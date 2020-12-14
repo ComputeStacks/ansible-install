@@ -22,7 +22,7 @@ prometheus_full_image: "{{ prometheus_image }}:{{ prometheus_image_tag }}"
 
 ##
 # Alerts
-container_ignore_list: "alertmanager|loki|loki-logs|cadvisor|prometheus|grafana|calico-node|vault-bootstrap|loki-nginx|prom-nginx|" # trailing pipe is intentional.
+container_ignore_list: "alertmanager|consul|loki|loki-logs|cadvisor|prometheus|grafana|calico-node|vault-bootstrap|loki-nginx|prom-nginx|" # trailing pipe is intentional.
 container_cpu_limit: "85"
 container_memory_limit: "85"
 alert_manager_ip: localhost

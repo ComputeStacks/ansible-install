@@ -2,7 +2,7 @@
 overwrite_resolvconf: true
 config_directory: "/etc/computestacks"
 
-cs_diag_url: "https://gist.githubusercontent.com/kwatson/a8028922c91180021c58f55768def870/raw/847bddc4183271974950bc1a9957b76e5a30cf71/cs-diag.sh"
+cs_diag_url: "https://gist.githubusercontent.com/kwatson/1022d337d2a775264586056819366d2d/raw/7361d2e58a0b1c6a3babc66afdbfdad0729775c0/cs-diag-without-google.sh"
 cs_diag_file: /usr/local/bin/cs-diagnostic
 
 motd_info:

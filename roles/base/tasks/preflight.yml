@@ -38,12 +38,3 @@
   fail:
     msg: "Invalid CentOS version. Only version 7 is supported"
   when: ansible_facts['distribution_major_version']|int < 7 or ansible_facts['distribution_major_version']|int > 7
-
-- name: base | ensure gcloud auth exists
-  local_action: stat path="{{ lookup('env','PWD') }}/gcloud-auth.json"
-  register: gcloud_auth_exists
-
-- name: base | missing gcloud auth, fail
-  fail:
-    msg: "Missing google auth file"
-  when: gcloud_auth_exists.stat.exists == False

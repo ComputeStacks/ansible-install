@@ -39,15 +39,6 @@
 
 - include_tasks: computestacks.yml
 
-- name: Check if gcloud is configured
-  shell: command -v gcloud version >/dev/null 2>&1
-  register: gcloud_exists
-  ignore_errors: yes
-  no_log: True
-
-- include_tasks: gcloud.yml
-  when: gcloud_exists is failed
-
 - name: base | setup chronyd
   service:
     name: chronyd

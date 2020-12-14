@@ -65,3 +65,14 @@
   roles:
     - ssh_transfer
     - iptables_persist
+
+- hosts:
+    - backup_server
+    - nodes
+  tasks:
+    - name: reboot
+      reboot:
+        msg: "Ansible rebooting to finalize setup"
+        reboot_timeout: 1
+      ignore_errors: yes
+      no_log: True

@@ -93,16 +93,6 @@
 
 ##
 # Controller Docker Image
-- name: controller | gcloud already configured?
-  shell: grep -q gcr.io "/root/.docker/config.json" >/dev/null 2>&1
-  register: docker_configured
-  ignore_errors: yes
-  no_log: True
-
-- name: controller | gcloud docker auth
-  shell: gcloud --quiet auth configure-docker gcr.io
-  when: docker_configured is failed
-
 - name: controller | pull container image
   docker_image:
     name: "{{ controller_image_path }}"

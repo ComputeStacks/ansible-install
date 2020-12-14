@@ -11,9 +11,23 @@ Ensure your local machine:
       ```
 
   * You've connected at least once to each machine over ssh, or you've configured ansible to automatically accept SSH host keys during the initial connection. (see below)
-  * You have a `gcloud-auth.json` file in the root directory of this package.
+
+## DNS: Before You Proceed
+
+Various parts of this ansible package will require the domains defined in your `inventory.yml` file to be correctly setup. Please configure those domains and ensure the changes have been propagated before proceeding.
+
+Example DNS Settings:
+
+```
+a.dev.cmptstks.net. IN A %{floating_ip}
+*.a.dev.cmptstks.net. IN CNAME a.dev.cmptstks.net.
+portal.dev.cmptstks.net. IN A %{controller ip address}
+cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
+```
 
 ## Requirements for each server
+
+_**Note:** If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=), then the following steps would have already been performed for you._
 
 1. Ensure all hostnames are configured properly on each node.
    Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
@@ -58,3 +72,12 @@ ssh_args = -o StrictHostKeyChecking=accept-new
 ```bash
 ansible-playbook -u root -i inventory.yml main.yml
 ```
+
+The very last step will reboot the servers (except the controller).
+
+
+## How long will this take?
+
+### UpCloud: Single Node
+
+[**Dec 2020, us-sjo1**] 1 hour, 15 minutes

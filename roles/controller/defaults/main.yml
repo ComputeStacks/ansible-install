@@ -8,9 +8,9 @@ ssh_port: 22
 
 ##
 # Controller Image
-docker_registry: gcr.io
+docker_registry: ghcr.io
 controller_version: "6.0"
-controller_image: computestacks/portal
+controller_image: computestacks/controller
 controller_image_path: "{{ docker_registry }}/{{ controller_image }}:{{ controller_version }}"
 
 ##
