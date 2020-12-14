@@ -1,0 +1,40 @@
+---
+- name: Setup etcd pki
+  shell: |
+    docker exec -it vault-bootstrap vault secrets enable -path=pki/etcd pki
+
+- name: Tune etcd TTL
+  shell: |
+    docker exec -it vault-bootstrap vault secrets tune -max-lease-ttl=87600h pki/etcd
+
+- name: Generate etcd CA
+  shell: |
+    docker exec -it vault-bootstrap vault write -field certificate pki/etcd/root/generate/internal common_name="etcd Root CA" ttl=87600h
+
+- name: Setup etcd server role
+  shell: |
+    docker exec -it vault-bootstrap vault write pki/etcd/roles/server \
+                                          max_ttl=87600h \
+                                          ttl=8760h  \
+                                          allow_any_name=true \
+                                          allow_localhost=true \
+                                          allow_ip_sans=true \
+                                          allow_bare_domains=true \
+                                          allow_subdomains=true \
+                                          server_flag=true \
+                                          client_flag=true \
+                                          key_usage=DigitalSignature,KeyEncipherment \
+                                          ou="etcd daemon"
+
+- name: Setup etcd client role
+  shell: |
+    docker exec -it vault-bootstrap vault write pki/etcd/roles/client \
+                                          max_ttl=87600h \
+                                          ttl=720h  \
+                                          allow_any_name=true \
+                                          enforce_hostnames=false \
+                                          server_flag=false \
+                                          client_flag=true \
+                                          key_usage=DigitalSignature \
+                                          ou="etcd client" \
+                                          no_store=true

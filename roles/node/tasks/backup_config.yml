@@ -1,0 +1,22 @@
+---
+- name: node | ensure backup directory exists
+  file:
+    path: "{{ backups_destination }}"
+    state: directory
+    mode: '0755'
+    owner: nfsnobody
+    group: nfsnobody
+
+- name: node | setup nfs services
+  service:
+    name: rpcbind
+    enabled: yes
+    state: restarted
+
+# mount 10.5.148.36:/var/nfsshare/backups /data/backups
+- name: node | mount nfs server
+  ansible.posix.mount:
+    path: "{{ backups_destination }}"
+    src: "{{ hostvars[groups['backup_server'][0]].node_ip }}:/var/nfsshare/backups"
+    state: mounted # will also edit fstab
+    fstype: nfs

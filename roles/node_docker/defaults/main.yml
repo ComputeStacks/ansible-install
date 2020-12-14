@@ -1,0 +1,28 @@
+---
+selinux: true
+disable_ipv6: true
+enable_debug: false
+
+consul_listen_ip: "127.0.0.1" # will be the same as docker.
+
+##
+# Docker
+docker_bin: "/usr/bin/dockerd"
+docker_config_dir: /etc/docker
+# docker_script_dir: /usr/libexec/docker
+docker_certs_dir: "{{ docker_config_dir }}/certs"
+docker_ca_file: "{{ docker_certs_dir }}/ca.crt"
+docker_cert_file: "{{ docker_certs_dir }}/server.crt"
+docker_key_file: "{{ docker_certs_dir }}/server.key"
+docker_registry_mirror: "" # Optionally provide a docker image mirror
+
+##
+# etcd
+etcd_listen_ip: "127.0.0.1"
+etcd_conf_dir: /etc/etcd
+etcd_certs_dir: "{{ etcd_conf_dir }}/certs"
+etcd_ca_file: "{{ etcd_certs_dir }}/ca.crt"
+etcd_cert_file: "{{ etcd_certs_dir }}/server/server.crt"
+etcd_key_file: "{{ etcd_certs_dir }}/server/server.key"
+etcd_client_cert_file: "{{ etcd_certs_dir }}/client/client.crt"
+etcd_client_key_file: "{{ etcd_certs_dir }}/client/client.key"

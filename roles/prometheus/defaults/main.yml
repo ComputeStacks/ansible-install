@@ -1,0 +1,29 @@
+---
+##
+# NODES
+# Settings set by inventory.yml
+global_region_name: ""
+prom_ip_address: ""
+# optional changes
+cadvisor_port: 8080
+node_exporter_port: 9100
+haproxy_stats_port: 81
+
+##
+# Local prom server
+prometheus_ip: localhost
+prometheus_port: 9090
+prometheus_nginx_listen: 82
+
+
+prometheus_image: "prom/prometheus"
+prometheus_image_tag: "latest"
+prometheus_full_image: "{{ prometheus_image }}:{{ prometheus_image_tag }}"
+
+##
+# Alerts
+container_ignore_list: "alertmanager|loki|loki-logs|cadvisor|prometheus|grafana|calico-node|vault-bootstrap|loki-nginx|prom-nginx|" # trailing pipe is intentional.
+container_cpu_limit: "85"
+container_memory_limit: "85"
+alert_manager_ip: localhost
+alert_manager_port: 9093

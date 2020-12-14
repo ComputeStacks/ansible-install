@@ -1,0 +1,1 @@
+{{ backup_path }} {% for host in groups['nodes'] %}{{ hostvars[host].backup_ip }}(rw,sync,no_subtree_check,all_squash){{ ' ' }}{% endfor %}

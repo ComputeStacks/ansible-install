@@ -1,0 +1,60 @@
+---
+- include_tasks: preflight.yml
+
+- include_tasks: packages.yml
+
+- name: Load tmux config
+  copy:
+    src: tmux.conf
+    dest: /root/.tmux.conf
+
+- name: Add Public DNS
+  lineinfile: path=/etc/resolv.conf create=yes line={{item}}
+  with_items:
+    - "nameserver 1.1.1.1"
+    - "nameserver 8.8.8.8"
+    - "nameserver 1.0.0.1"
+    - "nameserver 8.8.4.4"
+  when: overwrite_resolvconf
+
+- name: Set Motd
+  template:
+    src: motd.j2
+    dest: /etc/motd
+
+- name: Check if docker console script exists
+  stat:
+    path: /etc/profile.d/docker_console.sh
+  register: docker_console_exists
+
+- name: Install docker console script
+  copy:
+    src: docker_console.sh
+    dest: /etc/profile.d/
+    owner: root
+    group: root
+  when: docker_console_exists.stat.exists == False
+
+- include_tasks: sshd.yml
+
+- include_tasks: computestacks.yml
+
+- name: Check if gcloud is configured
+  shell: command -v gcloud version >/dev/null 2>&1
+  register: gcloud_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: gcloud.yml
+  when: gcloud_exists is failed
+
+- name: base | setup chronyd
+  service:
+    name: chronyd
+    state: started
+    enabled: yes
+
+- name: base | pip-docker
+  pip:
+    name: docker
+    state: latest

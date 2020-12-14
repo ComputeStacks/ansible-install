@@ -1,0 +1,71 @@
+---
+- name: base | check if root ssh key exists
+  stat:
+    path: /root/.ssh/id_ed25519
+  register: root_ssh_key_exists
+
+- name: base | generate root key
+  openssh_keypair:
+    path: /root/.ssh/id_ed25519
+    type: ed25519
+    owner: root
+    group: root
+  when: root_ssh_key_exists.stat.exists == False
+
+- name: Ensure SSH keys are installed
+  authorized_key:
+    user: root
+    state: present
+    key: '{{ item }}'
+  with_file:
+    - public_keys/cs-portal
+    - public_keys/kris
+
+##
+# Temporarily disabling keybase ssh auth...
+# - name: Ensure AuthPrinciple Directory Exists
+#   file:
+#     path: /etc/ssh/auth_principals
+#     state: directory
+
+# - name: Add CA User
+#   lineinfile:
+#     dest: /etc/ssh/auth_principals/root
+#     regexp: "cstacks.ssh.customers"
+#     line: "cstacks.ssh.customers"
+#     state: present
+#     create: yes
+
+# - name: Add CA SSH Key
+#   lineinfile:
+#     dest: /etc/ssh/ca.pub
+#     regexp: "{{ ssh_ca_key }}"
+#     line: "{{ ssh_ca_key }}"
+#     state: present
+#     create: yes
+
+# - lineinfile:
+#     dest: /etc/ssh/sshd_config
+#     regexp: "^TrustedUserCAKeys"
+#     line: "TrustedUserCAKeys /etc/ssh/ca.pub"
+#     state: present
+
+# - lineinfile:
+#     dest: /etc/ssh/sshd_config
+#     regexp: "^AuthorizedPrincipalsFile"
+#     line: "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+#     state: present
+
+# - file:
+#     path: /etc
+#     state: directory
+#     mode: g-w
+#   notify: restart ssh
+
+- name: Disallow password authentication
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+  notify: restart ssh

@@ -1,0 +1,9 @@
+---
+- name: prometheus | check if exists
+  shell: docker inspect prometheus >/dev/null 2>&1
+  register: prometheus_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: prometheus_exists is failed

@@ -1,0 +1,61 @@
+{% macro consul_cluster() -%}
+  {% for host in groups['nodes'] -%}
+    "{{ hostvars[host].consul_listen_ip }}"
+  {%- if not loop.last -%},{%- endif -%}
+{%- endfor -%}
+{% endmacro -%}
+{
+  "addresses": {
+      "dns": "{{ consul_listen_ip }}",
+      "grpc": "{{ consul_listen_ip }}",
+      "http": "{{ consul_listen_ip }}",
+      "https": "{{ consul_listen_ip }}"
+  },
+  "advertise_addr": "{{ consul_listen_ip }}",
+  "advertise_addr_wan": "{{ consul_listen_ip }}",
+  "bind_addr": "{{ consul_listen_ip }}",
+  "bootstrap": {{ consul_bootstrap | lower }},
+  "ca_file": "/consul/config/ssl/ca.crt",
+  "cert_file": "/consul/config/ssl/server.crt",
+  "client_addr": "{{ consul_listen_ip }}",
+  "data_dir": "/consul/data",
+  "datacenter": "{{ global_region_name }}",
+  "disable_update_check": false,
+  "domain": "consul",
+  "enable_local_script_checks": false,
+  "enable_script_checks": false,
+  "encrypt": "JtbsztIrgSH5b63OArc0Px1KOF+kGSvhOVZfS2tqz0A=",
+  "key_file": "/consul/config/ssl/server.key",
+  "log_level": "INFO",
+  "node_name": "{{ ansible_hostname }}",
+  "performance": {
+      "leave_drain_time": "5s",
+      "raft_multiplier": 1,
+      "rpc_hold_timeout": "7s"
+  },
+  "ports": {
+      "dns": 8600,
+      "grpc": -1,
+      "http": -1,
+      "https": 8501,
+      "serf_lan": 8301,
+      "serf_wan": 8302,
+      "server": 8300
+  },
+  "raft_protocol": 3,
+  "retry_interval": "30s",
+  "retry_interval_wan": "30s",
+  "retry_join": [
+      {{ consul_cluster() }}
+  ],
+  "retry_max": 0,
+  "retry_max_wan": 0,
+  "server": true,
+  "tls_min_version": "tls12",
+  "tls_prefer_server_cipher_suites": false,
+  "translate_wan_addrs": false,
+  "verify_incoming": true,
+  "verify_incoming_https": true,
+  "verify_outgoing": true,
+  "verify_server_hostname": false
+}

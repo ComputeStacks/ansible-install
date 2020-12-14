@@ -1,0 +1,11 @@
+---
+- name: loki | check if plugin exists
+  shell: docker plugin inspect loki >/dev/null 2>&1
+  register: loki_plugin_exists
+  ignore_errors: yes
+  no_log: True
+
+# https://grafana.com/docs/loki/latest/clients/docker-driver/
+- name: loki | install docker driver
+  shell: docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions >/dev/null 2>&1
+  when: loki_plugin_exists is failed

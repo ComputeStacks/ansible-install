@@ -1,0 +1,8 @@
+---
+- name: iptables_persist | have iptables file
+  stat:
+    path: "{{ iptables_script }}"
+  register: iptables_exists
+
+- include_tasks: step_1.yml
+  when: iptables_exists.stat.exists == False

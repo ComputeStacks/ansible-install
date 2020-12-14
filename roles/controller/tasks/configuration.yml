@@ -1,0 +1,109 @@
+---
+- name: Generate Keys
+  command: openssl rand -hex 64
+  register: secret_key_raw
+- command: openssl rand -hex 64
+  register: secret_auth_key_raw
+- set_fact:
+    secret_key: "{{ secret_key_raw.stdout }}"
+- set_fact:
+    secret_auth_key: "{{ secret_auth_key_raw.stdout }}"
+
+- name: Write cstacks command script
+  copy:
+    src: cstacks.sh
+    dest: /usr/local/bin/cstacks
+    mode: 0740
+
+- name: Write cstacks settings
+  template:
+    src: default-computestacks.j2
+    dest: "{{ cs_environmental_file }}"
+    mode: 0400
+
+- name: Install bash completion script for cstacks
+  copy:
+    src: cstacks_completion.sh
+    dest: /etc/bash_completion.d/cstacks.sh
+    mode: 0740
+
+# ##
+# # Generate Bootstrap
+- name: Slurp and store wildcared cert
+  slurp:
+    src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
+  register: lb_shared_cert_raw
+
+- name: Decode certificate for assignment
+  set_fact:
+    lb_shared_cert: "{{ lb_shared_cert_raw.content | b64decode }}"
+
+- name: Create bootstrap file
+  template:
+    src: bootstrap.rake.j2
+    dest: "{{ rake_tasks_directory }}/bootstrap.rake"
+
+- name: controller | branding css
+  get_url:
+    url: "{{ branding_css_url }}"
+    dest: "{{ branding_directory }}/application.css"
+
+- name: controller | branding css map
+  get_url:
+    url: "{{ branding_css_map_url }}"
+    dest: "{{ branding_directory }}/application.css.map"
+
+- name: controller | branding login image
+  get_url:
+    url: "{{ branding_login_img_url }}"
+    dest: "{{ branding_directory }}/logo-login.png"
+
+- name: controller | branding favicon
+  file:
+    path: "{{ branding_directory }}/favicon.ico"
+    state: touch
+
+##
+# HAProxy Configuration
+- name: controller | haproxy config
+  copy:
+    src: haproxy.cfg
+    dest: /etc/haproxy/haproxy.cfg
+    mode: 0644
+
+- name: controller | haproxy restart
+  service:
+    name: haproxy
+    state: restarted
+
+- name: Install renewal script
+  copy:
+    src: renew_ssl.sh
+    dest: /etc/cron.daily/cert_renew
+    mode: 0777
+  when: controller_use_lets_encrypt
+
+##
+# IPTables
+- name: controller | install iptables
+  template:
+    src: iptables.sh.j2
+    dest: "{{ config_directory }}/iptables"
+    mode: 0755
+
+##
+# Controller Docker Image
+- name: controller | gcloud already configured?
+  shell: grep -q gcr.io "/root/.docker/config.json" >/dev/null 2>&1
+  register: docker_configured
+  ignore_errors: yes
+  no_log: True
+
+- name: controller | gcloud docker auth
+  shell: gcloud --quiet auth configure-docker gcr.io
+  when: docker_configured is failed
+
+- name: controller | pull container image
+  docker_image:
+    name: "{{ controller_image_path }}"
+    source: pull

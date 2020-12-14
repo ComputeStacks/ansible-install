@@ -1,0 +1,10 @@
+---
+- name: haproxy | exists?
+  stat:
+    path: /usr/lib/tmpfiles.d/haproxy.conf
+  register: haproxy_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: haproxy_exists.stat.exists == False

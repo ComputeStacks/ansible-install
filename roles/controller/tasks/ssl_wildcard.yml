@@ -1,0 +1,13 @@
+---
+- name: Ensure selfsigned directory exists
+  file:
+    path: "{{ data_directory }}/.ssl_wildcard"
+    state: directory
+
+- name: Write selfsigned config
+  template:
+    src: ssl_wildcard.j2
+    dest: "{{ data_directory }}/.ssl_wildcard/selfwildcard.conf"
+
+- name: Generate self signed certificate
+  shell: "openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -sha256 -keyout {{ data_directory }}/.ssl_wildcard/sharedcert.pem -out {{ data_directory }}/.ssl_wildcard/sharedcert.pem -config {{ data_directory }}/.ssl_wildcard/selfwildcard.conf -extensions 'v3_req'"

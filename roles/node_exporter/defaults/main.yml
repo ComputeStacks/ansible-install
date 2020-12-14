@@ -1,0 +1,3 @@
+---
+copr_repo: "https://copr.fedorainfracloud.org/coprs/ibotty/prometheus-exporters/repo/epel-7/ibotty-prometheus-exporters-epel-7.repo"
+copr_repo_dest: "/etc/yum.repos.d/_copr_ibotty-prometheus-exporters.repo"

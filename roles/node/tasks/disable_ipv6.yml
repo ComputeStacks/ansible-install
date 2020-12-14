@@ -1,0 +1,8 @@
+---
+- name: node | install disable ipv6
+  copy:
+    src: 50-ipv6.conf
+    dest: /etc/sysctl.d/50-ipv6.conf
+
+- name: node | activate (requires reboot)
+  shell: sysctl -p

@@ -1,0 +1,12 @@
+[Unit]
+Description=calico-ipam
+Before=docker.service
+
+[Service]
+EnvironmentFile={{ calico_ipam_conf }}
+ExecStart={{ calico_ipam_exec }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

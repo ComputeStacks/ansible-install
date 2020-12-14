@@ -1,0 +1,15 @@
+---
+consul_listen_ip: '127.0.0.1'
+enable_debug: false
+
+consul_config_dir: "/etc/consul"
+consul_ssl_dir: "{{ consul_config_dir }}/ssl"
+
+consul_ssl_crt: "{{ consul_ssl_dir }}/server.crt"
+consul_ssl_ca: "{{ consul_ssl_dir }}/ca.crt"
+consul_ssl_key: "{{ consul_ssl_dir }}/server.key"
+
+computestacks_consul_config_dir: "/etc/computestacks/certs/consul"
+computestacks_consul_ssl_crt: "{{ computestacks_consul_config_dir }}/client.crt"
+computestacks_consul_ssl_ca: "{{ computestacks_consul_config_dir }}/ca.crt"
+computestacks_consul_ssl_key: "{{ computestacks_consul_config_dir }}/client.key"

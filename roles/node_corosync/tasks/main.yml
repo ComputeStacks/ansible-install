@@ -1,0 +1,9 @@
+---
+- name: node_corosync | is configured?
+  stat:
+    path: "{{ corosync_key_file }}"
+  register: key_file
+
+- include_tasks: install.yml
+  when: key_file.stat.exists == False
+

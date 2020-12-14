@@ -1,0 +1,23 @@
+---
+- name: controller_redis | install
+  yum:
+    name: redis5
+    state: present
+  when: ansible_facts['distribution_major_version'] == "7"
+
+- name: controller_redis | install
+  dnf:
+    name: redis
+    state: present
+  when: ansible_facts['distribution_major_version'] == "8"
+
+- name: controller_redis | install config
+  copy:
+    src: redis.conf
+    dest: /etc/redis.conf
+
+- name: controller_redis | start
+  service:
+    name: redis
+    enabled: yes
+    state: restarted

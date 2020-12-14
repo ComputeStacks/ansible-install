@@ -1,0 +1,25 @@
+---
+- name: controller | setup directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ config_directory }}"
+    - "{{ certificates_directory }}"
+    - "{{ data_directory }}"
+    - "{{ backups_directory }}"
+    - "{{ ssh_keys_directory }}"
+    - "{{ rake_tasks_directory }}"
+    - "{{ branding_directory }}"
+    - "{{ registry_data_path }}"
+
+- include_tasks: ssh.yml
+- include_tasks: ssl.yml
+
+- name: controller | check if app installed
+  stat:
+    path: "{{ cs_environmental_file }}"
+  register: app_initialized
+  
+- include_tasks: configuration.yml
+  when: app_initialized.stat.exists == False

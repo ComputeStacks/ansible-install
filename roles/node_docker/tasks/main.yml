@@ -1,0 +1,8 @@
+---
+- name: node_docker | check if already configured
+  stat:
+    path: "{{ docker_key_file }}"
+  register: is_configured
+
+- include_tasks: install.yml
+  when: is_configured.stat.exists == False

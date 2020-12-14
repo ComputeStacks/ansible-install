@@ -1,0 +1,15 @@
+---
+acme_staging: false
+selinux: true
+enable_lets_encrypt: true
+
+cs_portal_domain: ""
+cs_registry_domain: ""
+
+certbot_port: 54321
+certbot_command_base: "--standalone -n --agree-tos -d {{ cs_portal_domain }} -d {{ cs_registry_domain }} --register-unsafely-without-email --http-01-port {{ certbot_port }} --preferred-challenges http-01"
+certbot_command: "certonly {% if acme_staging %}--test-cert{{ ' ' }}{% endif %}{{ certbot_command_base }}"
+certbot_image: "certbot/certbot:latest"
+
+letsencrypt_dir: "/etc/letsencrypt:/etc/letsencrypt{% if selinux %}:Z{% endif %}"
+letsencrypt_data_dir: "/var/lib/letsencrypt:/var/lib/letsencrypt{% if selinux %}:Z{% endif %}"

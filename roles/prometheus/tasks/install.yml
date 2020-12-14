@@ -1,0 +1,57 @@
+---
+- name: prometheus | pull image
+  community.general.docker_image:
+    name: "{{ prometheus_image }}"
+    tag: "{{ prometheus_image_tag }}"
+    source: pull
+
+- name: prometheus | create directories
+  file:
+    path: "/etc/prometheus"
+    state: directory
+
+- name: prometheus | install files
+  copy:
+    src: "{{ item }}"
+    dest: /etc/prometheus/
+  loop:
+    - alerts_node.yml
+    - alerts_prometheus.yml
+
+- name: prometheus | install prom config
+  template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+
+- name: prometheus | install alerts_containers
+  template:
+    src: alerts_containers.yml.j2
+    dest: /etc/prometheus/alerts_containers.yml
+
+- name: prometheus | check if volume exists
+  shell: docker volume inspect prometheus-data >/dev/null 2>&1
+  register: prometheus_vol_exists
+  ignore_errors: yes
+  no_log: True
+
+- name: prometheus | create prometheus volume
+  community.general.docker_volume:
+    name: prometheus-data
+  when: prometheus_vol_exists is failed
+
+- name: prometheus | run container
+  community.general.docker_container:
+    name: prometheus
+    detach: yes
+    image: "{{ prometheus_full_image }}"
+    state: started
+    container_default_behavior: compatibility
+    network_mode: "container:prom-nginx"
+    log_driver: json-file
+    log_options:
+      max-size: 10m
+      max-file: "2"
+    restart_policy: "unless-stopped"
+    volumes:
+      - "/etc/prometheus:/etc/prometheus:Z"
+      - "prometheus-data:/prometheus"

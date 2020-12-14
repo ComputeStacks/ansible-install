@@ -1,0 +1,7 @@
+---
+certificates_path: /etc/computestacks/certificates
+docker_certs_path: "{{ certificates_path }}/docker"
+consul_certs_path: "{{ certificates_path }}/consul"
+
+vault_image: "vault:latest"
+vault_storage_path: /etc/computestacks/.vault-bootstrap

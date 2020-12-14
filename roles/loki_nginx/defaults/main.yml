@@ -1,0 +1,9 @@
+---
+loki_nginx_username: "loguser"
+loki_nginx_password: "ch4ng3m3"
+
+nginx_image: "nginx"
+nginx_image_tag: "stable"
+nginx_full_image: "{{ nginx_image}}:{{ nginx_image_tag }}"
+
+loki_nginx_listen: 85

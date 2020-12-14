@@ -1,0 +1,10 @@
+---
+- name: docker | exists?
+  shell: command -v docker >/dev/null 2>&1
+  register: docker_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: docker_exists is failed
+

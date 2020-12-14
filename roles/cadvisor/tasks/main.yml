@@ -1,0 +1,9 @@
+---
+- name: cadvisor | check if exists
+  shell: docker inspect cadvisor >/dev/null 2>&1
+  register: cadvisor_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: cadvisor_exists is failed

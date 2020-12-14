@@ -1,0 +1,17 @@
+---
+- name: node_exporter | add copr repo
+  get_url:
+    url: "{{ copr_repo }}"
+    dest: "{{ copr_repo_dest }}"
+
+- name: node_exporter | ensure node_exporter exists
+  yum:
+    name: node_exporter
+    state: present
+    update_cache: yes
+
+- name: node_exporter | activate and run
+  systemd:
+    name: node_exporter
+    state: started
+    enabled: yes

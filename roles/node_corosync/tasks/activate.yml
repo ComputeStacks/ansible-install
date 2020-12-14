@@ -1,0 +1,14 @@
+---
+- name: node_corosync | set stonith
+  shell: pcs property set stonith-enabled=false
+
+- name: node_corosync | set no-quorum-policy
+  shell: pcs property set no-quorum-policy=ignore
+
+- name: node_corosync | create vip without interface
+  shell: "pcs resource create VIP ocf:heartbeat:IPaddr2 ip={{ floating_ip }} cidr_netmask={{ floating_ip_netmask | int }}"
+  when: floating_ip_interface == ''
+
+- name: node_corosync | create vip with interface
+  shell: "pcs resource create VIP ocf:heartbeat:IPaddr2 ip={{ floating_ip }} cidr_netmask={{ floating_ip_netmask | int }} nic={{ floating_ip_interface }}"
+  when: floating_ip_interface != ''

@@ -1,0 +1,36 @@
+totem {
+  version: 2
+  cluster_name: {{ global_region_name }}
+  transport: udpu
+  interface {
+    ringnumber: 0
+    bindnetaddr: {{ etcd_listen_ip }}
+  }
+}
+
+quorum {
+  provider: corosync_votequorum
+}
+
+nodelist {
+{% for host in groups['nodes'] %}
+  node {
+    ring0_addr: {{ hostvars[host].etcd_listen_ip }}
+    {{ ' ' }}
+  }
+  {{ ' ' }}
+{% endfor %}
+}
+
+logging {
+  to_logfile: yes
+  logfile: {{ corosync_log_file }}
+  to_syslog: yes
+  timestamp: on
+}
+
+service {
+  name: pacemaker
+  ver: 1
+}
+{{ ' ' }}

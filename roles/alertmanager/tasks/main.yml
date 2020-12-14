@@ -1,0 +1,9 @@
+---
+- name: alertmanager | check if exists
+  shell: "docker inspect {{ container_name }} >/dev/null 2>&1"
+  register: alertmanager_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: alertmanager_exists is failed

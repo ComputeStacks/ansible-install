@@ -1,0 +1,8 @@
+---
+- name: controller_redis | configured?
+  stat:
+    path: /etc/redis.conf
+  register: redis_configured
+
+- include_tasks: install.yml
+  when: redis_configured.stat.exists == False

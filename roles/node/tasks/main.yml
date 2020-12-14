@@ -1,0 +1,15 @@
+---
+- include_tasks: kernel_params.yml
+
+- name: node | disable ipv6 exists
+  stat:
+    path: /etc/sysctl.d/50-ipv6.conf
+  register: ipv6_exists
+
+- include_tasks: disable_ipv6.yml
+  when: ipv6_exists.stat.exists == False
+
+- include_tasks: preload_images.yml
+
+- include_tasks: backup_config.yml
+  when: groups['backup_server'] is defined and (groups['backup_server'] | length > 0)

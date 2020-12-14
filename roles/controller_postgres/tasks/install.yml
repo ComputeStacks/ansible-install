@@ -1,0 +1,105 @@
+---
+##
+# Required for postgresql12-devel
+# See: https://qiita.com/tom-sato/items/b5f1263911fdedd5e81b
+- name: controller_postgres | install centos-release-scl
+  yum:
+    name: centos-release-scl
+    state: present
+
+- name: controller_postgres | setup yum
+  yum:
+    name: "{{ yum_repo_url }}"
+    state: present
+
+# devel package is required to install the python library, used by ansible.
+- name: controller_postgres | install packages
+  yum:
+    name: ['postgresql{{ psql_version }}-server','postgresql{{ psql_version }}-contrib', 'postgresql{{ psql_version }}-devel']
+    state: present
+
+- name: controller_postgres | link pg_config
+  file:
+    src: "{{ psql_base_path }}/bin/pg_config"
+    dest: /usr/bin/pg_config
+    owner: root
+    group: root
+    state: link
+
+# Ignore errors, because it may already exist which produces an error we don't care about.
+- name: controller_postgres | create initial database
+  shell: "{{ psql_base_path }}/bin/postgresql-{{ psql_version }}-setup initdb"
+  ignore_errors: yes
+  no_log: True
+
+- name: controller_postgres | install pg_hba
+  copy:
+    src: pg_hba.conf
+    dest: "{{ psql_data_path }}/data/pg_hba.conf"
+
+- name: controller_postgres | start
+  systemd:
+    name: "postgresql-{{ psql_version }}"
+    state: started
+    enabled: yes
+
+- name: controller_postgres | install psql python library
+  pip:
+    name: psycopg2
+  when: ansible_facts['distribution_major_version'] == "7"
+
+- name: Create PG root DB
+  postgresql_db:
+    name: root
+    encoding: UTF-8
+    state: present
+  become_user: postgres
+  become: yes
+  become_method: su
+
+- name: Create PG CS DB
+  postgresql_db:
+    name: "{{ postgres_user }}"
+    encoding: UTF-8
+    state: present
+  become_user: postgres
+  become: yes
+  become_method: su
+
+- name: Create PostgreSQL Users
+  postgresql_user:
+    name: root
+    db: root
+    role_attr_flags: SUPERUSER
+    state: present
+  become_user: postgres
+  become: yes
+  become_method: su
+
+- name: Create ComputeStacks user
+  postgresql_user:
+    name: "{{ postgres_user }}"
+    db: "{{ postgres_user }}"
+    password: "{{ postgres_cs_password }}"
+    role_attr_flags: SUPERUSER
+    state: present
+  become_user: postgres
+  become: yes
+  become_method: su
+
+- name: Set ComputeStacks DB owner
+  postgresql_db:
+    name: "{{ postgres_user }}"
+    owner: "{{ postgres_user }}"
+  become_user: postgres
+  become: yes
+  become_method: su
+
+- name: Create PG CloudPortal DB
+  postgresql_db:
+    name: cloudportal
+    owner: "{{ postgres_user }}"
+    encoding: UTF-8
+  become_user: postgres
+  become: yes
+  become_method: su

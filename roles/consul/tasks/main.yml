@@ -1,0 +1,17 @@
+---
+- name: consul | check if ssl configured
+  stat:
+    path: "{{ consul_ssl_key }}"
+  register: consul_certs_exists
+
+- include_tasks: install_ssl.yml
+  when: consul_certs_exists.stat.exists == False
+
+- name: consul | check if container exists
+  shell: docker inspect --type container consul >/dev/null 2>&1
+  register: consul_container
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: consul_container is failed

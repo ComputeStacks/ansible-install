@@ -1,0 +1,86 @@
+---
+- name: consul | pull image
+  community.general.docker_image:
+    name: "{{ consul_image }}"
+    tag: "{{ consul_image_tag }}"
+    source: pull
+
+- name: consul | create directories
+  file:
+    path: "{{ consul_host_config_dir }}"
+    state: directory
+
+- name: consul | check if config exists
+  stat:
+    path: "{{ consul_host_config_dir }}/config.json"
+  register: consul_config_exists
+
+# Read the existing Key
+- name: consul | read existing encryption key
+  shell: "cat {{ consul_host_config_dir }}/config.json | jq '.encrypt'"
+  register: consul_key_read
+  run_once: true
+  when: consul_config_exists.stat.exists == True
+- name: consul | set key fact
+  set_fact:
+    consul_raw_key: "{{ consul_key_read.stdout }}"
+  when: consul_config_exists.stat.exists == True
+
+- name: consul | generate encryption key
+  community.general.docker_container:
+    name: "consul-keygen"
+    detach: no
+    image: "consul:latest"
+    state: started
+    network_mode: "none"
+    auto_remove: "yes"
+    container_default_behavior: compatibility
+    command: ["consul", "keygen"]
+  register: consul_key_read 
+  run_once: true
+  when: consul_config_exists.stat.exists == False
+
+- name: consul | set key fact
+  set_fact:
+    consul_raw_key: "{{ consul_key_read.ansible_facts.docker_container.Output }}"
+  when: consul_config_exists.stat.exists == False
+
+- name: consul | write configuration file
+  template:
+    src: config.json.j2
+    dest: "{{ consul_host_config_dir }}/config.json"
+
+- name: consul | check if volume exists
+  shell: docker volume inspect consul-data >/dev/null 2>&1
+  register: consul_vol_exists
+  ignore_errors: yes
+  no_log: True
+
+- name: consul | create data volume
+  community.general.docker_volume:
+    name: consul-data
+  when: consul_vol_exists is failed
+
+- name: consul | run container
+  community.general.docker_container:
+    name: consul
+    detach: yes
+    command: ["consul", "agent", "-config-file=/consul/config/config.json"]
+    env:
+      CONSUL_HTTP_SSL: "true"
+      CONSUL_CACERT: "/consul/config/ssl/ca.crt"
+      CONSUL_CLIENT_CERT: "/consul/config/ssl/server.crt"
+      CONSUL_CLIENT_KEY: "/consul/config/ssl/server.key"
+      CONSUL_HTTP_ADDR: "https://{{ consul_listen_ip }}:8501"
+    image: "consul:latest"
+    state: started
+    container_default_behavior: compatibility
+    network_mode: "host"
+    log_driver: json-file
+    log_options:
+      max-size: 10m
+      max-file: "2"
+    restart_policy: "unless-stopped"
+    volumes:
+      - "{{ consul_host_config_dir }}:/consul/config{% if selinux %}:Z{% endif %}"
+      - "consul-data:/consul/data"

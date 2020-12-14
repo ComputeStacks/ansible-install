@@ -1,0 +1,24 @@
+---
+computestacks:
+  host: "https://{{ cs_portal_domain }}"
+consul:
+  host: "{{ consul_listen_ip }}:2379"
+  tls: true
+backups:
+  enabled: {{ backups_enabled | lower }}
+  check_freq: "{{ backups_check_freq }}"
+  prune_freq: "{{ backups_prune_freq }}"
+  key: "{{ backups_key }}"
+  borg:
+    cache: /root/.cache/borg
+    config: /root/.cache/borg
+    compress: "zstd,3"
+    destination: "{{ backups_destination }}"
+    executable: /usr/bin/borg
+    image: "{{ agent_image }}"
+    selinux: true
+docker:
+  version: "{{ docker_api_version }}"
+sentry:
+  dsn: "{{ agent_sentry_dsn }}"
+

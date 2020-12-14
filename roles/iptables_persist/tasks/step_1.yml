@@ -1,0 +1,8 @@
+---
+- name: iptables_persist | startup script exists
+  stat:
+    path: /lib/systemd/system/cs-iptables.service
+  register: iptables_startup_exists
+
+- include_tasks: step_2.yml
+  when: iptables_startup_exists.stat.exists == True

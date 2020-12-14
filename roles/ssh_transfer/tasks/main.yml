@@ -1,0 +1,42 @@
+---
+- name: Slurp CP SSH certificates
+  slurp:
+    src: "{{ item }}"
+  register: ssh_certs
+  run_once: true
+  delegate_to: "{{ groups['controller'][0] }}"
+  with_items:
+    - "{{ ssh_keys_directory }}/id_ed25519.pub"
+    - /root/.ssh/id_ed25519.pub
+
+- name: Register CP SSH certs as facts
+  set_fact:
+    ssh_app: "{{ ssh_certs.results[0].content|b64decode }}"
+    ssh_admin: "{{ ssh_certs.results[1].content|b64decode }}"
+
+- name: Slurp Master Node SSH Certificates
+  slurp:
+    src: "{{ item }}"
+  register: node_ssh_certs
+  run_once: true
+  delegate_to: "{{ groups['nodes'][0] }}"
+  with_items:
+    - /root/.ssh/id_ed25519.pub
+
+- name: Register Master Node SSH certs as facts
+  set_fact:
+    ssh_master_node: "{{ node_ssh_certs.results[0].content|b64decode }}"
+  
+- name: ssh_transfer | write ssh keys
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ item }}"
+  with_items:
+    - "{{ ssh_app }}"
+    - "{{ ssh_admin }}"
+    - "{{ ssh_master_node }}"
+
+- name: ssh_transfer | verify controller can connect
+  shell: "ssh -o 'StrictHostKeyChecking no' {{ inventory_hostname }} -C date"
+  delegate_to: "{{ groups['controller'][0] }}"

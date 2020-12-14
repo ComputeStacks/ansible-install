@@ -1,0 +1,18 @@
+---
+- name: controller_bootstrap | database
+  shell: cstacks bootstrap-db
+  no_log: True
+  args:
+    warn: false
+
+- name: controller_bootstrap | application
+  shell: cstacks bootstrap-app
+  no_log: True
+  args:
+    warn: false
+
+- name: controller_bootstrap | boot
+  shell: cstacks run
+  no_log: True
+  args:
+    warn: false

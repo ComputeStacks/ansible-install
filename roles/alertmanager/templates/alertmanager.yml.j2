@@ -1,0 +1,14 @@
+route:
+  group_by: ['alertname', 'name', 'service', 'region', 'node']
+  group_wait: 30s
+  group_interval: 1m
+  repeat_interval: 1h
+  receiver: controller
+receivers:
+  - name: 'controller'
+    webhook_configs:
+      - send_resolved: true
+        url: "{{ alert_endpoint }}"
+        http_config:
+          tls_config:
+            insecure_skip_verify: {{ tls_skip_verify | lower }}

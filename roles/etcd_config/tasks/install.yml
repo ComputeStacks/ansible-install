@@ -1,0 +1,51 @@
+---
+- name: Ensure etcd conf directory exists
+  file:
+    path: "{{ etcd_conf_dir }}"
+    state: directory
+
+- name: Create etcd group
+  group:
+    name: etcd
+    system: true
+    state: present
+
+- name: Create etcd user
+  user:
+    name: etcd
+    shell: /sbin/nologin
+    system: true
+    groups: etcd
+    state: present
+
+- name: Configure etcd data directory
+  file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: etcd
+    group: etcd
+
+- name: Write etcd config file
+  template:
+    src: etcd.conf.j2
+    dest: "{{ etcd_conf_dir }}/etcd.conf"
+
+- name: Write etcd service
+  copy:
+    src: etcd.service
+    dest: /usr/lib/systemd/system/etcd.service
+
+- name: Copy certificates if specified
+  include_tasks: vault-certs.yml
+
+
+- name: Setup local etcdctl
+  template:
+    src: etcdctl.j2
+    dest: /etc/profile.d/etcdctl.sh
+
+- name: Enable and start etcd
+  service:
+    name: etcd
+    enabled: yes
+    state: started

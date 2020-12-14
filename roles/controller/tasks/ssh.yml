@@ -1,0 +1,22 @@
+---
+- name: controller | check if ssh key exists
+  stat:
+    path: "{{ ssh_keys_directory }}/id_ed25519"
+  register: ssh_key_exists
+  
+- name: controller | Generate ComputeStacks SSH Key
+  openssh_keypair:
+    path: "{{ ssh_keys_directory }}/id_ed25519"
+    comment: ComputeStacks Portal
+    type: ed25519
+    owner: root
+    group: root
+  when: ssh_key_exists.stat.exists == False
+
+- name: controller | generate ssh client config file
+  template:
+    src: ssh_config.j2
+    dest: /root/.ssh/config
+    owner: root
+    group: root
+    mode: '0700'

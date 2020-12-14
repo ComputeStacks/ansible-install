@@ -1,0 +1,5 @@
+---
+backup_path: "/var/nfsshare/backups"
+
+config_directory: "/etc/computestacks"
+iptables_script: "{{ config_directory }}/iptables"

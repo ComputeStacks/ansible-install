@@ -1,0 +1,8 @@
+---
+- name: Check if vault is configured
+  stat:
+    path: "{{ vault_storage_path }}/keys/unseal_key_0"
+  register: vault_configured
+
+- include_tasks: install.yml
+  when: vault_configured.stat.exists == False

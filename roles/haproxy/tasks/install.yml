@@ -1,0 +1,56 @@
+- name: haproxy | install
+  yum:
+    name: haproxy20
+    state: present
+  when: ansible_facts['distribution_major_version'] == "7"
+
+- name: haproxy | install
+  dnf:
+    name: haproxy
+    state: present
+  when: ansible_facts['distribution_major_version'] == "8"
+
+- name: haproxy | create certificate directory
+  file:
+    path: /etc/haproxy/certs
+    state: directory
+
+- name: haproxy | install default error page
+  copy:
+    src: default.http
+    dest: '/etc/haproxy/default.http'
+
+- name: haproxy | stats directory
+  file:
+    path: /run/haproxy
+    state: directory
+    owner: haproxy
+    group: haproxy
+
+- name: haproxy | persist stats
+  copy:
+    src: haproxy.conf
+    dest: /usr/lib/tmpfiles.d/haproxy.conf
+
+- name: haproxy | create lib
+  file:
+    path: /var/lib/haproxy
+    state: directory
+    owner: haproxy
+    group: haproxy
+
+- name: haproxy | selinux (haproxy_connect_any)
+  shell: setsebool -P haproxy_connect_any 1
+
+- name: haproxy | selinux (cluster_use_execmem)
+  shell: setsebool -P cluster_use_execmem 1
+
+# Ensure that centos nodes have same structure as debian/ubuntu
+- name: haproxy | copy error files
+  shell: rsync -a /usr/share/haproxy/ /etc/haproxy/errors/
+
+- name: haproxy | start
+  service:
+    name: haproxy
+    state: started
+    enabled: yes

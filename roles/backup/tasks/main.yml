@@ -1,0 +1,36 @@
+---
+- name: backup_server | setup nfsshare
+  file:
+    path: "{{ backup_path }}"
+    state: directory
+    mode: '0755'
+    owner: nfsnobody
+    group: nfsnobody
+
+- name: backup_server | write exports
+  template:
+    src: exports.j2
+    dest: /etc/exports
+
+- name: backup_server | restart services
+  service:
+    name: "{{ item }}"
+    enabled: yes
+    state: restarted
+  loop:
+    - rpcbind
+    - nfs-server
+    - nfs-lock
+    - nfs-idmap
+
+- name: backup_server | check if iptables already exists
+  stat:
+    path: "{{ iptables_script }}"
+  register: check_iptables
+
+- name: backup_server | install iptables config file
+  template:
+    src: iptables.config.j2
+    dest: "{{ iptables_script }}"
+    mode: 0755
+  when: check_iptables.stat.exists == False

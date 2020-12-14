@@ -1,0 +1,7 @@
+---
+enable_iptables: true
+config_directory: "/etc/computestacks"
+iptables_script: "{{ config_directory }}/iptables"
+
+ # ports used by CS to enable external access for non-http containers
+usable_port_range: "10000:50000"

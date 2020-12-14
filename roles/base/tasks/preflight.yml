@@ -1,0 +1,49 @@
+---
+- name: base | Ensure SELinux is enabled
+  fail:
+    msg: SELinux is disabled
+  when: ansible_selinux == False or ansible_selinux.status == 'disabled'
+
+- name: base | Ensure portal domain exists
+  fail:
+    msg: "'cs_portal_domain' is not defined"
+  when: cs_portal_domain == ""
+
+- name: base | Ensure registry domain exists
+  fail:
+    msg: "'cs_registry_domain' is not defined"
+  when: cs_registry_domain == ""
+
+- name: base | Ensure Floating IP exists
+  fail:
+    msg: "'floating_ip' is not defined"
+  when: floating_ip == ""
+
+- name: base | Ensure global region name defined
+  fail:
+    msg: "'global_region_name' is not defined"
+  when: global_region_name == ""
+
+- name: base | Ensure default app url is defined
+  fail:
+    msg: "'cs_app_url' is not defined"
+  when: cs_app_url == ""
+
+- name: base | Ensure correct linux variant
+  fail:
+    msg: "Invalid OS distribution"
+  when: ansible_facts['distribution'] != "CentOS"
+
+- name: base | Ensure supported linux version
+  fail:
+    msg: "Invalid CentOS version. Only version 7 is supported"
+  when: ansible_facts['distribution_major_version']|int < 7 or ansible_facts['distribution_major_version']|int > 7
+
+- name: base | ensure gcloud auth exists
+  local_action: stat path="{{ lookup('env','PWD') }}/gcloud-auth.json"
+  register: gcloud_auth_exists
+
+- name: base | missing gcloud auth, fail
+  fail:
+    msg: "Missing google auth file"
+  when: gcloud_auth_exists.stat.exists == False

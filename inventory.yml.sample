@@ -1,0 +1,76 @@
+---
+all:
+  vars:
+    license_key: ""
+    global_region_name: dev
+    overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
+
+    backups_key: "changme!" # Example: `openssl rand -base64 32`
+
+    ##
+    # Container Network
+    calico_network: 10.100.0.0/21
+    calico_network_name: "net100"
+    calico_network_ipip: false # required when private network performs source/dest filtering
+
+    ##
+    # etcd
+    etcd_initial_cluster_token: cs-demo-cluster
+
+    ##
+    # Floating IP
+    enable_floating_ip: false # will skip installing corosync/pacemaker
+    floating_ip: 0.0.0.0
+    floating_ip_netmask: 0 # e.g. 24, 21
+    # it's important that all nodes have same interface name.
+    # if you mix eth/ens format, automatic failover will not work.
+    # If, however, floating IP is in the same network as the primary ip
+    # on that interface, you may leave the interface field blank and it should
+    # correctly pick the correct interface.
+    floating_ip_interface: "eth0"
+
+    ##
+    # CS Controller Settings
+    cs_app_id: dev # unique name to identify app to CS Support
+    cs_app_url: a.dev.cmptstks.net
+    cs_currency: "USD" # Default currency. Can add more later in web admin.
+    cs_portal_domain: portal.dev.cmptstks.net
+    cs_registry_domain: cr.dev.cmptstks.net
+  children:
+    backup_server:
+      hosts:
+        192.168.173.11:
+          node_ip: 192.168.173.11 # backup ip used by nodes
+          controller_ip: 192.168.173.11 # backup ip used by controller
+          ssh_port: 22
+    controller:
+      hosts:
+        192.168.173.9:
+          postgres_cs_password: "28s9xrTxKX8DG8bO6ciGwHt4"
+          node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
+    loki_instance:
+      hosts:
+        192.168.173.9:
+          loki_nginx_listen: 8132
+          loki_nginx_password: "rzSQ6xKrN1QFKE1tX0fFsvys"
+          controller_endpoint: 127.0.0.1 # The ip/hostname used by the controller to connect
+          node_endpoint: 192.168.173.9 # The ip/hostname used by nodes to connect
+    nodes:
+      hosts:
+        192.168.173.10: # all nodes need cadvisor & node-exporter
+          backup_ip: 192.168.173.10 # node ip used by backup server
+          consul_bootstrap: true # set false on all other nodes.
+          consul_listen_ip: 192.168.173.10 # used by both controller and agent.
+          prom_ip_address: 192.168.173.10 # The ip used by prom to connect for stats.
+          etcd_listen_ip: 192.168.173.10 # shared with corosync
+          ssh_port: 22
+    prom_instance:
+      hosts:
+        192.168.173.9: # prometheus, alert-manager
+          alertmanager_nginx_listen: 8134
+          prometheus_nginx_listen: 8133
+          prometheus_nginx_password: "EZZrdGw0g3vlACmwyWNOO1Oj"
+          node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
+          controller_endpoint: 127.0.0.1 # The hostname used by the controller to connect
+          on_controller: true # If running on controller, set to true. (used by docker_iptables)
+          ssh_port: 22

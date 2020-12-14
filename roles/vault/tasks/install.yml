@@ -1,0 +1,113 @@
+---
+- name: Ensure docker certificate path exists
+  file:
+    path: "{{ docker_certs_path }}"
+    owner: root
+    group: root
+    state: directory
+
+- name: Ensure consul certificate path exists
+  file:
+    path: "{{ consul_certs_path }}"
+    owner: root
+    group: root
+    state: directory
+
+- name: Create vault path
+  file:
+    path: "{{ vault_storage_path }}"
+    owner: root
+    group: root
+    state: directory
+
+- name: Create vault file storage volume
+  file:
+    path: "{{ vault_storage_path }}/file"
+    owner: root
+    group: root
+    state: directory
+
+- name: Create vault logs volume
+  file:
+    path: "{{ vault_storage_path }}/logs"
+    owner: root
+    group: root
+    state: directory
+
+- name: Create vault keys directory
+  file:
+    path: "{{ vault_storage_path }}/keys"
+    owner: root
+    group: root
+    state: directory
+
+- name: Run vault container
+  docker_container:
+    name: vault-bootstrap
+    image: "{{ vault_image }}"
+    pull: yes
+    volumes:
+      - "{{ vault_storage_path }}/file:/vault/file:Z"
+      - "{{ vault_storage_path }}/logs:/vault/logs:Z"
+    env:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_LOCAL_CONFIG: '{"backend": {"file": {"path": "/vault/file"}}, "default_lease_ttl": "168h", "max_lease_ttl": "87600h", "listener": {"tcp": {"address": "127.0.0.1:8200", "tls_disable": "true"}}}'
+    capabilities:
+      - IPC_LOCK
+    command: server
+    restart_policy: unless-stopped
+
+- name: Register vault command
+  lineinfile:
+    dest: /root/.bashrc
+    line: "alias vault='docker exec -it vault-bootstrap vault'"
+    owner: root
+    regexp: "^alias vault='docker exec -it vault-bootstrap vault'$"
+    state: present
+    insertafter: EOF
+    create: true
+
+- name: Initialise Vault operator
+  shell: "docker exec -it vault-bootstrap vault operator init -key-shares=5 -key-threshold=3 -format json"
+  register: vault_init_results
+
+- name: Parse output of vault init
+  set_fact:
+    vault_init_parsed: "{{ vault_init_results.stdout | from_json }}"
+
+- name: Write unseal keys to files
+  copy:
+    dest: "{{ vault_storage_path }}/keys/unseal_key_{{ item.0 }}"
+    content: "{{ item.1 }}"
+  with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
+
+- name: Write root token to file
+  copy:
+    content: "{{ vault_init_parsed.root_token }}"
+    dest: "{{ vault_storage_path }}/keys/rootkey"
+
+- name: Run vault container
+  docker_container:
+    name: vault-bootstrap
+    image: vault:latest
+    recreate: yes
+    volumes:
+      - "{{ vault_storage_path }}/file:/vault/file:Z"
+      - "{{ vault_storage_path }}/logs:/vault/logs:Z"
+      - "{{ vault_storage_path }}/keys/rootkey:/root/.vault-token:Z"
+    env:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_LOCAL_CONFIG: '{"backend": {"file": {"path": "/vault/file"}}, "default_lease_ttl": "168h", "max_lease_ttl": "87600h", "listener": {"tcp": {"address": "127.0.0.1:8200", "tls_disable": "true"}}}'
+    capabilities:
+      - IPC_LOCK
+    command: server
+    restart_policy: unless-stopped
+
+- name: Unseal vault with unseal keys
+  shell: |
+    docker exec -it vault-bootstrap vault operator unseal {{ item.1 }}
+  with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
+
+- include_tasks: ssl_docker.yml
+- include_tasks: ssl_consul.yml
+- include_tasks: ssl_etcd.yml

@@ -1,0 +1,66 @@
+---
+- name: Setup consul pki mount
+  shell: "docker exec -it vault-bootstrap vault secrets enable -path=pki/consul pki"
+  register: enable_consul_pki
+
+- name: Tune consul TTL
+  shell: "docker exec -it vault-bootstrap vault secrets tune -max-lease-ttl=87600h pki/consul"
+
+- name: Generate consul CA
+  shell: |
+    docker exec -it vault-bootstrap vault write -field certificate pki/consul/root/generate/internal common_name="Consul Root CA" ttl=87600h
+  register: vault_consul_ca
+
+- name: Setup consul server role
+  shell: |
+    docker exec -it vault-bootstrap vault write pki/consul/roles/server \
+                                          max_ttl=87600h \
+                                          ttl=8760h  \
+                                          allow_any_name=true \
+                                          allow_localhost=true \
+                                          allow_ip_sans=true \
+                                          allow_bare_domains=true \
+                                          allow_subdomains=true \
+                                          server_flag=true \
+                                          client_flag=true \
+                                          key_usage=DigitalSignature,KeyEncipherment \
+                                          ou="Consul Server"
+
+- name: Setup consul client role
+  shell: |
+    docker exec -it vault-bootstrap vault write pki/consul/roles/client \
+                                          max_ttl=87600h \
+                                          ttl=720h  \
+                                          allow_any_name=true \
+                                          enforce_hostnames=false \
+                                          server_flag=false \
+                                          client_flag=true \
+                                          key_usage=DigitalSignature \
+                                          ou="Consul Client" \
+                                          no_store=true
+
+- name: Generate ComputeStacks consul client certificate
+  shell: |
+    docker exec -it vault-bootstrap vault write -format json pki/consul/issue/client \
+                                                common_name=portal \
+                                                ttl=43800h
+  register: vault_consul_client_results
+
+- name: Parse output of vault consul client generate
+  set_fact:
+    vault_consul_client_parsed: "{{ vault_consul_client_results.stdout | from_json }}"
+
+- name: Write client cert
+  copy:
+    content: "{{ vault_consul_client_parsed.data.certificate }}\n"
+    dest: "{{ consul_certs_path }}/cert.pem"
+
+- name: Write ca cert
+  copy:
+    content: "{{ vault_consul_client_parsed.data.issuing_ca }}\n"
+    dest: "{{ consul_certs_path }}/ca.pem"
+
+- name: Write client key
+  copy:
+    content: "{{ vault_consul_client_parsed.data.private_key }}\n"
+    dest: "{{ consul_certs_path }}/key.pem"

@@ -1,0 +1,10 @@
+---
+- name: node_iptables | check if configured
+  stat:
+    path: "{{ config_directory }}/iptables"
+  register: check_iptables
+
+- include_tasks: install.yml
+  when: 
+    - check_iptables.stat.exists == False
+    - enable_iptables

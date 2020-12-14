@@ -1,0 +1,56 @@
+---
+- name: borg | Ensure backup destination exists
+  file:
+    path: "{{ backups_destination }}"
+    state: directory
+    mode: '0755'
+    owner: nfsnobody
+    group: nfsnobody
+
+- name: borg | ensure config directory exists
+  file:
+    path: "{{ agent_config_path }}"
+    state: directory
+    mode: '0740'
+
+- name: borg | Download agent
+  unarchive:
+    src: "{{ agent_download_url }}"
+    dest: /usr/local/src/
+    remote_src: yes
+
+# Should fail and kill ansible
+# see: https://stackoverflow.com/questions/34340562/evaluating-return-code-in-ansible-conditional
+- name: borg | Verify integrity
+  shell: |
+    cd /usr/local/src && gpg --verify cs-agent.sig cs-agent
+  args:
+    warn: false
+
+- name: borg | Install agent binary
+  copy:
+    remote_src: true
+    src: /usr/local/src/cs-agent
+    dest: /usr/local/bin/cs-agent
+    mode: '0655'
+
+- include_tasks: ssl_consul.yml
+- include_tasks: ssl_docker.yml
+
+- name: borg | Install agent config
+  template:
+    src: agent.yml.j2
+    dest: "{{ agent_config_path }}/agent.yml"
+    mode: '0440'
+
+- name: borg | systemd conf file
+  template:
+    src: cs-agent.service.j2
+    dest: /usr/lib/systemd/system/cs-agent.service
+
+- name: borg | start agent
+  systemd:
+    name: cs-agent
+    state: started
+    enabled: yes
+    daemon_reload: yes

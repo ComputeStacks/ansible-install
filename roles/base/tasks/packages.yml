@@ -1,0 +1,24 @@
+---
+- name: Remove conflicting packages
+  yum:
+    name: ['firewalld', 'ntp', 'tmux']
+    state: absent
+
+- name: Install base packages
+  yum:
+    name: ['@Development tools','libcurl-devel','vim','bind-utils','gnupg2','ca-certificates','traceroute','yum-utils','device-mapper-persistent-data','lvm2','yum-plugin-versionlock','sysstat','python-devel','python2-pip','policycoreutils-python','policycoreutils-devel','chrony', 'ncurses', 'libevent', 'libevent-devel', 'wget', 'net-tools', 'bash-completion', 'tree', 'nfs-utils', 'iptables-services', 'jq']
+    state: present  
+
+- name: Install IUS repo
+  yum:
+    name:
+      - https://repo.ius.io/ius-release-el7.rpm
+      - https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    state: present
+  retries: 2
+  delay: 2
+
+- name: Install TMUX
+  yum:
+    name: tmux2
+    state: present

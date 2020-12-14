@@ -1,0 +1,9 @@
+---
+- name: loki_nginx | nginx check if exists
+  shell: docker inspect loki-nginx >/dev/null 2>&1
+  register: nginx_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: nginx_exists is failed

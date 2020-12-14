@@ -1,0 +1,17 @@
+[Unit]
+Description="ComputeStacks Agent"
+Documentation=https://computestacks.com
+Requires=network-online.target docker.service
+After=network-online.target docker.service
+ConditionFileNotEmpty={{ agent_config_path }}/agent.yml
+
+[Service]
+User=root
+Group=root
+ExecStart=/usr/local/bin/cs-agent
+KillMode=process
+Restart=on-failure
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

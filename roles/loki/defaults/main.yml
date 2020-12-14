@@ -1,0 +1,7 @@
+---
+loki_image: "grafana/loki"
+loki_image_tag: "2.0.0"
+loki_full_image: "{{ loki_image }}:{{ loki_image_tag }}"
+
+loki_nginx_listen: 80
+loki_port: 3100

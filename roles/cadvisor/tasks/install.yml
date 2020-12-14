@@ -1,0 +1,28 @@
+---
+- name: cadvisor | pull image
+  community.general.docker_image:
+    name: "{{ cadvisor_image }}"
+    tag: "{{ cadvisor_image_tag }}"
+    source: pull
+
+- name: cadvisor | run container
+  community.general.docker_container:
+    name: cadvisor
+    detach: yes
+    network_mode: host
+    image: "{{ cadvisor_full_image }}"
+    state: started
+    privileged: yes
+    container_default_behavior: compatibility
+    log_driver: json-file
+    log_options:
+      max-size: 10m
+      max-file: "2"
+    restart_policy: "unless-stopped"
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+      - "/dev/disk/:/dev/disk:ro"
+      - "/cgroup:/cgroup:ro"

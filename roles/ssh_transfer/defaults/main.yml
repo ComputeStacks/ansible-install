@@ -1,0 +1,3 @@
+---
+data_directory: "/var/lib/computestacks"
+ssh_keys_directory: "{{ data_directory }}/sshkeys"

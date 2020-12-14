@@ -1,0 +1,11 @@
+[Unit]
+Description=ComputeStacks IPTables
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/bin/bash {{ config_dir }}/iptables
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+iptables -A INPUT -p tcp --dport {{ ssh_port }} -j ACCEPT
+iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
+iptables -A INPUT -p udp --dport 10000:50000 -j ACCEPT
+iptables -A INPUT -p all -s 172.16.0.0/12 -j ACCEPT
+
+{% for host in groups['nodes'] %}
+iptables -A INPUT -p all -s {{ hostvars[host].consul_listen_ip }} -j ACCEPT
+{{ '' }}
+{% endfor %}
+
+iptables -P INPUT DROP

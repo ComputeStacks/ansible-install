@@ -1,0 +1,32 @@
+- file:
+    path: "{{ config_directory }}"
+    state: directory
+
+- name: Check if key exists
+  stat:
+    path: /root/.A8C477EE.asc
+  register: gpg_key_exists
+
+- name: Load signing key
+  copy:
+    src: gpg_keys/A8C477EE.asc
+    dest: /root/.A8C477EE.asc
+  when: gpg_key_exists.stat.exists == False
+
+- name: Install gpg key
+  shell: gpg --import /root/.A8C477EE.asc
+  when: gpg_key_exists.stat.exists == False
+
+- name: Check if diagnostic file exists
+  stat:
+    path: "{{ cs_diag_file }}"
+  register: diag_file_exists
+
+- name: Install diagnostic file
+  get_url:
+    url: "{{ cs_diag_url }}"
+    dest: "{{ cs_diag_file }}"
+    mode: '0600'
+    owner: root
+    group: root
+  when: diag_file_exists.stat.exists == False

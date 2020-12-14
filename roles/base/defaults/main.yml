@@ -1,0 +1,15 @@
+---
+overwrite_resolvconf: true
+config_directory: "/etc/computestacks"
+
+cs_diag_url: "https://gist.githubusercontent.com/kwatson/a8028922c91180021c58f55768def870/raw/847bddc4183271974950bc1a9957b76e5a30cf71/cs-diag.sh"
+cs_diag_file: /usr/local/bin/cs-diagnostic
+
+motd_info:
+  - "    HOST:    ": "{{ hostvars[inventory_hostname].ansible_hostname }}"
+  - "      IP:    ": "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
+  - "  REGION:    ": "{{ global_region_name }}"
+
+global_region_name: ""
+
+# ssh_ca_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAamLg+Qj1Rh3ENeaVoPf0O+xWv4C1Juotqe1MkC72sU keybase@ea61b79df40c"

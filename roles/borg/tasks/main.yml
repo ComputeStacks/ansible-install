@@ -1,0 +1,9 @@
+---
+- name: borg | exists?
+  shell: systemctl status cs-agent >/dev/null 2>&1
+  register: borg_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: borg_exists is failed

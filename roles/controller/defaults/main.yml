@@ -1,0 +1,93 @@
+---
+license_key: ""
+global_region_name: "dev" # set in inventory
+lb_name: "{{ global_region_name }}-lb"
+
+controller_use_lets_encrypt: true
+ssh_port: 22
+
+##
+# Controller Image
+docker_registry: gcr.io
+controller_version: "6.0"
+controller_image: computestacks/portal
+controller_image_path: "{{ docker_registry }}/{{ controller_image }}:{{ controller_version }}"
+
+##
+# Directory Structure & Paths
+config_directory: "/etc/computestacks"
+certificates_directory: "{{ config_directory }}/certificates"
+
+cs_environmental_file: "/etc/default/computestacks"
+
+data_directory: "/var/lib/computestacks"
+backups_directory: "{{ data_directory }}/backups"
+ssh_keys_directory: "{{ data_directory }}/sshkeys"
+rake_tasks_directory: "{{ data_directory }}/rake"
+branding_directory: "{{ data_directory }}/branding"
+
+registry_data_path: "/computestacks-mnt"
+registry_ssl_directory: "/etc/ssl/container-registry"
+
+##
+# App Configuration
+cs_version: "6.0"
+cs_app_id: "dev"
+cs_locale: "en"
+cs_currency: "USD"
+
+# Default User
+cs_admin_create: false # CS Support user is already created by default
+cs_admin_email: root@localhost
+cs_admin_password: changeme
+
+# Domains
+cs_app_url: "" # WildCard self-signed cert generation
+cs_portal_domain: ""
+cs_registry_domain: ""
+
+# Networks
+floating_ip: "10.10.100.10"
+calico_network_name: "dev01"
+calico_network: 10.100.0.0/21
+calico_network_ipip: false
+
+# Prometheus
+#http://promuser:ch4ng3m3@51.161.105.193:8133
+prometheus_port: "{{ hostvars[groups['prom_instance'][0]].prometheus_nginx_listen }}"
+prometheus_username: "promuser"
+prometheus_password: "{{ hostvars[groups['prom_instance'][0]].prometheus_nginx_password }}"
+prometheus_endpoint: "http://{{ hostvars[groups['prom_instance'][0]].controller_endpoint }}:{{ prometheus_port }}"
+
+
+# Loki
+loki_port: "{{ hostvars[groups['loki_instance'][0]].loki_nginx_listen }}"
+loki_username: "loguser"
+loki_password: "{{ hostvars[groups['loki_instance'][0]].loki_nginx_password }}"
+loki_controller_endpoint: "http://{{ hostvars[groups['loki_instance'][0]].controller_endpoint }}:{{ loki_port }}"
+loki_node_endpoint: "http://{{ hostvars[groups['loki_instance'][0]].node_endpoint }}:{{ loki_port }}"
+
+# Concurrency
+queue_le: 2
+queue_system: 15
+queue_deployment: 20
+
+passenger_pool_size: 15
+passenger_min_instances: 15
+
+##
+# Branding
+branding_css_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/application.css"
+branding_css_map_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/application.css.map"
+branding_login_img_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/logo-login.png"
+
+##
+# Postgres
+postgres_user: computestacks
+postgres_cs_password: "ch4ng3m3"
+postgres_host: 127.0.0.1
+postgres_pool: 30
+
+##
+# Redis
+redis_host: 127.0.0.1

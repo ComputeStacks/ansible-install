@@ -1,0 +1,8 @@
+---
+- name: node_calico | check if configured
+  stat:
+    path: "{{ network_manager_conf }}"
+  register: config_file
+
+- include_tasks: install.yml
+  when: config_file.stat.exists == False

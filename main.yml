@@ -1,0 +1,67 @@
+---
+- hosts:
+    - all
+  roles:
+    - base
+    - docker
+    - cadvisor
+    - loki_driver
+    - node_exporter
+
+- hosts:
+    - controller
+  roles:
+    - controller_postgres
+    - controller_redis
+    - haproxy
+    - vault
+    - controller
+
+- hosts:
+    - backup_server
+  roles:
+    - backup
+
+- hosts:
+    - nodes
+  roles:
+    - haproxy
+    - andrewrothstein.etcd
+    - etcd_config
+    - consul
+    - node_docker
+    - node
+    - node_calico
+    - node_iptables
+    - borg
+
+- hosts:
+    - loki_instance
+  roles:
+    - ops_network
+    - loki
+    - loki_nginx
+
+- hosts:
+    - prom_instance
+  roles:
+    - ops_network
+    - prometheus_nginx
+    - prometheus
+    - alertmanager
+
+- hosts:
+    - controller
+  roles:
+    - controller_bootstrap
+
+- hosts:
+    - nodes
+  roles:
+    - node_corosync
+
+- hosts:
+    - all
+  roles:
+    - ssh_transfer
+    - iptables_persist

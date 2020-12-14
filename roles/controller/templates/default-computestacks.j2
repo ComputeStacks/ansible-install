@@ -1,0 +1,23 @@
+CS_APP_ID={{ cs_app_id }}
+DB_BACKUPS_PATH={{ backups_directory }}
+CS_CERT_PATH={{ certificates_directory }}
+CS_RAKE_PATH={{ rake_tasks_directory }}
+CS_BRANDING_PATH={{ branding_directory }}
+CS_SSH_KEYS_PATH={{ ssh_keys_directory }}
+
+CS_LOCALE={{ cs_locale }}
+CS_CURRENCY={{ cs_currency }}
+
+PORTAL_VERSION={{ cs_version }}
+SECRET_KEY_BASE={{ secret_key }}
+USER_AUTH_SECRET={{ secret_auth_key }}
+DATABASE_URL=postgresql://{{ postgres_user }}:{{ postgres_cs_password }}@{{ postgres_host }}/cloudportal?pool={{ postgres_pool }}
+REDIS_HOST={{ redis_host }}
+CS_REG={{ controller_image_path }}
+
+PASSENGER_MAX_POOL_SIZE={{ passenger_pool_size }}
+PASSENGER_MIN_INSTANCES={{ passenger_min_instances }}
+
+QUEUE_SYSTEM={{ queue_system | int }}
+QUEUE_DEPLOYMENTS={{ queue_deployment | int }}
+QUEUE_LE={{ queue_le | int }}

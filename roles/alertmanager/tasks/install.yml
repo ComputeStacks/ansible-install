@@ -1,0 +1,45 @@
+---
+- name: alertmanager | pull image
+  community.general.docker_image:
+    name: "{{ alertmanager_image }}"
+    tag: "{{ alertmanager_image_tag }}"
+    source: pull
+
+- name: alertmanager | check if volume exists
+  shell: docker volume inspect alertmanager-data >/dev/null 2>&1
+  register: data_vol_exists
+  ignore_errors: yes
+  no_log: True
+
+- name: alertmanager | create alertmanager volume
+  community.general.docker_volume:
+    name: alertmanager-data
+  when: data_vol_exists is failed
+
+- name: alertmanager | create directories
+  file:
+    path: "/etc/prometheus"
+    state: directory
+
+
+- name: alertmanager | install alertmanager
+  template:
+    src: alertmanager.yml.j2
+    dest: /etc/prometheus/alertmanager.yml
+
+- name: alertmanager | run container
+  community.general.docker_container:
+    name: "{{ container_name }}"
+    detach: yes
+    network_mode: "container:prom-nginx"
+    image: "{{ alertmanager_full_image }}"
+    state: started
+    container_default_behavior: compatibility
+    log_driver: json-file
+    log_options:
+      max-size: 10m
+      max-file: "2"
+    restart_policy: "unless-stopped"
+    volumes:
+      - "alertmanager-data:/alertmanager"
+      - "/etc/prometheus:/etc/alertmanager:Z"

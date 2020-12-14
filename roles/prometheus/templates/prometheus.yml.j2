@@ -1,0 +1,50 @@
+---
+global:
+  scrape_interval:     10s
+  evaluation_interval: 10s
+
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - 'localhost:9093'
+
+rule_files:
+  - "alerts_prom.yml"
+  - "alerts_node.yml"
+  - "alerts_containers.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+    - targets: ['{{ prometheus_ip }}:{{ prometheus_port }}']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      {% for server in groups['nodes'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ cadvisor_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
+
+  - job_name: 'node-exporter'
+    static_configs:
+      {% for server in groups['nodes'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ node_exporter_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
+
+  - job_name: 'haproxy'
+    static_configs:
+      {% for server in groups['nodes'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ haproxy_stats_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}

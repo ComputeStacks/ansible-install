@@ -1,0 +1,56 @@
+---
+- name: prometheus_nginx | install required pip packages
+  pip:
+    name: passlib
+
+- name: prometheus_nginx | check nginx directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - /etc/nginx
+    - /etc/nginx/prometheus/conf.d
+    - /etc/nginx/prometheus/passwords
+
+- name: prometheus_nginx | nginx install image
+  community.general.docker_image:
+    name: "{{ nginx_image }}"
+    tag: "{{ nginx_image_tag }}"
+    source: pull
+
+- name: prometheus_nginx | nginx.conf
+  copy:
+    src: nginx.conf
+    dest: /etc/nginx/prometheus/nginx.conf
+
+- name: prometheus_nginx | prometheus vhost conf
+  template:
+    src: default.conf.j2
+    dest: /etc/nginx/prometheus/conf.d/default.conf
+
+- name: prometheus_nginx | nginx password
+  community.general.htpasswd:
+    path: /etc/nginx/prometheus/passwords/prom.htpasswd
+    name: "{{ prometheus_nginx_username }}"
+    password: "{{ prometheus_nginx_password }}"
+
+- name: prometheus_nginx | run container
+  community.general.docker_container:
+    name: prom-nginx
+    detach: yes
+    network_mode: ops
+    image: "{{ nginx_full_image }}"
+    state: started
+    container_default_behavior: compatibility
+    log_driver: json-file
+    log_options:
+      max-size: 10m
+      max-file: "2"
+    restart_policy: "unless-stopped"
+    published_ports:
+      - "{{ prometheus_nginx_listen }}:{{ prometheus_nginx_listen }}"
+      - "{{ alertmanager_nginx_listen }}:{{ alertmanager_nginx_listen }}"
+    volumes:
+      - "/etc/nginx/prometheus/nginx.conf:/etc/nginx/nginx.conf:Z"
+      - "/etc/nginx/prometheus/conf.d:/etc/nginx/conf.d:Z"
+      - "/etc/nginx/prometheus/passwords:/etc/nginx/passwords:Z"

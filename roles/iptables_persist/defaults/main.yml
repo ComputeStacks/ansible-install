@@ -1,0 +1,3 @@
+---
+config_dir: "/etc/computestacks"
+iptables_script: "{{ config_dir }}/iptables"

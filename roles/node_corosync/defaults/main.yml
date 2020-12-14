@@ -1,0 +1,17 @@
+---
+enable_floating_ip: true
+
+global_region_name: "dev"
+corosync_config_dir: /etc/corosync
+corosync_config_file: "{{ corosync_config_dir }}/corosync.conf"
+
+corosync_key_file: "{{ corosync_config_dir }}/authkey"
+
+corosync_log_dir: "/var/log/corosync"
+corosync_log_file: "/var/log/corosync/corosync.log"
+
+etcd_listen_ip: "127.0.0.1"
+
+floating_ip: 0.0.0.0
+floating_ip_netmask: 0
+floating_ip_interface: ""

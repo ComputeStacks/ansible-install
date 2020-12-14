@@ -1,0 +1,8 @@
+- name: borg | exists?
+  shell: "systemctl status postgresql-{{ psql_version }} >/dev/null 2>&1"
+  register: psql_exists
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: install.yml
+  when: psql_exists is failed
