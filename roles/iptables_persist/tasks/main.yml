@@ -5,4 +5,4 @@
   register: iptables_exists
 
 - include_tasks: step_1.yml
-  when: iptables_exists.stat.exists == False
+  when: iptables_exists.stat.exists == True

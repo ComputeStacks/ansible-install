@@ -68,6 +68,7 @@
 
 - hosts:
     - backup_server
+    - prom_instance
     - nodes
   tasks:
     - name: reboot

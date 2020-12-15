@@ -35,9 +35,6 @@
     name: "{{ loki_nginx_username }}"
     password: "{{ loki_nginx_password }}"
 
-# - debug:
-#     msg: "{{ hostvars[groups['loki_instance'][0]]['loki_container_name'] }}"
-
 - name: loki_nginx | run container
   community.general.docker_container:
     name: loki-nginx

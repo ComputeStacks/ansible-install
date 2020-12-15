@@ -12,4 +12,4 @@ motd_info:
 
 global_region_name: ""
 
-# ssh_ca_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAamLg+Qj1Rh3ENeaVoPf0O+xWv4C1Juotqe1MkC72sU keybase@ea61b79df40c"
+ssh_ca_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAamLg+Qj1Rh3ENeaVoPf0O+xWv4C1Juotqe1MkC72sU keybase@ea61b79df40c"

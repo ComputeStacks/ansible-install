@@ -15,10 +15,10 @@ Host {{ hostvars[host].ansible_hostname }}
 {% endfor %}
 
 {% for host in groups['prom_instance'] %}
-{% if not on_controller %}
+{% if not hostvars[host].on_controller %}
 Host {{ hostvars[host].ansible_hostname }}
   User root
-  HostName {{ hostvars[host].consul_listen_ip }}
+  HostName {{ hostvars[host].controller_endpoint }}
   Port {{ hostvars[host].ssh_port }}
 {{ '' }}
 {% endif %}

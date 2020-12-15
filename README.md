@@ -78,6 +78,4 @@ The very last step will reboot the servers (except the controller).
 
 ## How long will this take?
 
-### UpCloud: Single Node
-
-[**Dec 2020, us-sjo1**] 1 hour, 15 minutes
+Depending on how many nodes you have, this can take anywhere from 30 minutes, to a couple of hours. For this reason, we recommend you run this process in a `screen` or `tmux` session on a remote server.

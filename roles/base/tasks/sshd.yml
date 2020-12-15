@@ -22,45 +22,45 @@
     - public_keys/kris
 
 ##
-# Temporarily disabling keybase ssh auth...
-# - name: Ensure AuthPrinciple Directory Exists
-#   file:
-#     path: /etc/ssh/auth_principals
-#     state: directory
+# SSH CA (KeyBase)
+- name: Ensure AuthPrinciple Directory Exists
+  file:
+    path: /etc/ssh/auth_principals
+    state: directory
 
-# - name: Add CA User
-#   lineinfile:
-#     dest: /etc/ssh/auth_principals/root
-#     regexp: "cstacks.ssh.customers"
-#     line: "cstacks.ssh.customers"
-#     state: present
-#     create: yes
+- name: Add CA User
+  lineinfile:
+    dest: /etc/ssh/auth_principals/root
+    regexp: "cstacks.ssh.customers"
+    line: "cstacks.ssh.customers"
+    state: present
+    create: yes
 
-# - name: Add CA SSH Key
-#   lineinfile:
-#     dest: /etc/ssh/ca.pub
-#     regexp: "{{ ssh_ca_key }}"
-#     line: "{{ ssh_ca_key }}"
-#     state: present
-#     create: yes
+- name: Add CA SSH Key
+  lineinfile:
+    dest: /etc/ssh/ca.pub
+    regexp: "{{ ssh_ca_key }}"
+    line: "{{ ssh_ca_key }}"
+    state: present
+    create: yes
 
-# - lineinfile:
-#     dest: /etc/ssh/sshd_config
-#     regexp: "^TrustedUserCAKeys"
-#     line: "TrustedUserCAKeys /etc/ssh/ca.pub"
-#     state: present
+- lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^TrustedUserCAKeys"
+    line: "TrustedUserCAKeys /etc/ssh/ca.pub"
+    state: present
 
-# - lineinfile:
-#     dest: /etc/ssh/sshd_config
-#     regexp: "^AuthorizedPrincipalsFile"
-#     line: "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
-#     state: present
+- lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^AuthorizedPrincipalsFile"
+    line: "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+    state: present
 
-# - file:
-#     path: /etc
-#     state: directory
-#     mode: g-w
-#   notify: restart ssh
+- file:
+    path: /etc
+    state: directory
+    mode: g-w
+  notify: restart ssh
 
 - name: Disallow password authentication
   lineinfile:
