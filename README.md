@@ -1,5 +1,9 @@
 # Install ComputeStacks
 
+Before proceeding, be sure to review our [architecture overview](https://docs.computestacks.com/admin_guide/getting_started/architecture_overview/), and our [minimum requirements](https://docs.computestacks.com/admin_guide/getting_started/onprem-demo/). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
+
+_Note: We do not recommend running this on an existing cluster at this time. We have made efforts to ensure this script is idempotent, however we are not 100% there just yet._
+
 ## Prerequisites
 
 1.  You will need a valid license to proceed with the installation. You can purchase, or request a demo license, by visiting: [accounts.computestacks.com/store/computestacks](https://accounts.computestacks.com/store/computestacks)
@@ -14,7 +18,13 @@
 
     * You've connected at least once to each machine over ssh, or you've configured ansible to automatically accept SSH host keys during the initial connection. (see below)
 
-## DNS: Before You Proceed
+### Inventory File
+
+If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=) to create your cluster, then you should already have a skeleton `inventory.yml` file that you can place in this directory. Otherwise, `cp inventory.yml.sample inventory.yml`.
+
+Ensure you fill out all the variables and ensure everything is correct. To see all available settings, check each [role](roles/) and look at their `defaults/main.yml` file.
+
+### DNS
 
 Various parts of this ansible package will require the domains defined in your `inventory.yml` file to be correctly setup. Please configure those domains and ensure the changes have been propagated before proceeding.
 
@@ -27,7 +37,7 @@ portal.dev.cmptstks.net. IN A %{controller ip address}
 cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
 ```
 
-## Requirements for each server
+### Requirements for each server
 
 _**Note:** If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=), then the following steps would have already been performed for you._
 
@@ -59,9 +69,8 @@ _**Note:** If you used one of our [terraform setup scripts](https://github.com/C
       * `touch /.autorelabel`
       * `reboot`
 
-## Running
-
 ***
+## Running
 
 ```bash
 ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
