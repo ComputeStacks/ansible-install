@@ -1,14 +1,7 @@
 - name: haproxy | install
   yum:
-    name: haproxy20
+    name: haproxy22
     state: present
-  when: ansible_facts['distribution_major_version'] == "7"
-
-- name: haproxy | install
-  dnf:
-    name: haproxy
-    state: present
-  when: ansible_facts['distribution_major_version'] == "8"
 
 - name: haproxy | create certificate directory
   file:

@@ -2,7 +2,7 @@
 computestacks:
   host: "https://{{ cs_portal_domain }}"
 consul:
-  host: "{{ consul_listen_ip }}:2379"
+  host: "{{ consul_listen_ip }}:{{ consul_listen_port }}"
   tls: true
 backups:
   enabled: {{ backups_enabled | lower }}
@@ -10,15 +10,10 @@ backups:
   prune_freq: "{{ backups_prune_freq }}"
   key: "{{ backups_key }}"
   borg:
-    cache: /root/.cache/borg
-    config: /root/.cache/borg
     compress: "zstd,3"
-    destination: "{{ backups_destination }}"
-    executable: /usr/bin/borg
     image: "{{ agent_image }}"
-    selinux: true
+    nfs: {{ backup_uses_nfs }}
+    nfs_host: {{ backup_nfs_host }}
+    nfs_host_path: "{{ nfs_host_path }}"
 docker:
   version: "{{ docker_api_version }}"
-sentry:
-  dsn: "{{ agent_sentry_dsn }}"
-

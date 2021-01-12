@@ -5,11 +5,11 @@ enable_debug: false
 # vars from inventory
 cs_portal_domain: ""
 consul_listen_ip: "127.0.0.1"
+consul_listen_port: 8501
 
 ##
 # Agent Configuration
-agent_sentry_dsn: "https://491b61104d5f43789787a33d97cc140e@o479519.ingest.sentry.io/5524586"
-docker_api_version: "1.40"
+docker_api_version: "1.41"
 agent_image: "cmptstks/borg:stable"
 agent_download_url: "https://cdn.computestacks.net/packages/cs-agent/cs-agent.tar.gz"
 
@@ -21,7 +21,11 @@ agent_consul_certs_dir: "{{ agent_certs_dir }}/consul"
 
 # Backup Configuration
 backups_enabled: true
-backups_destination: "/mnt/backups"
 backups_check_freq: "*/2 * * * *"
 backups_prune_freq: "15 1 * * *"
 backups_key: "changme!"
+
+# Backup NFS
+backup_uses_nfs: "{{ groups['backup_server'] is defined and (groups['backup_server']|length>0) | lower }}"
+backup_nfs_host: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].node_ip }}{% else %}127.0.0.1{% endif %}"
+nfs_host_path: "/var/nfsshare/backups"

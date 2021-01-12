@@ -1,6 +1,6 @@
 ---
 postgres_user: computestacks
-postgres_cs_password: "ch4ng3m3"
+postgres_cs_password: "ch4ng3m3" # pwgen -s 32 1
 
 yum_repo_url: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
 

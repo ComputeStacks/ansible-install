@@ -1,6 +1,6 @@
 ---
 loki_nginx_username: "loguser"
-loki_nginx_password: "ch4ng3m3"
+loki_nginx_password: "ch4ng3m3" # pwgen -s 32 1
 
 nginx_image: "nginx"
 nginx_image_tag: "stable"

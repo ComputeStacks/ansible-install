@@ -1,6 +1,7 @@
 ---
 - hosts:
     - all
+  tags: ['never', 'bootstrap']
   roles:
     - base
     - docker
@@ -10,6 +11,7 @@
 
 - hosts:
     - controller
+  tags: ['never', 'bootstrap']
   roles:
     - controller_postgres
     - controller_redis
@@ -17,13 +19,21 @@
     - vault
     - controller
 
+- hosts: 
+    - controller
+  tags: ['never', 'vault_unseal']
+  roles: 
+    - vault_unseal
+
 - hosts:
     - backup_server
+  tags: ['never', 'bootstrap']
   roles:
     - backup
 
 - hosts:
     - nodes
+  tags: ['never', 'bootstrap']
   roles:
     - haproxy
     - andrewrothstein.etcd
@@ -33,10 +43,11 @@
     - node
     - node_calico
     - node_iptables
-    - borg
+    - cs_agent
 
 - hosts:
     - loki_instance
+  tags: ['never', 'bootstrap']
   roles:
     - ops_network
     - loki
@@ -44,6 +55,7 @@
 
 - hosts:
     - prom_instance
+  tags: ['never', 'bootstrap']
   roles:
     - ops_network
     - prometheus_nginx
@@ -52,11 +64,13 @@
 
 - hosts:
     - controller
+  tags: ['never', 'bootstrap']
   roles:
     - controller_bootstrap
 
 - hosts:
     - nodes
+  tags: ['never', 'bootstrap']
   roles:
     - node_corosync
 
@@ -70,6 +84,7 @@
     - backup_server
     - prom_instance
     - nodes
+  tags: ['never', 'bootstrap']
   tasks:
     - name: reboot
       reboot:

@@ -9,6 +9,9 @@
     name: node_exporter
     state: present
     update_cache: yes
+  register: yum_add_node_exporter
+  until: yum_add_node_exporter is not failed
+  retries: 5
 
 - name: node_exporter | activate and run
   systemd:

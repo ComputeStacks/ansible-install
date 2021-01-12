@@ -45,6 +45,7 @@
   docker_container:
     name: vault-bootstrap
     image: "{{ vault_image }}"
+    container_default_behavior: compatibility
     pull: yes
     volumes:
       - "{{ vault_storage_path }}/file:/vault/file:Z"
@@ -90,6 +91,7 @@
   docker_container:
     name: vault-bootstrap
     image: vault:latest
+    container_default_behavior: compatibility
     recreate: yes
     volumes:
       - "{{ vault_storage_path }}/file:/vault/file:Z"

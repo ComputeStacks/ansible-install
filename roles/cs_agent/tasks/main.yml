@@ -1,5 +1,5 @@
 ---
-- name: borg | exists?
+- name: cs_agent | exists?
   shell: systemctl status cs-agent >/dev/null 2>&1
   register: borg_exists
   ignore_errors: yes

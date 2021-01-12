@@ -1,4 +1,12 @@
 ---
+- name: node_docker | check if certs exist
+  stat:
+    path: "{{ docker_key_file }}"
+  register: key_exists
+
+- include_tasks: certificates.yml
+  when: key_exists.stat.exists == False
+  
 - name: node_docker | stop docker
   service:
     name: docker
@@ -23,14 +31,6 @@
     uid: 1001
     shell: /bin/false
     create_home: no
-
-- name: node_docker | check if certs exist
-  stat:
-    path: "{{ docker_key_file }}"
-  register: key_exists
-
-- include_tasks: certificates.yml
-  when: key_exists.stat.exists == False
 
 - name: node_docker | start docker
   service:

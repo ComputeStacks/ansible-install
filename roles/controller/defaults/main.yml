@@ -91,3 +91,8 @@ postgres_pool: 30
 ##
 # Redis
 redis_host: 127.0.0.1
+
+##
+# ComputeStacks Bastion Portal
+enable_support_ip: true
+support_ip: 192.155.86.87

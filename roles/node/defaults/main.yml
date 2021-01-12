@@ -1,3 +1,2 @@
 ---
 config_directory: "/etc/computestacks"
-backups_destination: "/mnt/backups"

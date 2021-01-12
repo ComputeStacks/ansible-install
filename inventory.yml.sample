@@ -1,7 +1,7 @@
 ---
 all:
   vars:
-    license_key: ""
+    license_key: "" # https://accounts.computestacks.com/store/computestacks
     global_region_name: dev
     overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
 
@@ -46,13 +46,13 @@ all:
     controller:
       hosts:
         192.168.173.9:
-          postgres_cs_password: "28s9xrTxKX8DG8bO6ciGwHt4"
+          postgres_cs_password: "" # pwgen -s 32 1
           node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
     loki_instance:
       hosts:
         192.168.173.9:
           loki_nginx_listen: 8132
-          loki_nginx_password: "rzSQ6xKrN1QFKE1tX0fFsvys"
+          loki_nginx_password: "" # pwgen -s 32 1
           controller_endpoint: 127.0.0.1 # The ip/hostname used by the controller to connect
           node_endpoint: 192.168.173.9 # The ip/hostname used by nodes to connect
     nodes:
@@ -69,7 +69,7 @@ all:
         192.168.173.9: # prometheus, alert-manager
           alertmanager_nginx_listen: 8134
           prometheus_nginx_listen: 8133
-          prometheus_nginx_password: "EZZrdGw0g3vlACmwyWNOO1Oj"
+          prometheus_nginx_password: "" # pwgen -s 32 1
           node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
           controller_endpoint: 127.0.0.1 # The hostname used by the controller to connect
           on_controller: true # If running on controller, set to true. (used by docker_iptables)

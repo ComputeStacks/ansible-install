@@ -1,6 +1,6 @@
 ---
 loki_image: "grafana/loki"
-loki_image_tag: "2.0.0"
+loki_image_tag: "2.1.0" # https://github.com/grafana/loki/releases
 loki_full_image: "{{ loki_image }}:{{ loki_image_tag }}"
 
 loki_nginx_listen: 80

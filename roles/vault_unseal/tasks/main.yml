@@ -1,0 +1,9 @@
+---
+- name: vault_unseal | check if vault is sealed
+  shell: vault operator key-status >/dev/null 2>&1
+  register: vault_sealed
+  ignore_errors: yes
+  no_log: True
+
+- include_tasks: unseal.yml
+  when: vault_sealed is failed

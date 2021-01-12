@@ -14,4 +14,8 @@ iptables -A INPUT -p all -s {{ hostvars[host].consul_listen_ip }} -j ACCEPT
 {{ '' }}
 {% endfor %}
 
+{% if enable_support_ip %}
+iptables -A INPUT -p all -s {{ support_ip }} -j ACCEPT
+{% endif %}
+
 iptables -P INPUT DROP

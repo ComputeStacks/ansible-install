@@ -2,15 +2,17 @@
 
 ## Prerequisites
 
-Ensure your local machine:
-  * Has ansible installed and configured, with the following plugins installed:
+1.  You will need a valid license to proceed with the installation. You can purchase, or request a demo license, by visiting: [accounts.computestacks.com/store/computestacks](https://accounts.computestacks.com/store/computestacks)
 
-      ```bash
-      ansible-galaxy collection install community.general
-      ansible-galaxy collection install ansible.posix
-      ```
+2.  Ensure your local machine:
+    * Has ansible installed and configured, with the following plugins installed:
 
-  * You've connected at least once to each machine over ssh, or you've configured ansible to automatically accept SSH host keys during the initial connection. (see below)
+        ```bash
+        ansible-galaxy collection install community.general
+        ansible-galaxy collection install ansible.posix
+        ```
+
+    * You've connected at least once to each machine over ssh, or you've configured ansible to automatically accept SSH host keys during the initial connection. (see below)
 
 ## DNS: Before You Proceed
 
@@ -59,23 +61,10 @@ _**Note:** If you used one of our [terraform setup scripts](https://github.com/C
 
 ## Running
 
-
-**Tip:** Add the following to `~/.ansible.cfg` to auto-accept new host keys (first time only, will not affect host key checking on subsequent connections):
-
-```
-[ssh_connection]
-ssh_args = -o StrictHostKeyChecking=accept-new
-```
-
 ***
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml
+ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
 ```
 
-The very last step will reboot the servers (except the controller).
-
-
-## How long will this take?
-
-Depending on how many nodes you have, this can take anywhere from 30 minutes, to a couple of hours. For this reason, we recommend you run this process in a `screen` or `tmux` session on a remote server.
+The last step in this script will reboot servers to finalize configuration.

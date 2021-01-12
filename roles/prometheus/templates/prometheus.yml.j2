@@ -21,6 +21,13 @@ scrape_configs:
 
   - job_name: 'cadvisor'
     static_configs:
+      {% for server in groups['controller'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ cadvisor_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
       {% for server in groups['nodes'] %}
 
       - targets: ['{{ hostvars[server].prom_ip_address }}:{{ cadvisor_port }}']
@@ -31,7 +38,21 @@ scrape_configs:
 
   - job_name: 'node-exporter'
     static_configs:
+      {% for server in groups['controller'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ node_exporter_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
       {% for server in groups['nodes'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ node_exporter_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
+      {% for server in groups['backup_server'] %}
 
       - targets: ['{{ hostvars[server].prom_ip_address }}:{{ node_exporter_port }}']
         labels:
@@ -41,6 +62,13 @@ scrape_configs:
 
   - job_name: 'haproxy'
     static_configs:
+      {% for server in groups['controller'] %}
+
+      - targets: ['{{ hostvars[server].prom_ip_address }}:{{ haproxy_stats_port }}']
+        labels:
+          region: {{ hostvars[server].global_region_name }}
+          node: {{ hostvars[server].ansible_hostname }}
+      {% endfor %}
       {% for server in groups['nodes'] %}
 
       - targets: ['{{ hostvars[server].prom_ip_address }}:{{ haproxy_stats_port }}']

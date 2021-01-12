@@ -1,0 +1,14 @@
+---
+- name: vault_unseal | read key file
+  command: cat {{ item }}
+  register: unseal_keys
+  with_items:
+    - "{{ vault_storage_path }}/keys/unseal_key_0"
+    - "{{ vault_storage_path }}/keys/unseal_key_1"
+    - "{{ vault_storage_path }}/keys/unseal_key_2"
+  delegate_to: "{{ groups['controller'][0] }}"
+
+- name: vault_unseal | unseal with keys
+  shell: |
+    docker exec -it vault-bootstrap vault operator unseal {{ item.stdout }}
+  with_items: "{{unseal_keys.results}}"

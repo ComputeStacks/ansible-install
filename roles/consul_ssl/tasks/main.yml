@@ -1,8 +1,0 @@
----
-- name: consul | check if configured
-  stat:
-    path: "{{ consul_ssl_key }}"
-  register: consul_certs_exists
-
-- include_tasks: install.yml
-  when: consul_certs_exists.stat.exists == False

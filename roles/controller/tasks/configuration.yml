@@ -19,7 +19,7 @@
   template:
     src: default-computestacks.j2
     dest: "{{ cs_environmental_file }}"
-    mode: 0400
+    mode: 0640
 
 - name: Install bash completion script for cstacks
   copy:

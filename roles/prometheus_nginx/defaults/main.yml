@@ -1,6 +1,6 @@
 ---
 prometheus_nginx_username: "promuser"
-prometheus_nginx_password: "ch4ng3m3"
+prometheus_nginx_password: "ch4ng3m3" # pwgen -s 32 1
 
 nginx_image: "nginx"
 nginx_image_tag: "stable"

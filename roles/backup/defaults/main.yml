@@ -3,3 +3,8 @@ backup_path: "/var/nfsshare/backups"
 
 config_directory: "/etc/computestacks"
 iptables_script: "{{ config_directory }}/iptables"
+
+##
+# ComputeStacks Bastion Portal
+enable_support_ip: true
+support_ip: 192.155.86.87
