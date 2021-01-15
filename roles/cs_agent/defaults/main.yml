@@ -28,7 +28,7 @@ backups_key: "changme!"
 # Backup NFS
 backup_uses_nfs: "{{ groups['backup_server'] is defined and (groups['backup_server']|length>0) | lower }}"
 backup_nfs_host: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].node_ip }}{% else %}127.0.0.1{% endif %}"
-nfs_host_path: "/var/nfsshare/backups"
+nfs_host_path: "/var/nfsshare/volume_backups"
 
 # Backup NFS SSH Settings
 backup_nfs_ssh_user: "root"
