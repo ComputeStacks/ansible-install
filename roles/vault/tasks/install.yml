@@ -71,6 +71,8 @@
 - name: Initialise Vault operator
   shell: "docker exec -it vault-bootstrap vault operator init -key-shares=5 -key-threshold=3 -format json"
   register: vault_init_results
+  vars:
+      ansible_ssh_pipelining: no
 
 - name: Parse output of vault init
   set_fact:
@@ -109,6 +111,8 @@
   shell: |
     docker exec -it vault-bootstrap vault operator unseal {{ item.1 }}
   with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
+  vars:
+      ansible_ssh_pipelining: no
 
 - include_tasks: ssl_docker.yml
 - include_tasks: ssl_consul.yml

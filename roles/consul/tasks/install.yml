@@ -20,7 +20,10 @@
   shell: "cat {{ consul_host_config_dir }}/config.json | jq '.encrypt'"
   register: consul_key_read
   run_once: true
+  vars:
+    ansible_ssh_pipelining: no
   when: consul_config_exists.stat.exists == True
+
 - name: consul | set key fact
   set_fact:
     consul_raw_key: "{{ consul_key_read.stdout }}"
@@ -55,6 +58,8 @@
   register: consul_vol_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: consul | create data volume
   community.general.docker_volume:

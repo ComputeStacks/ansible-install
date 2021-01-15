@@ -76,6 +76,7 @@
 
 - hosts:
     - all
+  tags: ['never', 'bootstrap']
   roles:
     - ssh_transfer
     - iptables_persist

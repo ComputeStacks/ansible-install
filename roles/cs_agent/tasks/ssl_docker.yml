@@ -12,6 +12,8 @@
                                                 ttl=43800h
   register: vault_docker_client_results
   delegate_to: "{{ groups['controller'][0] }}"
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: output
   debug:

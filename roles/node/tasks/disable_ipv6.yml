@@ -6,3 +6,5 @@
 
 - name: node | activate (requires reboot)
   shell: sysctl -p
+  vars:
+    ansible_ssh_pipelining: no

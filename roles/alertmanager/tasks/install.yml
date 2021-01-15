@@ -10,6 +10,8 @@
   register: data_vol_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: alertmanager | create alertmanager volume
   community.general.docker_volume:

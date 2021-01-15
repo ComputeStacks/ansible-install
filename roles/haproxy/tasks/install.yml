@@ -34,13 +34,19 @@
 
 - name: haproxy | selinux (haproxy_connect_any)
   shell: setsebool -P haproxy_connect_any 1
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: haproxy | selinux (cluster_use_execmem)
   shell: setsebool -P cluster_use_execmem 1
+  vars:
+    ansible_ssh_pipelining: no
 
 # Ensure that centos nodes have same structure as debian/ubuntu
 - name: haproxy | copy error files
   shell: rsync -a /usr/share/haproxy/ /etc/haproxy/errors/
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: haproxy | start
   service:

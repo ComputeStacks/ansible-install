@@ -34,3 +34,25 @@
     dest: "{{ iptables_script }}"
     mode: 0755
   when: check_iptables.stat.exists == False
+
+- name: backup | fetch node ssh keys
+  fetch:
+    src: "/root/.ssh/id_ed25519.pub"
+    dest: "tmp/nodes/{{ item }}.pub"
+    flat: yes
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups.nodes }}"
+  register: node_ssh_keys
+  changed_when: false
+  
+- name: backup | add ssh keys to backup server
+  ansible.posix.authorized_key:
+    user: "root"
+    key: "{{ lookup('file', item) }}"
+    state: present
+  with_flattened: 
+    - "{{ node_ssh_keys.results | default({}) | map(attribute='dest') | list }}"
+
+- name: backup | remove temp local pubkey copies
+  local_action: file dest="tmp/nodes" state=absent
+  changed_when: false

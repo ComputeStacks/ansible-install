@@ -2,14 +2,20 @@
 - name: Setup docker pki mount
   shell: "docker exec -it vault-bootstrap vault secrets enable -path=pki/docker pki"
   register: enable_docker_pki
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Tune docker TTL
   shell: "docker exec -it vault-bootstrap vault secrets tune -max-lease-ttl=87600h pki/docker"
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Generate docker CA
   shell: |
     docker exec -it vault-bootstrap vault write -field certificate pki/docker/root/generate/internal common_name="Docker Root CA" ttl=87600h
   register: vault_docker_ca
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Write docker CA to file
   copy:
@@ -30,6 +36,8 @@
                                           client_flag=false \
                                           key_usage=DigitalSignature,KeyEncipherment \
                                           ou="Docker Daemon"
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Setup docker client role
   shell: |
@@ -43,6 +51,8 @@
                                           key_usage=DigitalSignature \
                                           ou="Docker Client" \
                                           no_store=true
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Generate ComputeStacks docker certificate
   shell: |
@@ -50,6 +60,8 @@
                                                 common_name=portal \
                                                 ttl=43800h
   register: vault_docker_client_results
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Parse output of vault client generate
   set_fact:
@@ -73,3 +85,5 @@
 - name: Build client pem
   shell: |
     cat {{ docker_certs_path }}/cert.pem {{ docker_certs_path }}/ca.pem {{ docker_certs_path }}/key.pem > {{ docker_certs_path }}/client.pem
+  vars:
+    ansible_ssh_pipelining: no

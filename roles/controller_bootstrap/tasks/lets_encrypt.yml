@@ -6,31 +6,24 @@
     image: "{{ certbot_image }}"
     name: certbot
     network_mode: host
+    container_default_behavior: compatibility
     state: started
     volumes:
       - "{{ letsencrypt_dir }}"
       - "{{ letsencrypt_data_dir }}"
 
 - name: controller_bootstrap | load certificate
-  shell: |
-    let "count=0"
-    for d in /etc/letsencrypt/live/* ; do
-      if ! [ -f $d/fullchain.pem ]; then
-        echo "Missing key for $d, skipping..."
-      else
-        cat $d/fullchain.pem $d/privkey.pem > /etc/haproxy/certs/lecert$count.pem
-      fi
-      ((count++))
-    done
+  command: /etc/cron.daily/cert_renew
+  no_log: True
   args:
     warn: false
-  no_log: True
 
 # Can't use auto remove on orig certbot container due to ansible issues.
 - name: controller_boootstrap | cleanup certbot
   docker_container:
     name: certbot
     state: absent
+    container_default_behavior: compatibility
 
 - name: controller_bootstrap | remove self-signed
   file:

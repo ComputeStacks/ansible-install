@@ -33,6 +33,8 @@
   register: prometheus_vol_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: prometheus | create prometheus volume
   community.general.docker_volume:

@@ -42,12 +42,14 @@ all:
         192.168.173.11:
           node_ip: 192.168.173.11 # backup ip used by nodes
           controller_ip: 192.168.173.11 # backup ip used by controller
+          prom_ip_address: 192.168.173.11 # The ip used by prom to connect for stats.
           ssh_port: 22
     controller:
       hosts:
         192.168.173.9:
           postgres_cs_password: "" # pwgen -s 32 1
           node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
+          prom_ip_address: 192.168.173.9 # The ip used by prom to connect for stats.
     loki_instance:
       hosts:
         192.168.173.9:

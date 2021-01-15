@@ -65,6 +65,8 @@
   shell: "{{ calico_exec }} apply -f /root/calico_global_egress.yml"
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Write calico network policy
   template:
@@ -77,11 +79,15 @@
   shell: "{{ calico_exec }} apply -f /root/calico_network.yml"
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Create docker network
   shell: docker network create --driver calico --ipam-driver calico-ipam --subnet={{ calico_network }} {{ calico_network_name }}
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
+  vars:
+    ansible_ssh_pipelining: no
 
 ##
 # https://docs.projectcalico.org/maintenance/troubleshoot/troubleshooting#configure-networkmanager

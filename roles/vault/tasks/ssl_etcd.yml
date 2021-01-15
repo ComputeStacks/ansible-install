@@ -2,14 +2,20 @@
 - name: Setup etcd pki
   shell: |
     docker exec -it vault-bootstrap vault secrets enable -path=pki/etcd pki
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Tune etcd TTL
   shell: |
     docker exec -it vault-bootstrap vault secrets tune -max-lease-ttl=87600h pki/etcd
+  vars:
+      ansible_ssh_pipelining: no
 
 - name: Generate etcd CA
   shell: |
     docker exec -it vault-bootstrap vault write -field certificate pki/etcd/root/generate/internal common_name="etcd Root CA" ttl=87600h
+  vars:
+      ansible_ssh_pipelining: no
 
 - name: Setup etcd server role
   shell: |
@@ -25,6 +31,8 @@
                                           client_flag=true \
                                           key_usage=DigitalSignature,KeyEncipherment \
                                           ou="etcd daemon"
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Setup etcd client role
   shell: |
@@ -38,3 +46,5 @@
                                           key_usage=DigitalSignature \
                                           ou="etcd client" \
                                           no_store=true
+  vars:
+    ansible_ssh_pipelining: no

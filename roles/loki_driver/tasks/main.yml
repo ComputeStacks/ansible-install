@@ -4,6 +4,8 @@
   register: loki_plugin_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 # https://grafana.com/docs/loki/latest/clients/docker-driver/
 - name: loki | install docker driver

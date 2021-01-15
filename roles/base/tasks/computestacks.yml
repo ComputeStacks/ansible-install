@@ -16,6 +16,8 @@
 - name: Install gpg key
   shell: gpg --import /root/.A8C477EE.asc
   when: gpg_key_exists.stat.exists == False
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Check if diagnostic file exists
   stat:

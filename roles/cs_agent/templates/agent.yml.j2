@@ -15,5 +15,9 @@ backups:
     nfs: {{ backup_uses_nfs }}
     nfs_host: {{ backup_nfs_host }}
     nfs_host_path: "{{ nfs_host_path }}"
+    nfs_ssh:
+      user: "{{ backup_nfs_ssh_user }}" # SSH key used to connect to NFS server
+      port: "{{ backup_nfs_ssh_port }}"
+      keyfile: "{{ backup_nfs_ssh_keyfile }}" # SSH key used to connect to NFS server
 docker:
   version: "{{ docker_api_version }}"

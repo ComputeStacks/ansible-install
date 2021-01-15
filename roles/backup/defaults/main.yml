@@ -1,5 +1,5 @@
 ---
-backup_path: "/var/nfsshare/backups"
+backup_path: "/var/nfsshare/volume_backups"
 
 config_directory: "/etc/computestacks"
 iptables_script: "{{ config_directory }}/iptables"

@@ -19,11 +19,8 @@
                                                 ttl=43800h
   register: etcd_server_cert
   delegate_to: "{{ groups['controller'][0] }}"
-
-- name: output
-  debug:
-    msg: "{{ etcd_server_cert }}"
-  when: enable_debug
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Parse output of vault server generate
   set_fact:
@@ -60,15 +57,12 @@
                                                 ttl=43800h
   register: etcd_client_cert
   delegate_to: "{{ groups['controller'][0] }}"
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: Parse output of vault client generate
   set_fact:
     client_cert_parsed: "{{ etcd_client_cert.stdout | from_json }}"
-
-- name: output
-  debug:
-    msg: "{{ etcd_client_cert }}"
-  when: enable_debug
 
 - name: Write client certificate
   copy:

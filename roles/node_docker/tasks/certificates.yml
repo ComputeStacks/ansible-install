@@ -16,11 +16,8 @@
                                                 ttl=43800h
   register: vault_docker_cert
   delegate_to: "{{ groups['controller'][0] }}"
-
-- name: output
-  debug:
-    msg: "{{ vault_docker_cert }}"
-  when: enable_debug
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: node_docker | parse certificate
   set_fact:

@@ -4,6 +4,8 @@
   register: node_exporter_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 - include_tasks: install.yml
   when: node_exporter_exists is failed

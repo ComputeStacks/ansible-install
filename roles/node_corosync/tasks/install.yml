@@ -21,7 +21,7 @@
 - name: node_corosync | generate key
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
-  shell: corosync-keygen -l
+  command: corosync-keygen -l
 
 - name: node_corosync | read key
   slurp:
