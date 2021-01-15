@@ -6,3 +6,6 @@ ETCD_CERT_FILE={{ etcd_client_cert_file }}
 NODENAME={{ hostvars[inventory_hostname].ansible_hostname }}
 CALICO_NETWORKING_BACKEND=bird
 CALICO_LIBNETWORK_LABEL_ENDPOINTS=true
+{% if container_network_mtu != 1500 %}
+CALICO_LIBNETWORK_VETH_MTU={{ container_network_mtu }}
+{% endif %}

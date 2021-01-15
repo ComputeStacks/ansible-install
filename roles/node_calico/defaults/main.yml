@@ -11,6 +11,8 @@ calico_network: ""
 calico_network_name: ""
 calico_network_ipip: false
 
+container_network_mtu: 1500
+
 calico_conf_dir: /etc/calico
 calico_exec: "/usr/local/bin/calicoctl"
 calico_ipam_exec: "/usr/local/bin/calico-libnetwork"

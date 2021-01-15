@@ -69,6 +69,22 @@ _**Note:** If you used one of our [terraform setup scripts](https://github.com/C
       * `touch /.autorelabel`
       * `reboot`
 
+4. Configure Network MTU Settings
+
+    If you're using a setting other than the default `1500`, please add the following to the main `vars:` section of your `inventory.yml` file:
+
+    ```yaml
+    container_network_mtu: 1400 # Set the desired MTU for containers to use
+    ```
+
+5. IPv6 and container nodes
+
+    Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer(s) on separate virtual machines, or by configuring the controller to proxy ipv6 traffic.
+
+    For the time being, our installer will disable ipv6 directly on the node. However, we recommend also cleaning out the `/etc/sysconfig/network-scripts/ifcfg-*` files to remove any ipv6 specific settings, and setting `IPV6INIT=no`.
+
+    We recommend performing this step prior to running this ansible package.
+
 ***
 ## Running
 
