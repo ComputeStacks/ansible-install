@@ -53,18 +53,6 @@
 
 - name: Install calico
   shell: /bin/bash /usr/local/bin/run_calico
-
-- name: Write calico egress policy
-  copy:
-    src: calico_global_egress.yml
-    dest: /root/calico_global_egress.yml
-  delegate_to: "{{ groups['nodes'][0] }}"
-  run_once: true
-
-- name: Apply calico egress policy
-  shell: "{{ calico_exec }} apply -f /root/calico_global_egress.yml"
-  delegate_to: "{{ groups['nodes'][0] }}"
-  run_once: true
   vars:
     ansible_ssh_pipelining: no
 
