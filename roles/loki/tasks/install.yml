@@ -1,16 +1,23 @@
 ---
-- name: loki | check if plugin exists
+- name: create ops network
+  community.general.docker_network:
+    name: ops
+    state: present
+
+- name: check if plugin exists
   shell: docker plugin inspect loki >/dev/null 2>&1
   register: loki_plugin_exists
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 # https://grafana.com/docs/loki/latest/clients/docker-driver/
-- name: loki | install docker driver
+- name: install docker driver
   shell: docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions >/dev/null 2>&1
   when: loki_plugin_exists is failed
 
-- name: loki | create directories
+- name: create directories
   file:
     path: "{{ item }}"
     state: directory
@@ -18,39 +25,30 @@
     - /etc/loki
     - /var/lib/loki
 
-- name: loki | install config
+- name: install config
   copy:
     src: loki-config.yml
     dest: /etc/loki/loki-config.yml
 
-- name: loki | pull image
+- name: pull image
   community.general.docker_image:
     name: "{{ loki_image }}"
     tag: "{{ loki_image_tag }}"
     source: pull
 
-- name: loki | local hosts entry
-  lineinfile:
-    dest: /etc/hosts
-    regexp: "127.0.0.1 loki.local"
-    line: "127.0.0.1 loki.local"
+- name: create loki volume
+  community.general.docker_volume:
+    name: loki-data
     state: present
 
-- name: loki | run container
-  community.general.docker_container:
-    name: "loki-logs"
-    detach: yes
-    image: "{{ loki_full_image }}"
+- name: install loki systemd
+  template:
+    src: loki.service.j2
+    dest: /etc/systemd/system/loki.service
+
+- name: start loki
+  systemd:
+    name: loki
     state: started
-    container_default_behavior: compatibility
-    network_mode: ops
-    log_driver: json-file
-    log_options:
-      max-size: 10m
-      max-file: "2"
-    restart_policy: "unless-stopped"
-    published_ports:
-      - "{{ loki_nginx_listen }}:{{ loki_nginx_listen }}"
-    volumes:
-      - "/etc/loki/loki-config.yml:/etc/loki/local-config.yaml:Z"
-      - "/var/lib/loki:/loki:Z"
+    enabled: yes
+    daemon_reload: yes

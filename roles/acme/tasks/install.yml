@@ -1,0 +1,46 @@
+---
+- name: setup acme.sh directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ acme_config_home }}"
+    - "{{ nginx_acme_path }}/.well-known/acme-challenge"
+    - "{{ container_registry_cert_home }}"
+
+- name: clone acme.sh repo
+  git:
+    repo: "{{ acme_repo }}"
+    dest: "{{ acme_install_path }}"
+  retries: 5
+
+- name: run acme.sh installer
+  shell:
+    cmd: "/usr/bin/bash {{ acme_install_path }}/acme.sh --install --nocron --noprofile --home {{ acme_data_path }} --accountemail {{ acme_notice_email }}"
+    chdir: "{{ acme_install_path }}"
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: clean installation path
+  file:
+    path: "{{ acme_install_path }}"
+    state: absent
+
+- name: Setup ACME Account
+  shell:
+    cmd: "{{ acme_executable }} --register-account  -m {{ acme_notice_email }}{% if use_zerossl %} --server zerossl{% endif %}"
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Enable ZeroSSL for future certificates
+  shell:
+    cmd: "{{ acme_executable }} --set-default-ca --server zerossl"
+  when: use_zerossl
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Enable auto-upgrade
+  shell:
+    cmd: "{{ acme_executable }} --upgrade --auto-upgrade"
+  vars:
+    ansible_ssh_pipelining: no

@@ -1,0 +1,9 @@
+---
+- name: Check if acme exists
+  stat:
+    path: "{{ acme_config_home }}"
+  register: acme_exists
+
+- include_tasks: install.yml
+  when: acme_exists.stat.exists == False
+

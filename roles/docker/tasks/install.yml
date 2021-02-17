@@ -1,28 +1,28 @@
 ---
-- name: docker | Install docker dependencies
+- name: Install docker dependencies
   yum:
     name: ['yum-utils', 'device-mapper-persistent-data', 'lvm2']
     state: present
     update_cache: true
 
-- name: docker | Install docker repo
+- name: Install docker repo
   command: yum-config-manager -y --add-repo https://download.docker.com/linux/centos/docker-ce.repo
   args:
     warn: false
 
-- name: docker | Install Docker
+- name: Install Docker
   yum:
     name: ['docker-ce', 'docker-ce-cli', 'containerd.io']
     state: present
 
 # https://access.redhat.com/solutions/98873
-- name: docker | Lock docker version
+- name: Lock docker version
   command: yum versionlock docker-ce docker-ce-cli containerd.io
   args:
     warn: false
   when: lock_docker_version
 
-- name: docker | Ensure docker is running
+- name: Ensure docker is running
   service:
     name: docker
     enabled: yes
@@ -34,7 +34,7 @@
     state: directory
 
 - name: Configure Docker Startup Script
-  copy:
+  template:
     src: startup.conf
     dest: /etc/systemd/system/docker.service.d/startup.conf
 

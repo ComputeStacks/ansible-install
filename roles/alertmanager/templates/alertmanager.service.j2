@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus AlertManager
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill alertmanager 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm alertmanager 2>/dev/null'
+
+ExecStart=/usr/bin/env docker run --rm --name alertmanager \
+      --log-driver=none \
+      --network=ops \
+      -v alertmanager-data:/alertmanager \
+      -v /etc/prometheus:/etc/alertmanager:z \
+      {{ alertmanager_full_image }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill alertmanager 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm alertmanager 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=alertmanager
+
+[Install]
+WantedBy=multi-user.target

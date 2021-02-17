@@ -1,0 +1,75 @@
+---
+- name: check if network exists
+  shell: docker network inspect ops >/dev/null 2>&1
+  register: net_exists
+  ignore_errors: yes
+  no_log: True
+
+- name: create ops network
+  community.general.docker_network:
+    name: ops
+  when: net_exists is failed
+
+- name: install required pip packages
+  pip:
+    name: passlib
+
+- name: check nginx directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - /etc/nginx/common
+    - /etc/nginx/conf.d
+    - /etc/nginx/error_pages
+    - /etc/nginx/passwords
+    - /etc/nginx/ssl/acme
+    - /etc/nginx/html
+
+- name: copy default html file
+  copy:
+    src: error_files/503-error.html
+    dest: /etc/nginx/html/index.html
+
+- name: install error pages
+  copy:
+    src: "{{ item }}"
+    dest: /etc/nginx/error_pages
+  with_items:
+    - error_files/400-error.html
+    - error_files/403-error.html
+    - error_files/404-error.html
+    - error_files/408-error.html
+    - error_files/500-error.html
+    - error_files/502-error.html
+    - error_files/503-error.html
+    - error_files/504-error.html
+
+- name: nginx install image
+  community.general.docker_image:
+    name: "{{ nginx_image }}"
+    tag: "{{ nginx_image_tag }}"
+    source: pull
+
+- name: install dhparam
+  get_url:
+    url: https://ssl-config.mozilla.org/ffdhe2048.txt
+    dest: /etc/nginx/dhparam
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: nginx.conf
+  copy:
+    src: nginx.conf
+    dest: /etc/nginx/nginx.conf
+
+- name: error_pages.conf
+  copy:
+    src: error_pages.conf
+    dest: /etc/nginx/common/error_pages.conf
+
+- name: install nginx systemd
+  template:
+    src: nginx.service
+    dest: /etc/systemd/system/nginx.service

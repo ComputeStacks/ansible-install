@@ -1,5 +1,5 @@
 ---
-- name: node_docker | docker certs dir
+- name: docker certs dir
   file:
     state: directory
     path: "{{ docker_certs_dir }}"
@@ -7,7 +7,7 @@
     group: root
     mode: 0740
 
-- name: node_docker | generate certificates
+- name: generate certificates
   shell: |
     docker exec -it vault-bootstrap vault write -format json pki/docker/issue/server \
                                                 common_name={{ hostvars[inventory_hostname].ansible_hostname }} \
@@ -19,11 +19,11 @@
   vars:
     ansible_ssh_pipelining: no
 
-- name: node_docker | parse certificate
+- name: parse certificate
   set_fact:
     vault_client_parsed: "{{ vault_docker_cert.stdout | from_json }}"
 
-- name: node_docker | certificate
+- name: certificate
   copy:
     content: "{{ vault_client_parsed.data.certificate }}\n"
     dest: "{{ docker_cert_file }}"
@@ -31,7 +31,7 @@
     owner: root
     mode: 0440
 
-- name: node_docker | ca cert
+- name: ca cert
   copy:
     content: "{{ vault_client_parsed.data.issuing_ca }}\n"
     dest: "{{ docker_ca_file }}"
@@ -39,7 +39,7 @@
     owner: root
     mode: 0440
 
-- name: node_docker | key
+- name: key
   copy:
     content: "{{ vault_client_parsed.data.private_key }}\n"
     dest: "{{ docker_key_file }}"

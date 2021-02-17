@@ -1,40 +1,40 @@
 ---
-- name: base | Ensure SELinux is enabled
+- name: Ensure SELinux is enabled
   fail:
     msg: SELinux is disabled
   when: ansible_selinux == False or ansible_selinux.status == 'disabled'
 
-- name: base | Ensure portal domain exists
+- name: Ensure portal domain exists
   fail:
     msg: "'cs_portal_domain' is not defined"
   when: cs_portal_domain == ""
 
-- name: base | Ensure registry domain exists
+- name: Ensure registry domain exists
   fail:
     msg: "'cs_registry_domain' is not defined"
   when: cs_registry_domain == ""
 
-- name: base | Ensure Floating IP exists
+- name: Ensure Floating IP exists
   fail:
     msg: "'floating_ip' is not defined"
   when: floating_ip == ""
 
-- name: base | Ensure global region name defined
+- name: Ensure global region name defined
   fail:
     msg: "'global_region_name' is not defined"
   when: global_region_name == ""
 
-- name: base | Ensure default app url is defined
+- name: Ensure default app url is defined
   fail:
     msg: "'cs_app_url' is not defined"
   when: cs_app_url == ""
 
-- name: base | Ensure correct linux variant
+- name: Ensure correct linux variant
   fail:
     msg: "Invalid OS distribution"
   when: ansible_facts['distribution'] != "CentOS"
 
-- name: base | Ensure supported linux version
+- name: Ensure supported linux version
   fail:
     msg: "Invalid CentOS version. Only version 7 is supported"
   when: ansible_facts['distribution_major_version']|int < 7 or ansible_facts['distribution_major_version']|int > 7

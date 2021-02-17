@@ -1,5 +1,5 @@
 ---
-- name: consul | check if ssl configured
+- name: check if ssl configured
   stat:
     path: "{{ consul_ssl_key }}"
   register: consul_certs_exists
@@ -7,13 +7,10 @@
 - include_tasks: install_ssl.yml
   when: consul_certs_exists.stat.exists == False
 
-- name: consul | check if container exists
-  shell: docker inspect --type container consul >/dev/null 2>&1
+- name: check if exists
+  community.general.docker_container_info:
+    name: consul
   register: consul_container
-  ignore_errors: yes
-  no_log: True
-  vars:
-    ansible_ssh_pipelining: no
 
 - include_tasks: install.yml
-  when: consul_container is failed
+  when: not consul_container.exists

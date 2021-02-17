@@ -1,0 +1,14 @@
+---
+- name: Load service state
+  service_facts:
+
+- include_tasks: install.yml
+  when: ansible_facts.services['dnsmasq.service'] is not defined
+
+- name: check if NetworkManager is installed
+  stat:
+    path: /etc/NetworkManager/NetworkManager.conf
+  register: nm_conf
+
+- include_tasks: network_manager.yml
+  when: nm_conf.stat.exists == True

@@ -3,6 +3,10 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
+  http_server_read_timeout: 1000s
+  http_server_write_timeout: 1000s
+  http_server_idle_timeout: 1000s
+  log_level: info
 
 ingester:
   lifecycler:
@@ -12,8 +16,11 @@ ingester:
         store: inmemory
       replication_factor: 1
     final_sleep: 0s
-  chunk_idle_period: 5m
+  chunk_encoding: snappy
+  chunk_idle_period: 1h
+  chunk_target_size: 1048576
   chunk_retain_period: 30s
+  max_transfer_retries: 0
 
 schema_config:
   configs:
@@ -27,12 +34,32 @@ schema_config:
 
 storage_config:
   boltdb:
-    directory: /tmp/loki/index
+    directory: /loki/index
 
   filesystem:
-    directory: /tmp/loki/chunks
+    directory: /loki/chunks
 
 limits_config:
   enforce_metric_name: false
   reject_old_samples: true
   reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 30
+  ingestion_burst_size_mb: 60
+
+chunk_store_config:
+  max_look_back_period: 336h
+
+# https://grafana.com/docs/loki/latest/operations/storage/retention/
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 336h
+  chunk_tables_provisioning:
+    inactive_read_throughput: 10
+    inactive_write_throughput: 10
+    provisioned_read_throughput: 50
+    provisioned_write_throughput: 20
+  index_tables_provisioning:
+    inactive_read_throughput: 10
+    inactive_write_throughput: 10
+    provisioned_read_throughput: 50
+    provisioned_write_throughput: 20

@@ -35,7 +35,7 @@ task bootstrap: :environment do
   puts "...Base URL"
   Setting.find_by(name: 'registry_base_url')&.update value: "{{ cs_registry_domain }}"
   puts "...Node"
-  Setting.find_by(name: 'registry_node')&.update value: "127.0.0.1"
+  Setting.find_by(name: 'registry_node')&.update value: "{{ registry_server_ip }}"
 
   puts "LetsEncrypt..."
   Setting.find_by(name: 'le_validation_server')&.update value: "{{ node_ip }}:3000"
@@ -45,7 +45,8 @@ task bootstrap: :environment do
     endpoint: "{{ prometheus_endpoint }}",
     username: "{{ prometheus_username }}",
     password: "{{ prometheus_password }}"
-  )
+  ) unless MetricClient.where(endpoint: "{{ prometheus_endpoint }}").exists?
+  mc = MetricClient.first
 
   # Log Client is used by the controller
   # `loki_*` settings on the region are used by containers.
@@ -53,7 +54,12 @@ task bootstrap: :environment do
     endpoint: "{{ loki_controller_endpoint }}",
     username: "{{ loki_username }}",
     password: "{{ loki_password }}"
-  )
+  ) unless LogClient.where(endpoint: "{{ loki_controller_endpoint }}").exists?
+  lc = LogClient.first
+
+  if mc.nil? || lc.nil?
+    raise "Missing Log or Metric Client"
+  end
 
   region.update name: "{{ global_region_name }}", 
                 metric_client: mc,
@@ -73,21 +79,23 @@ task bootstrap: :environment do
     region: region,
     active: true,    
     ssh_port: {{ hostvars[host].ssh_port | int }}
-  )
+  ) unless Node.where(primary_ip: '{{ hostvars[host].consul_listen_ip }}').exists?
   {{ '' }}
   {{ '' }}
   {%- endfor -%}
   {{ '' }}
   puts "Configuring Network..."
-  network = Network.create!(
-    cidr: '{{ calico_network }}',
-    is_public: false,
-    is_ipv4: true,
-    active: true,
-    name: '{{ calico_network_name }}',
-    label: '{{ global_region_name }} Network'
-  )
-  network.regions << region
+  unless Network.where(cidr: '{{ calico_network }}').exists?
+    network = Network.create!(
+      cidr: '{{ calico_network }}',
+      is_public: false,
+      is_ipv4: true,
+      active: true,
+      name: '{{ calico_network_name | lower }}',
+      label: '{{ global_region_name }} Network'
+    )
+    network.regions << region
+  end
 
   {% if cs_admin_create -%}
   puts "Creating default admin account"
@@ -98,19 +106,21 @@ task bootstrap: :environment do
     region = Region.first
     group.regions << region if region
   end
-  user = User.new(
-    fname: 'Admin',
-    lname: 'Admin',
-    email: '{{ cs_admin_email }}',
-    bypass_billing: true,
-    currency: ENV['CURRENCY'],
-    is_admin: true,
-    password: '{{ cs_admin_password }}',
-    password_confirmation: '{{ cs_admin_password }}',
-    user_group: group
-  )
-  user.skip_confirmation!
-  user.save
+  if User.support_admin.empty?
+    user = User.new(
+      fname: 'Admin',
+      lname: 'Admin',
+      email: '{{ cs_admin_email }}',
+      bypass_billing: true,
+      currency: ENV['CURRENCY'],
+      is_admin: true,
+      password: '{{ cs_admin_password }}',
+      password_confirmation: '{{ cs_admin_password }}',
+      user_group: group
+    )
+    user.skip_confirmation!
+    user.save
+  end
 
   {%- endif -%}
 
@@ -118,7 +128,7 @@ task bootstrap: :environment do
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
 {% else %}
 floating_ip = "{{ floating_ip }}"
-{% endif %}
+{% endif %} 
 
   LoadBalancer.create!(
     label: "{{ lb_name }}",
@@ -129,7 +139,17 @@ floating_ip = "{{ floating_ip }}"
     public_ip: floating_ip,
     shared_certificate: "{{ lb_shared_cert }}",
     direct_connect: {% if calico_network_ipip %}false{% else %}true{% endif %}
-  )
+  ) if LoadBalancer.first.nil?
+
+  begin
+    Dns::Zone.create!(name: "{{ cs_app_zone }}")
+  rescue => e
+    ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
+  end
+
+  Feature.setup!
+  Feature.find_by(name: 'updated_cr_cert')&.update_column :active, true
+
   puts "Done."
 
 end

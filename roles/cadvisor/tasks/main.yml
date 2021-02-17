@@ -1,11 +1,8 @@
 ---
-- name: cadvisor | check if exists
-  shell: docker inspect cadvisor >/dev/null 2>&1
-  register: cadvisor_exists
-  ignore_errors: yes
-  no_log: True
-  vars:
-    ansible_ssh_pipelining: no
+- name: check if exists
+  community.general.docker_container_info:
+    name: cadvisor
+  register: cadvisor_container
 
 - include_tasks: install.yml
-  when: cadvisor_exists is failed
+  when: not cadvisor_container.exists

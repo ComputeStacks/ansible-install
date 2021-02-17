@@ -1,0 +1,8 @@
+---
+- include_tasks: common/cadvisor.yml
+- include_tasks: common/docker.yml
+- include_tasks: common/node_exporter.yml
+- include_tasks: common/nginx.yml
+
+- debug:
+    msg: "Registry validation successful."

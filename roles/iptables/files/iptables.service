@@ -1,0 +1,11 @@
+[Unit]
+Description=CS Persist IP Tables
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/bin/cs-recover_iptables
+
+[Install]
+WantedBy=multi-user.target

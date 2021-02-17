@@ -1,5 +1,5 @@
 ---
-- name: node_docker | check if already configured
+- name: check if already configured
   stat:
     path: "{{ docker_key_file }}"
   register: is_configured

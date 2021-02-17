@@ -1,0 +1,53 @@
+---
+selinux: true
+enable_ipv6: true
+nginx_image: "nginx"
+nginx_image_tag: "stable"
+nginx_full_image: "{{ nginx_image}}:{{ nginx_image_tag }}"
+
+prom_nginx_listen: 3101
+loki_nginx_listen: 3102
+
+loki_username: "loguser"
+loki_password: "" # pwgen -s 32 1
+
+prometheus_username: "promuser"
+prometheus_password: "" # pwgen -s 32 1
+
+nginx_certificate: "/etc/nginx/ssl/acme"
+nginx_cert_fullchain: "{{ nginx_certificate }}/fullchain.pem"
+nginx_cert_key: "{{ nginx_certificate }}/privkey.pem"
+
+cs_portal_domain: ""
+cs_registry_domain: ""
+cs_metrics_domain: ""
+
+##
+# Container Registry
+container_registry_cert_home: "/opt/container_registry/ssl"
+container_registry_fullchain: "{{ container_registry_cert_home }}/fullchain.pem"
+container_registry_key: "{{ container_registry_cert_home }}/privkey.pem"
+
+##
+# Acme.SH
+acme_data_path: "/opt/acme"
+nginx_acme_path: "/var/www/acme-sh" # Path to validate certificate
+acme_install_path: "{{ acme_data_path }}/src"
+acme_config_home: "{{ acme_data_path }}/data"
+acme_executable: "/usr/bin/bash {{ acme_data_path }}/acme.sh"
+acme_challenge_method: "http" # or cloudflare
+
+# Cloudflare DNS Challenge
+acme_cf_token: "" # API Token
+acme_cf_account: "" # Account ID
+
+acme_cert_request: "{% if 'controller' in group_names %}-d {{ cs_portal_domain }}{% endif %}{% if 'registry' in group_names %} -d {{ cs_registry_domain }}{% endif %}{% if 'metrics' in group_names %} -d {{ cs_metrics_domain }}{% endif %}"
+
+acme_cert_issue_base_cmd: "{{ acme_executable }} --issue {{ acme_cert_request }} --force"
+acme_cert_issue_cmd: "{{ acme_cert_issue_base_cmd }} -w {{ nginx_acme_path }}"
+acme_cert_cf_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_cf"
+
+acme_cert_name: "{% if 'controller' in group_names %}{{ cs_portal_domain }}{% elif 'registry' in group_names %}{{ cs_registry_domain }}{% elif 'metrics' in group_names %}{{ cs_metrics_domain }}{% endif %}"
+
+acme_nginx_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ nginx_cert_key }} --fullchain-file {{ nginx_cert_fullchain }} --reloadcmd \"systemctl reload nginx\""
+acme_reg_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ container_registry_key }} --fullchain-file {{ container_registry_fullchain }} --reloadcmd \"bash /usr/local/bin/reload_container_reg.sh\""

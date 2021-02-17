@@ -71,7 +71,7 @@
     ansible_ssh_pipelining: no
 
 - name: Create docker network
-  shell: docker network create --driver calico --ipam-driver calico-ipam --subnet={{ calico_network }} {{ calico_network_name }}
+  shell: docker network create --driver calico --ipam-driver calico-ipam --subnet={{ calico_network }} {{ calico_network_name | lower }}
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
   vars:

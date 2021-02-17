@@ -1,0 +1,11 @@
+---
+# Any additional IPs to add to the allow list
+# You can enter either single IPv4 addresses, or ranges like: 192.168.10.0/24.
+# Example:
+# extra_allowed_ipv4_addresses:
+#   - "192.168.10.32"
+#   - "192.168.10.33"
+#
+# Same format for IPv6
+# extra_allowed_ipv6_addresses:
+#   - "2600:3c01::f03c:92ff:feaa:fc7e"

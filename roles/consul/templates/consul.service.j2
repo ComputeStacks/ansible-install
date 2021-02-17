@@ -1,0 +1,31 @@
+[Unit]
+Description=Consul
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill consul 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm consul 2>/dev/null'
+
+ExecStart=/usr/bin/env docker run --rm --name consul \
+      --log-driver=none \
+      --network=host \
+      -v consul-data:/consul/data \
+      -e CONSUL_HTTP_SSL=true \
+      -e CONSUL_CACERT=/consul/config/ssl/ca.crt \
+      -e CONSUL_CLIENT_CERT=/consul/config/ssl/server.crt \
+      -e CONSUL_CLIENT_KEY=/consul/config/ssl/server.key \
+      -e CONSUL_HTTP_ADDR=https://{{ consul_listen_ip }}:8501 \
+      -v {{ consul_host_config_dir }}:/consul/config{% if selinux %}:z{% endif %} \
+      {{ consul_image }}:{{ consul_image_tag }} consul agent -config-file=/consul/config/config.json
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill consul 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm consul 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=consul
+
+[Install]
+WantedBy=multi-user.target

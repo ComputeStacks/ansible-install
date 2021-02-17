@@ -1,0 +1,60 @@
+---
+- name: Install dnsmasq
+  yum:
+    name: dnsmasq
+    state: present  
+
+- name: install dnsmasq conf
+  copy:
+    src: dnsmasq.conf
+    dest: /etc/dnsmasq.conf
+
+- name: Check if existing resolvconf exists
+  stat:
+    path: /etc/resolv.conf
+  register: resolveconf_exists
+
+- name: copy existing nameservers to dnsmasq
+  copy:
+    src: /etc/resolv.conf
+    dest: /etc/resolv.dnsmasq
+    remote_src: yes
+  when: resolveconf_exists.stat.exists == True
+
+- name: install dnsmasq.resolv
+  copy:
+    src: resolv.dnsmasq
+    dest: /etc/resolv.dnsmasq
+  when: resolveconf_exists.stat.exists == False
+
+- name: initialize dnsmasq
+  systemd:
+    name: dnsmasq
+    state: restarted
+    enabled: yes
+
+- name: ensure dnsmasq is running
+  shell: "systemctl status dnsmasq >/dev/null 2>&1"
+  register: dnsmasq_is_active
+  ignore_errors: yes
+  no_log: True
+  vars:
+    ansible_ssh_pipelining: no
+    
+- fail:
+    msg: "dnsmasq is not running"
+  when: dnsmasq_is_active is failed
+
+- name: Disable systemd resolve
+  systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: no
+  ignore_errors: yes
+  no_log: True
+
+- name: install new resolv.conf
+  copy:
+    src: resolv.conf
+    dest: /etc/resolv.conf
+

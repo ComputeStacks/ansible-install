@@ -1,0 +1,5 @@
+---
+- name: cadvisor
+  fail:
+    msg: cadvisor is not running
+  when: ansible_facts.services['cadvisor.service']['state'] != 'running'

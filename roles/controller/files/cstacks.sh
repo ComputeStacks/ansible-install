@@ -13,7 +13,7 @@ bootstrap-app()
     echo "Existing container found, aborting..."
     exit 1
   fi
-  docker run -it --rm \
+  docker run -it --rm --name portal \
           -v $CS_CERT_PATH/docker:/root/.docker:Z \
           -v $CS_CERT_PATH/consul:/root/.consul:Z \
           -v $CS_RAKE_PATH/bootstrap.rake:/usr/src/app/lib/tasks/bootstrap.rake:Z \
@@ -30,6 +30,7 @@ bootstrap-app()
           -e DOCKER_CERT_PATH=/root/.docker \
           -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
           --net=host \
+          --log-driver=journald \
           $CS_REG bundle exec rake bootstrap
 }
 
@@ -40,7 +41,7 @@ bootstrap-db()
     exit 1
   fi
   docker pull $CS_REG
-  docker run -it --rm \
+  docker run -it --rm --name portal \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -e APP_ID=$CS_APP_ID \
@@ -56,6 +57,7 @@ bootstrap-db()
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
         --net=host \
+        --log-driver=journald \
         $CS_REG bundle exec rails db:schema:load
 }
 
@@ -64,7 +66,7 @@ console()
   if [ "$(docker ps -q -f name=portal)" ]; then
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bundle exec rails c
   else
-    docker run -it --rm \
+    docker run -it --rm --name portal \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -86,6 +88,7 @@ console()
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         --net=host \
+        --log-driver=journald \
         $CS_REG bundle exec rails c
   fi
 }
@@ -95,7 +98,7 @@ container()
   if [ "$(docker ps -q -f name=portal)" ]; then
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal ash
   else
-    docker run -it --rm \
+    docker run -it --rm --name portal \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -117,6 +120,7 @@ container()
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         --net=host \
+        --log-driver=journald \
         $CS_REG ash
   fi
 }
@@ -141,7 +145,7 @@ upgrade()
   database-backup
 
   echo "Running migrations..."
-  docker run -it --rm \
+  docker run -it --rm --name portal \
           -v $CS_CERT_PATH/docker:/root/.docker:Z \
           -v $CS_CERT_PATH/consul:/root/.consul:Z \
           -e APP_ID=$CS_APP_ID \
@@ -157,6 +161,7 @@ upgrade()
           -e DOCKER_CERT_PATH=/root/.docker \
           -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
           --net=host \
+          --log-driver=journald \
           $CS_REG bundle exec rails db:migrate
 }
 
@@ -190,8 +195,7 @@ run()
         -e QUEUE_LE=$QUEUE_LE \
         --net=host \
         --restart=unless-stopped \
-        --log-opt max-size=10m \
-        --log-opt max-file=2 \
+        --log-driver=journald \
         $CS_REG
 }
 
@@ -201,7 +205,7 @@ test()
   if [ "$(docker ps -q -f name=portal)" ]; then
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bundle exec rake test_connection:all
   else
-    docker run -it --rm \
+    docker run -it --rm --name portal \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -223,21 +227,19 @@ test()
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         --net=host \
+        --log-driver=journald \
         $CS_REG bundle exec rake test_connection:all
   fi
 }
 
-certbot-renew()
+portal-logs()
 {
-  if [ "$(docker ps -aq -f name=certbot)" ]; then
-    echo "Existing container found, halting."
-    exit 1
-  fi
-  docker run --rm -it --name certbot \
-         -v /etc/letsencrypt:/etc/letsencrypt:Z \
-         -v /var/lib/letsencrypt:/var/lib/letsencrypt:Z \
-         --net=host \
-         certbot/certbot renew --agree-tos --http-01-port 54321 --preferred-challenges http-01
+  journalctl --all CONTAINER_NAME=portal
+}
+
+portal-log-tail()
+{
+  journalctl --all CONTAINER_NAME=portal -f
 }
 
 usage()
@@ -248,11 +250,11 @@ where COMMAND is one of:
 
   bootstrap-app     Initialize the ComputeStacks application
   bootstrap-db      Create the database
-  certbot-renew     Renews the local LetsEncrypt certificate
   console           Enter the ComputeStacks console
   container         Enter the ComputeStacks application container
   database-backup   Create a database backup (postgres)
   help              Usage Help
+  logs              Controller Logs
   run               Run ComputeStacks
   upgrade           Pull the latest version and run any database migrations
   test              Test connectivity between controller and nodes
@@ -280,7 +282,10 @@ while [ "$1" != "" ]; do
     upgrade )                 upgrade
                               exit
                               ;;
-    certbot-renew )           certbot-renew
+    logs )                    portal-logs
+                              exit
+                              ;;
+    tail-logs )               portal-log-tail
                               exit
                               ;;
     test )                    test

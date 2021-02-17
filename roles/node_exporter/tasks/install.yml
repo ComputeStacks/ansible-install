@@ -1,10 +1,10 @@
 ---
-- name: node_exporter | add copr repo
+- name: add copr repo
   get_url:
     url: "{{ copr_repo }}"
     dest: "{{ copr_repo_dest }}"
 
-- name: node_exporter | ensure node_exporter exists
+- name: ensure node_exporter exists
   yum:
     name: node_exporter
     state: present
@@ -13,7 +13,7 @@
   until: yum_add_node_exporter is not failed
   retries: 5
 
-- name: node_exporter | activate and run
+- name: activate and run
   systemd:
     name: node_exporter
     state: started

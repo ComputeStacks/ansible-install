@@ -1,0 +1,27 @@
+[Unit]
+Description=Prometheus
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill prometheus 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm prometheus 2>/dev/null'
+
+ExecStart=/usr/bin/env docker run --rm --name prometheus \
+      --log-driver=none \
+      --network=ops \
+      -v prometheus-data:/prometheus \
+      -v /etc/prometheus:/etc/prometheus:z \
+      -p 127.0.0.1:9090:9090 \
+      {{ prometheus_full_image }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill prometheus 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm prometheus 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=prometheus
+
+[Install]
+WantedBy=multi-user.target

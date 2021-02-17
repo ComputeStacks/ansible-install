@@ -1,0 +1,15 @@
+---
+- include_tasks: common/cadvisor.yml
+- include_tasks: common/docker.yml
+- include_tasks: common/node_exporter.yml
+- include_tasks: common/nginx.yml
+
+- name: redis
+  fail:
+    msg: redis is not running
+  when: ansible_facts.services['nginx.service']['state'] != 'running'
+
+- name: postgres
+  fail:
+    msg: postgresql is not running
+  when: ansible_facts.services['postgresql-13.service']['state'] != 'running'

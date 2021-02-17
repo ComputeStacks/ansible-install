@@ -2,15 +2,17 @@
 all:
   vars:
     license_key: "" # https://accounts.computestacks.com/store/computestacks
-    global_region_name: dev
+    global_region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
 
     ##
     # Container Network
-    calico_network: 10.100.0.0/21
-    calico_network_name: "net100"
+
+    # We recommend not going larger than a `/24`. If you need more, you can create additional networks later.
+    calico_network: 10.100.10.0/24
+    calico_network_name: "net100" # some unique identifier. should not include spaces, capitals, or special characters.
     calico_network_ipip: false # required when private network performs source/dest filtering
 
     ##
@@ -19,9 +21,9 @@ all:
 
     ##
     # Floating IP
-    enable_floating_ip: false # will skip installing corosync/pacemaker
+    enable_floating_ip: false
     floating_ip: 0.0.0.0
-    floating_ip_netmask: 0 # e.g. 24, 21
+    floating_ip_netmask: 32
     # it's important that all nodes have same interface name.
     # if you mix eth/ens format, automatic failover will not work.
     # If, however, floating IP is in the same network as the primary ip
@@ -31,48 +33,84 @@ all:
 
     ##
     # CS Controller Settings
-    cs_app_id: dev # unique name to identify app to CS Support
+
+    # This helps us identify your installation when you contact us for support
+    # Please choose a unique name that is all lower case, has no spaces, and only '-' and '_' characters.
+    # We generally recommend your company name, so if you were 'Acme, Inc.', we would recommend 'acme'.
+    # Alternatively, if you do not want us to see this, you can generate a random string with: `pwgen -s 12 1`
+    cs_app_id: dev
+    
     cs_app_url: a.dev.cmptstks.net
+    cs_app_zone: cmptstks.net # The zone file for the app url
     cs_currency: "USD" # Default currency. Can add more later in web admin.
     cs_portal_domain: portal.dev.cmptstks.net
     cs_registry_domain: cr.dev.cmptstks.net
+    cs_metrics_domain: metrics.dev.cmptstks.net
+
+    ##
+    # Management SSL Certificates
+    # Controller, Registry, and Metrics will all receive ZeroSSL certificates during installation. By default,
+    # this will be done through HTTP validation. If you're using CloudFlare, you may optionally use DNS validation.
+    #
+    # acme_challenge_method: "cloudflare" # default is: 'http'
+    # acme_cf_token: "" # API Token
+    # acme_cf_account: "" # Account ID
+    #
+    # If you would prefer LetsEncrypt, set:
+    # use_zerossl: false # default is: true
+
+    ##
+    # Additional Management Ips
+    # Add any additional IP Addresses that you want to have full access
+    # to these servers. You can enter either single address, or ranges like: 192.168.10.0/24.
+    #
+    # Example:
+    # extra_allowed_ipv4_addresses:
+    #   - "192.168.10.32"
+    #   - "192.168.10.33"
+    # extra_allowed_ipv6_addresses:
+    #   - "2600:3c01::f03c:92ff:feaa:fc7e"
   children:
     backup_server:
       hosts:
         192.168.173.11:
           node_ip: 192.168.173.11 # backup ip used by nodes
           controller_ip: 192.168.173.11 # backup ip used by controller
-          prom_ip_address: 192.168.173.11 # The ip used by prom to connect for stats.
+          metrics_ip_address: 192.168.173.11 # The ip used by prom to connect for stats.
           ssh_port: 22
+          enable_ipv6: true
     controller:
       hosts:
         192.168.173.9:
           postgres_cs_password: "" # pwgen -s 32 1
           node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
-          prom_ip_address: 192.168.173.9 # The ip used by prom to connect for stats.
-    loki_instance:
+          metrics_ip_address: 192.168.173.9 # The ip used by prom to connect for stats.
+          enable_ipv6: true
+          ssh_port: 22
+    metrics:
       hosts:
         192.168.173.9:
-          loki_nginx_listen: 8132
-          loki_nginx_password: "" # pwgen -s 32 1
+          loki_password: "" # pwgen -s 32 1
+          prometheus_password: "" # pwgen -s 32 1
           controller_endpoint: 127.0.0.1 # The ip/hostname used by the controller to connect
           node_endpoint: 192.168.173.9 # The ip/hostname used by nodes to connect
+          enable_ipv6: true
+          ssh_port: 22
     nodes:
       hosts:
-        192.168.173.10: # all nodes need cadvisor & node-exporter
+        192.168.173.10:
           backup_ip: 192.168.173.10 # node ip used by backup server
           consul_bootstrap: true # set false on all other nodes.
           consul_listen_ip: 192.168.173.10 # used by both controller and agent.
-          prom_ip_address: 192.168.173.10 # The ip used by prom to connect for stats.
+          metrics_ip_address: 192.168.173.10 # The ip used by prom to connect for stats.
           etcd_listen_ip: 192.168.173.10 # shared with corosync
           ssh_port: 22
-    prom_instance:
+
+          # Currently not supported on container nodes. Contact us for info on how to bring ipv6 to your cluster.
+          enable_ipv6: false
+    registry:
       hosts:
-        192.168.173.9: # prometheus, alert-manager
-          alertmanager_nginx_listen: 8134
-          prometheus_nginx_listen: 8133
-          prometheus_nginx_password: "" # pwgen -s 32 1
-          node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
-          controller_endpoint: 127.0.0.1 # The hostname used by the controller to connect
-          on_controller: true # If running on controller, set to true. (used by docker_iptables)
+        192.168.173.9:
+          controller_ip: 127.0.0.1 # IP Addresses used by controller to connect to registry
+          enable_ipv6: true
           ssh_port: 22

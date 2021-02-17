@@ -1,0 +1,6 @@
+---
+- include_tasks: controller/services.yml
+- include_tasks: controller/portal.yml
+
+- debug:
+    msg: "Controller validation successful."

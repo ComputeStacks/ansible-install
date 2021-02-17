@@ -1,5 +1,5 @@
 ---
-- name: backup_server | setup nfsshare
+- name: setup nfsshare
   file:
     path: "{{ backup_path }}"
     state: directory
@@ -7,12 +7,12 @@
     owner: nfsnobody
     group: nfsnobody
 
-- name: backup_server | write exports
+- name: write exports
   template:
     src: exports.j2
     dest: /etc/exports
 
-- name: backup_server | restart services
+- name: restart services
   service:
     name: "{{ item }}"
     enabled: yes
@@ -23,19 +23,7 @@
     - nfs-lock
     - nfs-idmap
 
-- name: backup_server | check if iptables already exists
-  stat:
-    path: "{{ iptables_script }}"
-  register: check_iptables
-
-- name: backup_server | install iptables config file
-  template:
-    src: iptables.config.j2
-    dest: "{{ iptables_script }}"
-    mode: 0755
-  when: check_iptables.stat.exists == False
-
-- name: backup | fetch node ssh keys
+- name: fetch node ssh keys
   fetch:
     src: "/root/.ssh/id_ed25519.pub"
     dest: "tmp/nodes/{{ item }}.pub"
@@ -45,7 +33,7 @@
   register: node_ssh_keys
   changed_when: false
   
-- name: backup | add ssh keys to backup server
+- name: add ssh keys to backup server
   ansible.posix.authorized_key:
     user: "root"
     key: "{{ lookup('file', item) }}"
@@ -53,6 +41,6 @@
   with_flattened: 
     - "{{ node_ssh_keys.results | default({}) | map(attribute='dest') | list }}"
 
-- name: backup | remove temp local pubkey copies
+- name: remove temp local pubkey copies
   local_action: file dest="tmp/nodes" state=absent
   changed_when: false

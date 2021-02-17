@@ -1,11 +1,6 @@
 ---
-- name: etcd_config | exists?
-  shell: systemctl status etcd >/dev/null 2>&1
-  register: etcd_exists
-  ignore_errors: yes
-  no_log: True
-  vars:
-    ansible_ssh_pipelining: no
+- name: Load service state
+  service_facts:
 
 - include_tasks: install.yml
-  when: etcd_exists is failed
+  when: ansible_facts.services['etcd.service'] is not defined

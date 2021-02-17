@@ -1,5 +1,5 @@
 ---
-- name: node_calico | check if configured
+- name: check if configured
   stat:
     path: "{{ network_manager_conf }}"
   register: config_file

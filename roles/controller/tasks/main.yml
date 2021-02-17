@@ -1,5 +1,5 @@
 ---
-- name: controller | setup directories
+- name: setup directories
   file:
     path: "{{ item }}"
     state: directory
@@ -16,7 +16,7 @@
 - include_tasks: ssh.yml
 - include_tasks: ssl.yml
 
-- name: controller | check if app installed
+- name: check if app installed
   stat:
     path: "{{ cs_environmental_file }}"
   register: app_initialized

@@ -2,23 +2,23 @@
 ##
 # Required for postgresql12-devel
 # See: https://qiita.com/tom-sato/items/b5f1263911fdedd5e81b
-- name: controller_postgres | install centos-release-scl
+- name: install centos-release-scl
   yum:
     name: centos-release-scl
     state: present
 
-- name: controller_postgres | setup yum
+- name: setup yum
   yum:
     name: "{{ yum_repo_url }}"
     state: present
 
 # devel package is required to install the python library, used by ansible.
-- name: controller_postgres | install packages
+- name: install packages
   yum:
     name: ['postgresql{{ psql_version }}-server','postgresql{{ psql_version }}-contrib', 'postgresql{{ psql_version }}-devel']
     state: present
 
-- name: controller_postgres | link pg_config
+- name: link pg_config
   file:
     src: "{{ psql_base_path }}/bin/pg_config"
     dest: /usr/bin/pg_config
@@ -27,25 +27,32 @@
     state: link
 
 # Ignore errors, because it may already exist which produces an error we don't care about.
-- name: controller_postgres | create initial database
+- name: create initial database
   shell: "{{ psql_base_path }}/bin/postgresql-{{ psql_version }}-setup initdb"
   ignore_errors: yes
   no_log: True
   vars:
     ansible_ssh_pipelining: no
 
-- name: controller_postgres | install pg_hba
+- name: install pg_hba
   copy:
     src: pg_hba.conf
     dest: "{{ psql_data_path }}/data/pg_hba.conf"
 
-- name: controller_postgres | start
+- name: adjust pg listen ip
+  lineinfile:
+    path: "{{ psql_data_path }}/data/postgresql.conf"
+    regexp: '^listen_addresses '
+    insertafter: '^#listen_addresses '
+    line: "listen_addresses = '127.0.0.1'"
+
+- name: start
   systemd:
     name: "postgresql-{{ psql_version }}"
     state: started
     enabled: yes
 
-- name: controller_postgres | install psql python library
+- name: install psql python library
   pip:
     name: psycopg2
   when: ansible_facts['distribution_major_version'] == "7"

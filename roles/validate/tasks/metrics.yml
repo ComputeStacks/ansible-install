@@ -1,0 +1,23 @@
+---
+- include_tasks: common/cadvisor.yml
+- include_tasks: common/docker.yml
+- include_tasks: common/node_exporter.yml
+- include_tasks: common/nginx.yml
+
+- name: alertmanager
+  fail:
+    msg: alertmanager is not running
+  when: ansible_facts.services['alertmanager.service']['state'] != 'running'
+
+- name: loki
+  fail:
+    msg: loki is not running
+  when: ansible_facts.services['loki.service']['state'] != 'running'
+
+- name: prometheus
+  fail:
+    msg: prometheus is not running
+  when: ansible_facts.services['prometheus.service']['state'] != 'running'
+
+- debug:
+    msg: "Metrics validation successful."

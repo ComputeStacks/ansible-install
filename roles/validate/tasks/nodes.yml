@@ -1,0 +1,6 @@
+---
+- include_tasks: nodes/services.yml
+- include_tasks: nodes/calico.yml
+
+- debug:
+    msg: "Node validation successful."

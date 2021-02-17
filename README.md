@@ -12,11 +12,8 @@ _Note: We do not recommend running this on an existing cluster at this time. We 
     * Has ansible installed and configured, with the following plugins installed:
 
         ```bash
-        ansible-galaxy collection install community.general
-        ansible-galaxy collection install ansible.posix
+        ansible-galaxy install -r requirements.yml
         ```
-
-    * You've connected at least once to each machine over ssh, or you've configured ansible to automatically accept SSH host keys during the initial connection. (see below)
 
 ### Inventory File
 
@@ -32,6 +29,7 @@ Example DNS Settings:
 
 ```
 a.dev.cmptstks.net. IN A %{floating_ip}
+metrics.dev.cmptstks.net. IN A %{PUBLIC IP OF METRICS SERVER}
 *.a.dev.cmptstks.net. IN CNAME a.dev.cmptstks.net.
 portal.dev.cmptstks.net. IN A %{controller ip address}
 cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
@@ -44,7 +42,7 @@ _**Note:** If you used one of our [terraform setup scripts](https://github.com/C
 1. Ensure all hostnames are configured properly on each node.
    Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
 
-   Examples: node101, node1, ch01, containernode01
+   Examples: node101, node102, node103
 
    ```bash
    hostname node101 && echo "node101" > /etc/hostname && echo "127.0.0.1 node101" >> /etc/hosts
@@ -79,7 +77,7 @@ _**Note:** If you used one of our [terraform setup scripts](https://github.com/C
 
 5. IPv6 and container nodes
 
-    Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer(s) on separate virtual machines, or by configuring the controller to proxy ipv6 traffic.
+    Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer on a separate virtual machine, or by configuring the controller to proxy ipv6 traffic.
 
     For the time being, our installer will disable ipv6 directly on the node. However, we recommend also cleaning out the `/etc/sysconfig/network-scripts/ifcfg-*` files to remove any ipv6 specific settings, and setting `IPV6INIT=no`.
 
@@ -93,3 +91,64 @@ ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
 ```
 
 The last step in this script will reboot servers to finalize configuration.
+
+
+## Post-Installation
+
+After running and allowing the servers to reboot, you can perform some basic validation by running: 
+
+```bash
+ansible-playbook -u root -i inventory.yml main.yml --tags "validate"
+```
+
+## FAQ
+
+### How to install ansible
+
+<details>
+<summary>Mac OSX</summary>
+<p>
+
+[Install Homebrew](https://docs.brew.sh/Installation)
+
+```bash
+brew install ansible
+```
+
+</p>
+</details>
+
+<details>
+<summary>Linux</summary>
+<p>
+
+[Install pyenv](https://github.com/pyenv/pyenv) for your local (non-root) user account.
+
+You can set the new version with `pyenv global 3.9.1` _(replace `3.9.1` with the version you installed)_
+
+```bash
+python -m pip install --user ansible
+echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+```
+
+_Note: Check if you have a `.bashrc` file, it may be `.bash_profile` for your distribution._
+
+This will ensure you have the most recent version of ansible.
+
+</p>
+</details>
+
+## Troubleshooting
+### NetworkManager Hostname Error
+
+How to Resolve `set-hostname: current hostname was changed outside NetworkManager: '<hostname>'` in logs:
+
+Edit `/etc/NetworkManager/NetworkManager.conf` and add `hostname-mode=none` to the `[main]` block, and reboot the server.
+
+**Example:**
+
+```
+[main]
+#plugins=ifcfg-rh,ibft
+hostname-mode=none
+```

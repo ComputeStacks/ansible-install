@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+{% if 'controller' in group_names or 'metrics' in group_names %}
+# Grant host access to local docker containers
+iptables -A INPUT -p all -s 172.18.0.2/16 -j ACCEPT
+{% endif %}
+
+# ComptueStacks Support
+iptables -A INPUT -p all -s 192.155.86.87 -j ACCEPT
+
+{% if enable_ipv6 %}
+ip6tables -A INPUT -p all -s 2600:3c01::f03c:92ff:feaa:fc7e -j ACCEPT
+{% endif %}
+
+{% if enable_ipv6 %}
+ip6tables -A INPUT -i lo -j ACCEPT
+ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+ip6tables -A INPUT -p ipv6-icmp -j ACCEPT
+{% if extra_allowed_ipv6_addresses is defined %}
+{% for ip in extra_allowed_ipv6_addresses %}
+
+ip6tables -A INPUT -p all -s {{ ip }} -j ACCEPT
+{% endfor %}
+{% endif %}
+ip6tables -A INPUT -j LOG --log-prefix=v6_input_deny --log-level=4
+ip6tables -A INPUT -j REJECT --reject-with icmp6-adm-prohibited
+{% endif %}
+
+# HTTP/HTTPS
+{% if 'controller' in group_names %}
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+{% endif %}
+{% if 'registry' in group_names %}
+iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
+{% if 'controller' not in group_names %}
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+{% endif %}
+{% endif %}
+{% if 'metrics' in group_names %}
+{% if 'controller' not in group_names %}
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+{% endif %}
+{% endif %}
+
+# Allow Controller
+{% if 'controller' not in group_names %}
+{% if 'metrics' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
+{% endif %}
+{% if 'backup_server' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].node_ip }} -j ACCEPT
+{% endif %}
+{% if 'nodes' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].node_ip }} -j ACCEPT
+{% endif %}
+{% if 'registry' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
+{% endif %}
+{% endif %}
+
+{% if 'nodes' in group_names %}
+# Nodes
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
+{% if hostvars[groups['controller'][0]].node_ip != hostvars[groups['metrics'][0]].node_endpoint %}
+iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].node_endpoint }} -j ACCEPT
+{% endif %}
+{% endif %}
+
+{% for host in groups['nodes'] %}
+{% if 'controller' in group_names %}
+# Allow Nodes
+iptables -A INPUT -p all -s {{ hostvars[host].consul_listen_ip }} -j ACCEPT
+{% endif %}
+
+{% if 'backup_server' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[host].backup_ip }} -j ACCEPT
+{% endif %}
+
+{% if 'metrics' in group_names %}
+{% if hostvars[groups['controller'][0]] != hostvars[groups['metrics'][0]] %}
+iptables -A INPUT -p all -s {{ hostvars[host].metrics_ip_address }} -j ACCEPT
+{% endif %}
+{% endif %}
+
+{% if 'nodes' in group_names %}
+{% if inventory_hostname != host %}
+iptables -A INPUT -p all -s {{ hostvars[host].etcd_listen_ip }} -j ACCEPT
+{% endif %}
+{% endif %}
+{% endfor %}
+
+# Controller
+{% if 'controller' in group_names %}
+{% if hostvars[groups['controller'][0]].metrics_ip_address != hostvars[groups['metrics'][0]].controller_endpoint %}
+iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].controller_endpoint }} -j ACCEPT
+{% endif %}
+{% endif %}
+
+{% if 'backup_server' in group_names %}
+# Backup
+iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].node_endpoint }} -j ACCEPT
+{% endif %}
+
+{% if 'registry' in group_names %}
+{% if hostvars[groups['registry'][0]].controller_ip != '127.0.0.1' %}
+# Registry
+iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].controller_endpoint }} -j ACCEPT
+{% endif %}
+{% endif %}
+
+{% if extra_allowed_ipv4_addresses is defined %}
+{% for ip in extra_allowed_ipv4_addresses %}
+
+iptables -A INPUT -p all -s {{ ip }} -j ACCEPT
+{% endfor %}
+{% endif %}
+
+iptables -P INPUT DROP

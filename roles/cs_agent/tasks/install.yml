@@ -1,11 +1,11 @@
 ---
-- name: cs_agent | ensure config directory exists
+- name: ensure config directory exists
   file:
     path: "{{ agent_config_path }}"
     state: directory
     mode: '0740'
 
-- name: cs_agent | Download agent
+- name: Download agent
   unarchive:
     src: "{{ agent_download_url }}"
     dest: /usr/local/src/
@@ -13,13 +13,13 @@
 
 # Should fail and kill ansible
 # see: https://stackoverflow.com/questions/34340562/evaluating-return-code-in-ansible-conditional
-- name: cs_agent | Verify integrity
+- name: Verify integrity
   shell: |
     cd /usr/local/src && gpg --verify cs-agent.sig cs-agent
   args:
     warn: false
 
-- name: cs_agent | Install agent binary
+- name: Install agent binary
   copy:
     remote_src: true
     src: /usr/local/src/cs-agent
@@ -31,18 +31,18 @@
 - include_tasks: ssl_consul.yml
 - include_tasks: ssl_docker.yml
 
-- name: cs_agent | Install agent config
+- name: Install agent config
   template:
     src: agent.yml.j2
     dest: "{{ agent_config_path }}/agent.yml"
     mode: '0440'
 
-- name: cs_agent | systemd conf file
+- name: systemd conf file
   template:
     src: cs-agent.service.j2
-    dest: /usr/lib/systemd/system/cs-agent.service
+    dest: /etc/systemd/system/cs-agent.service
 
-- name: cs_agent | start agent
+- name: start agent
   systemd:
     name: cs-agent
     state: started

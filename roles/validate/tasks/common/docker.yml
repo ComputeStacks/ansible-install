@@ -1,0 +1,5 @@
+---
+- name: docker
+  fail:
+    msg: docker is not running
+  when: ansible_facts.services['docker.service']['state'] != 'running'

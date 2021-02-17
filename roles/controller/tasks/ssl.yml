@@ -1,18 +1,5 @@
 ---
-- name: controller | python openssl
-  pip:
-    name: pyopenssl
-    state: present
-
-- name: controller | self-signed exists?
-  stat:
-    path: "/etc/haproxy/certs/selfsigned.pem"
-  register: shared_cert_exists
-
-- include_tasks: ssl_self_init.yml
-  when: shared_cert_exists.stat.exists == False
-
-- name: controller | wilddcard self-signed exists
+- name: wildcard self-signed exists
   stat:
     path: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
   register: shared_wildcard_exists

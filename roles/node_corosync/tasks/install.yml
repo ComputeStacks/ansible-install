@@ -1,10 +1,10 @@
 ---
-- name: node_corosync | install packages
+- name: install packages
   yum:
     name: ['pacemaker', 'haveged', 'pcs', 'corosync']
     state: present
 
-- name: node_corosync | ensure directories exists
+- name: ensure directories exists
   file:
     path: "{{ item }}"
     state: directory
@@ -12,41 +12,41 @@
     - "{{ corosync_config_dir }}"
     - "{{ corosync_log_dir }}"
 
-- name: node_corosync | load corosync config
+- name: load corosync config
   template:
     src: corosync.conf.j2
     dest: "{{ corosync_config_file }}"
     mode: 0644
 
-- name: node_corosync | generate key
+- name: generate key
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
   command: corosync-keygen -l
 
-- name: node_corosync | read key
+- name: read key
   slurp:
     src: "{{ corosync_key_file }}"
   register: corosync_authkey
   run_once: true
   delegate_to: "{{ groups['nodes'][0] }}"
 
-- name: node_corosync | store key
+- name: store key
   set_fact:
     corosync_key: "{{ corosync_authkey.content|b64decode }}"
 
-- name: node_corosync | write key
+- name: write key
   copy:
     dest: "{{ corosync_key_file }}"
     content: "{{ corosync_key }}"
   when: inventory_hostname != groups['nodes'][0]
 
-- name: node_corosync | run corosync
+- name: run corosync
   systemd:
     name: corosync
     enabled: yes
     state: started
 
-- name: node_corosync | run pacemaker
+- name: run pacemaker
   systemd:
     name: pacemaker
     enabled: yes
@@ -54,4 +54,4 @@
 
 # Activate only if defaults are not in use.
 - include_tasks: activate.yml
-  when: enable_floating_ip
+  

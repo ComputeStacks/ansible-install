@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew Let's Encrypt certificates using acme.sh
+After=network-online.target
+Requires=nginx.service
+After=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart={{ acme_executable }} --cron --home "{{ acme_data_path }}"
+
+SuccessExitStatus=0 2

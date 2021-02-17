@@ -1,0 +1,14 @@
+---
+use_zerossl: true
+acme_repo: https://github.com/acmesh-official/acme.sh.git
+acme_notice_email: "acme-renewals@computestacks.com"
+acme_data_path: "/opt/acme"
+acme_config_home: "{{ acme_data_path }}/data"
+acme_install_path: "{{ acme_data_path }}/src"
+acme_executable: "{{ acme_data_path }}/acme.sh"
+
+nginx_acme_path: "/var/www/acme-sh"
+
+##
+# Container Registry
+container_registry_cert_home: "/opt/container_registry/ssl"

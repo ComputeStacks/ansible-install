@@ -2,9 +2,13 @@
 alertmanager_image: "prom/alertmanager"
 alertmanager_image_tag: "latest"
 alertmanager_full_image: "{{ alertmanager_image }}:{{ alertmanager_image_tag }}"
-container_name: "alertmanager"
 
 cs_portal_domain: "demo.computestacks.net" # set in inventory
 alert_endpoint: "https://{{ cs_portal_domain }}/api/system/alert_notifications"
 
-tls_skip_verify: false
+# Validate SSL Certificate with the portal
+# If set to true:
+#  - Accept self-signed certificates on the controller
+# If set to false:
+#  - Only accept valid SSL certificates. Self-signed certificates will fail.
+tls_skip_verify: true

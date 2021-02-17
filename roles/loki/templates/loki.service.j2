@@ -1,0 +1,27 @@
+[Unit]
+Description=Loki
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill loki-logs 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm loki-logs 2>/dev/null'
+
+ExecStart=/usr/bin/env docker run --rm --name loki-logs \
+      --log-driver=none \
+      --network=ops \
+      -v loki-data:/loki \
+      -v /etc/loki/loki-config.yml:/etc/loki/local-config.yaml:z \
+      -p 127.0.0.1:3100:3100 \
+      {{ loki_full_image }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill loki-logs 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm loki-logs 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=loki
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+---
+- name: node_exporter
+  fail:
+    msg: node_exporter is not running
+  when: ansible_facts.services['node_exporter.service']['state'] != 'running'

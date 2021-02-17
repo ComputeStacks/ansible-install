@@ -1,8 +1,0 @@
----
-- name: node_iptables | install config
-  template:
-    src: iptables.config.j2
-    dest: "{{ iptables_script }}"
-    mode: 0755
-
-

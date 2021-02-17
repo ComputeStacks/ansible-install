@@ -1,18 +1,8 @@
 ---
-- name: controller_bootstrap | check if portal is configured
+- name: check if portal is configured
   docker_container_info:
     name: portal
   register: cs_exists
 
 - include_tasks: cstacks.yml
   when: not cs_exists.exists
-
-- name: controller_bootstrap | check if le already initialized
-  stat:
-    path: /etc/letsencrypt/csr/0000_csr-certbot.pem
-  register: le_initialized
-
-- include_tasks: lets_encrypt.yml
-  when:
-    - enable_lets_encrypt
-    - le_initialized.stat.exists == False

@@ -3,9 +3,12 @@
 
 - include_tasks: packages.yml
 
-- name: Load tmux config
-  copy:
-    src: tmux.conf
+- include_tasks: centos7/kernel.yml
+  when: is_centos_7
+
+- name: install tmux.conf
+  get_url:
+    url: "{{ tmux_url }}"
     dest: /root/.tmux.conf
 
 - name: Add Public DNS
@@ -39,13 +42,8 @@
 
 - include_tasks: computestacks.yml
 
-- name: base | setup chronyd
+- name: setup chronyd
   service:
     name: chronyd
     state: started
     enabled: yes
-
-- name: base | pip-docker
-  pip:
-    name: docker
-    state: latest

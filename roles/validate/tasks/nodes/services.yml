@@ -1,0 +1,24 @@
+---
+- include_tasks: common/cadvisor.yml
+- include_tasks: common/docker.yml
+- include_tasks: common/node_exporter.yml
+
+- name: consul
+  fail:
+    msg: consul is not running
+  when: ansible_facts.services['consul.service']['state'] != 'running'
+
+- name: dnsmasq
+  fail:
+    msg: dnsmasq is not running
+  when: ansible_facts.services['dnsmasq.service']['state'] != 'running'
+
+- name: etcd
+  fail:
+    msg: etcd is not running
+  when: ansible_facts.services['etcd.service']['state'] != 'running'
+
+- name: cs-agent
+  fail:
+    msg: ComputeStacks Backup Agent is not running
+  when: ansible_facts.services['cs-agent.service']['state'] != 'running'

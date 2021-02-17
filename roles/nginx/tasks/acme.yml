@@ -1,0 +1,84 @@
+---
+- name: acme nginx conf
+  template:
+    src: acme-default.conf
+    dest: /etc/nginx/conf.d/default.conf
+
+- name: install container registry renewal_script
+  copy:
+    src: reload_container_reg.sh
+    dest: /usr/local/bin/reload_container_reg.sh
+    mode: 0777
+  when: "'registry' in group_names"
+
+- name: acme include for nginx
+  template:
+    src: acme.conf
+    dest: /etc/nginx/common/acme.conf
+
+- name: start nginx
+  systemd:
+    name: nginx
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+- name: ensure nginx is running
+  shell: "systemctl status nginx >/dev/null 2>&1"
+  register: nginx_is_active
+  ignore_errors: yes
+  no_log: True
+  vars:
+    ansible_ssh_pipelining: no
+    
+- fail:
+    msg: "nginx is not running"
+  when: nginx_is_active is failed
+
+- name: Request Certificate (HTTP)
+  shell: "{{ acme_cert_issue_cmd }}"
+  vars:
+    ansible_ssh_pipelining: no
+  when: "acme_challenge_method == 'http'"
+
+- name: Request Certificate (Cloudflare)
+  shell: "{{ acme_cert_cf_issue_cmd }}"
+  environment:
+    CF_Token: "{{ acme_cf_token }}"
+    CF_Account_ID: "{{ acme_cf_account }}"
+  vars:
+    ansible_ssh_pipelining: no
+  when: "acme_challenge_method == 'cloudflare'"
+
+- name: Install Certificate
+  shell: "{{ acme_nginx_cert_install }}"
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Install Registry Certificate
+  shell: "{{ acme_reg_cert_install }}"
+  vars:
+    ansible_ssh_pipelining: no
+  when: "'registry' in group_names"
+
+- name: remove default vhost
+  file:
+    path: /etc/nginx/conf.d/default.conf
+    state: absent
+
+- name: setup renewal systemd service
+  template:
+    src: renewal-systemd/acme_letsencrypt.service
+    dest: /etc/systemd/system/acme_letsencrypt.service
+
+- name: setup renewal systemd timer
+  template:
+    src: renewal-systemd/acme_letsencrypt.timer
+    dest: /etc/systemd/system/acme_letsencrypt.timer
+
+- name: enable acme renew
+  systemd:
+    name: acme_letsencrypt
+    state: started
+    enabled: yes
+    daemon_reload: yes

@@ -12,4 +12,7 @@ motd_info:
 
 global_region_name: ""
 
-ssh_ca_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAamLg+Qj1Rh3ENeaVoPf0O+xWv4C1Juotqe1MkC72sU keybase@ea61b79df40c"
+tmux_url: "https://gist.githubusercontent.com/kwatson/45a298891981e2323eed3e118a3d5da7/raw/ff7eb5ba7afbccb11df6470290ab6f520c2a128d/.tmux.conf"
+
+is_centos_7: "{{ (ansible_facts['distribution'] == 'CentOS' and ansible_facts['distribution_major_version'] == '7') or (ansible_facts['distribution'] == 'RedHat' and ansible_facts['distribution_major_version'] == '7') }}"
+has_old_kernel: "{{ ansible_kernel is version('5', '<') }}"

@@ -1,11 +1,6 @@
 ---
-- name: loki | check if exists
-  shell: "docker inspect loki-logs >/dev/null 2>&1"
-  register: loki_exists
-  ignore_errors: yes
-  no_log: True
-  vars:
-    ansible_ssh_pipelining: no
+- name: Load service state
+  service_facts:
 
 - include_tasks: install.yml
-  when: loki_exists is failed
+  when: ansible_facts.services['loki.service'] is not defined

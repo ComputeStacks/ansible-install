@@ -1,0 +1,30 @@
+---
+- name: Add controller to nodes
+  lineinfile:
+    path: /etc/hosts
+    regexp: "{{ cs_portal_domain }}"
+    line: "{{ hostvars[groups['controller'][0]].node_ip }} {{ cs_portal_domain }}"
+  when: "'nodes' in group_names"
+
+- name: Add controller to metrics
+  lineinfile:
+    path: /etc/hosts
+    regexp: "{{ cs_portal_domain }}"
+    line: "{{ hostvars[groups['controller'][0]].metrics_ip_address }} {{ cs_portal_domain }}"
+  when: 
+    - "'metrics' in group_names"
+    - "'controller' not in group_names" 
+
+- name: Add metrics to nodes
+  lineinfile:
+    path: /etc/hosts
+    regexp: "{{ cs_metrics_domain }}"
+    line: "{{ hostvars[groups['metrics'][0]].node_endpoint }} {{ cs_metrics_domain }}"
+  when: "'nodes' in group_names"
+
+- name: Add metrics to controller
+  lineinfile:
+    path: /etc/hosts
+    regexp: "{{ cs_metrics_domain }}"
+    line: "{{ hostvars[groups['metrics'][0]].controller_endpoint }} {{ cs_metrics_domain }}"
+  when: "'controller' in group_names"

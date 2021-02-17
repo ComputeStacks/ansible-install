@@ -4,10 +4,19 @@
   tags: ['never', 'bootstrap']
   roles:
     - base
+    - node_exporter
+    - local_dns
+
+- hosts:
+    - controller
+    - metrics
+    - registry
+  tags: ['never', 'bootstrap']
+  roles:
     - docker
     - cadvisor
-    - loki_driver
-    - node_exporter
+    - acme
+    - nginx
 
 - hosts:
     - controller
@@ -15,7 +24,6 @@
   roles:
     - controller_postgres
     - controller_redis
-    - haproxy
     - vault
     - controller
 
@@ -35,38 +43,33 @@
     - nodes
   tags: ['never', 'bootstrap']
   roles:
+    - node_dnsmasq
+    - docker
+    - cadvisor
     - haproxy
+    - loki_driver
     - andrewrothstein.etcd
     - etcd_config
     - consul
     - node_docker
     - node
     - node_calico
-    - node_iptables
     - cs_agent
 
 - hosts:
-    - loki_instance
+    - metrics
   tags: ['never', 'bootstrap']
   roles:
-    - ops_network
     - loki
-    - loki_nginx
-
-- hosts:
-    - prom_instance
-  tags: ['never', 'bootstrap']
-  roles:
-    - ops_network
-    - prometheus_nginx
     - prometheus
     - alertmanager
 
 - hosts:
-    - controller
+    - all
   tags: ['never', 'bootstrap']
   roles:
-    - controller_bootstrap
+    - ssh_transfer
+    - iptables
 
 - hosts:
     - nodes
@@ -75,21 +78,26 @@
     - node_corosync
 
 - hosts:
-    - all
+    - controller
   tags: ['never', 'bootstrap']
   roles:
-    - ssh_transfer
-    - iptables_persist
+    - controller_bootstrap
+
+- hosts: 
+    - all
+  tags: ['never', 'validate']
+  roles: 
+    - validate
 
 - hosts:
-    - backup_server
-    - prom_instance
-    - nodes
+    - all
   tags: ['never', 'bootstrap']
   tasks:
+    - debug:
+        msg: "Server is now rebooting. Installation Complete!"
     - name: reboot
       reboot:
         msg: "Ansible rebooting to finalize setup"
         reboot_timeout: 1
       ignore_errors: yes
-      no_log: True
+      no_log: True    

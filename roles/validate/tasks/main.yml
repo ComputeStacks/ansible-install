@@ -1,0 +1,18 @@
+---
+- name: Load service state
+  service_facts:
+
+- include_tasks: backup.yml
+  when: "'backup_server' in group_names"
+
+- include_tasks: metrics.yml
+  when: "'metrics' in group_names"
+
+- include_tasks: nodes.yml
+  when: "'nodes' in group_names"
+
+- include_tasks: registry.yml
+  when: "'registry' in group_names"
+
+- include_tasks: controller.yml
+  when: "'controller' in group_names"

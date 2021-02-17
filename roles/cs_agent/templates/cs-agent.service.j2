@@ -1,8 +1,10 @@
 [Unit]
 Description="ComputeStacks Agent"
 Documentation=https://computestacks.com
-Requires=network-online.target docker.service
-After=network-online.target docker.service
+Requires=docker.service
+After=docker.service
+Requires=consul.service
+After=consul.service
 ConditionFileNotEmpty={{ agent_config_path }}/agent.yml
 
 [Service]

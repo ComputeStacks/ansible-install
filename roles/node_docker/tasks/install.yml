@@ -1,5 +1,5 @@
 ---
-- name: node_docker | check if certs exist
+- name: check if certs exist
   stat:
     path: "{{ docker_key_file }}"
   register: key_exists
@@ -7,32 +7,32 @@
 - include_tasks: certificates.yml
   when: key_exists.stat.exists == False
   
-- name: node_docker | stop docker
+- name: stop docker
   service:
     name: docker
     state: stopped
 
-- name: node_docker | create docker startup directory
+- name: create docker startup directory
   file:
     path: /etc/systemd/system/docker.service.d
     state: directory
   
-- name: node_docker | create docker startup script
+- name: create docker startup script
   template:
     src: docker-startup.conf.j2
     dest: /etc/systemd/system/docker.service.d/startup.conf
 
-- name: node_docker | reload systemd
+- name: reload systemd
   systemd: daemon_reload=yes
 
-- name: node_docker | create user for containers
+- name: create user for containers
   user:
     name: dockremap
     uid: 1001
     shell: /bin/false
     create_home: no
 
-- name: node_docker | start docker
+- name: start docker
   service:
     name: docker
     state: started

@@ -1,0 +1,5 @@
+---
+- name: nginx
+  fail:
+    msg: nginx is not running
+  when: ansible_facts.services['nginx.service']['state'] != 'running'

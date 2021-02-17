@@ -1,5 +1,5 @@
 ---
-- name: haproxy | exists?
+- name: exists?
   stat:
     path: /usr/lib/tmpfiles.d/haproxy.conf
   register: haproxy_exists

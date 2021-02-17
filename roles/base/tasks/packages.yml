@@ -6,10 +6,10 @@
 
 - name: Install base packages
   yum:
-    name: ['@Development tools','libcurl-devel','vim','bind-utils','gnupg2','ca-certificates','traceroute','yum-utils','device-mapper-persistent-data','lvm2','yum-plugin-versionlock','sysstat','python-devel','python2-pip','policycoreutils-python','policycoreutils-devel','chrony', 'ncurses', 'libevent', 'libevent-devel', 'wget', 'net-tools', 'bash-completion', 'tree', 'nfs-utils', 'iptables-services', 'jq']
+    name: ['@Development tools','libcurl-devel','vim','bind-utils','gnupg2','ca-certificates','traceroute','yum-utils','device-mapper-persistent-data','lvm2','yum-plugin-versionlock','sysstat','python-devel','python2-pip','policycoreutils-python','policycoreutils-devel','chrony', 'ncurses', 'libevent', 'libevent-devel', 'wget', 'net-tools', 'bash-completion', 'tree', 'nfs-utils', 'iptables-services', 'jq', 'whois', 'mosh', 'socat', 'pyOpenSSL', 'python-docker']
     state: present  
 
-- name: Install IUS repo
+- name: Install Additional Repositories
   yum:
     name:
       - https://repo.ius.io/ius-release-el7.rpm

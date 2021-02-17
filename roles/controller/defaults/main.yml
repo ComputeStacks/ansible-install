@@ -5,6 +5,10 @@ lb_name: "{{ global_region_name }}-lb"
 
 controller_use_lets_encrypt: true
 ssh_port: 22
+enable_ipv6: true
+
+controller_haproxy_http_listen: "{% if enable_ipv6 %}:::80 v4v6{% else %}:80{% endif %}"
+controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{% endif %}"
 
 ##
 # Controller Image
@@ -27,7 +31,7 @@ rake_tasks_directory: "{{ data_directory }}/rake"
 branding_directory: "{{ data_directory }}/branding"
 
 registry_data_path: "/computestacks-mnt"
-registry_ssl_directory: "/etc/ssl/container-registry"
+registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry'][0]].controller_ip }}{% else %}127.0.0.1{% endif %}"
 
 ##
 # App Configuration
@@ -43,8 +47,13 @@ cs_admin_password: changeme
 
 # Domains
 cs_app_url: "" # WildCard self-signed cert generation
+cs_app_zone: "" # The zone name for cs_app_url.
 cs_portal_domain: ""
 cs_registry_domain: ""
+cs_metrics_domain: "" # We create a domain so we can grab a LetsEncrypt cert for our metrics endpoint
+
+# SSL
+acme_staging: false
 
 # Networks
 floating_ip: "10.10.100.10"
@@ -53,19 +62,15 @@ calico_network: 10.100.0.0/21
 calico_network_ipip: false
 
 # Prometheus
-#http://promuser:ch4ng3m3@51.161.105.193:8133
-prometheus_port: "{{ hostvars[groups['prom_instance'][0]].prometheus_nginx_listen }}"
 prometheus_username: "promuser"
-prometheus_password: "{{ hostvars[groups['prom_instance'][0]].prometheus_nginx_password }}"
-prometheus_endpoint: "http://{{ hostvars[groups['prom_instance'][0]].controller_endpoint }}:{{ prometheus_port }}"
-
+prometheus_password: "{{ hostvars[groups['metrics'][0]].prometheus_password }}"
+prometheus_endpoint: "https://{{ cs_metrics_domain }}:3101"
 
 # Loki
-loki_port: "{{ hostvars[groups['loki_instance'][0]].loki_nginx_listen }}"
 loki_username: "loguser"
-loki_password: "{{ hostvars[groups['loki_instance'][0]].loki_nginx_password }}"
-loki_controller_endpoint: "http://{{ hostvars[groups['loki_instance'][0]].controller_endpoint }}:{{ loki_port }}"
-loki_node_endpoint: "http://{{ hostvars[groups['loki_instance'][0]].node_endpoint }}:{{ loki_port }}"
+loki_password: "{{ hostvars[groups['metrics'][0]].loki_password }}"
+loki_controller_endpoint: "https://{{ cs_metrics_domain }}:3102"
+loki_node_endpoint: "https://{{ cs_metrics_domain }}:3102"
 
 # Concurrency
 queue_le: 2

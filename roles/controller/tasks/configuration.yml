@@ -27,8 +27,8 @@
     dest: /etc/bash_completion.d/cstacks.sh
     mode: 0740
 
-# ##
-# # Generate Bootstrap
+##
+# Generate Bootstrap
 - name: Slurp and store wildcared cert
   slurp:
     src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
@@ -43,57 +43,29 @@
     src: bootstrap.rake.j2
     dest: "{{ rake_tasks_directory }}/bootstrap.rake"
 
-- name: controller | branding css
+- name: branding css
   get_url:
     url: "{{ branding_css_url }}"
     dest: "{{ branding_directory }}/application.css"
 
-- name: controller | branding css map
+- name: branding css map
   get_url:
     url: "{{ branding_css_map_url }}"
     dest: "{{ branding_directory }}/application.css.map"
 
-- name: controller | branding login image
+- name: branding login image
   get_url:
     url: "{{ branding_login_img_url }}"
     dest: "{{ branding_directory }}/logo-login.png"
 
-- name: controller | branding favicon
+- name: branding favicon
   file:
     path: "{{ branding_directory }}/favicon.ico"
     state: touch
 
 ##
-# HAProxy Configuration
-- name: controller | haproxy config
-  copy:
-    src: haproxy.cfg
-    dest: /etc/haproxy/haproxy.cfg
-    mode: 0644
-
-- name: controller | haproxy restart
-  service:
-    name: haproxy
-    state: restarted
-
-- name: Install renewal script
-  copy:
-    src: renew_ssl.sh
-    dest: /etc/cron.daily/cert_renew
-    mode: 0777
-  when: controller_use_lets_encrypt
-
-##
-# IPTables
-- name: controller | install iptables
-  template:
-    src: iptables.sh.j2
-    dest: "{{ config_directory }}/iptables"
-    mode: 0755
-
-##
 # Controller Docker Image
-- name: controller | pull container image
+- name: pull container image
   docker_image:
     name: "{{ controller_image_path }}"
     source: pull

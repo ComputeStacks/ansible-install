@@ -1,2 +1,4 @@
 ---
+enable_ipv6: true
 lock_docker_version: true
+docker_ipv6_local_net: "2001:db8:1::/64"

@@ -1,5 +1,5 @@
 ---
-- name: node_corosync | is configured?
+- name: is configured?
   stat:
     path: "{{ corosync_key_file }}"
   register: key_file
