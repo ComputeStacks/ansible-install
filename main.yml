@@ -100,4 +100,4 @@
         msg: "Ansible rebooting to finalize setup"
         reboot_timeout: 1
       ignore_errors: yes
-      no_log: True    
+      no_log: True

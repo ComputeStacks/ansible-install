@@ -16,3 +16,8 @@ tmux_url: "https://gist.githubusercontent.com/kwatson/45a298891981e2323eed3e118a
 
 is_centos_7: "{{ (ansible_facts['distribution'] == 'CentOS' and ansible_facts['distribution_major_version'] == '7') or (ansible_facts['distribution'] == 'RedHat' and ansible_facts['distribution_major_version'] == '7') }}"
 has_old_kernel: "{{ ansible_kernel is version('5', '<') }}"
+
+##
+# Cloud Platform Specifics
+cloud_platform: "generic"
+platform_do_token: "" # DigitalOcean Personal Access token

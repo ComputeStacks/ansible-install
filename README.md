@@ -39,49 +39,73 @@ cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
 
 _**Note:** If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=), then the following steps would have already been performed for you._
 
-1. Ensure all hostnames are configured properly on each node.
-   Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
+#### Server Hostnames
 
-   Examples: node101, node102, node103
+Ensure all hostnames are configured properly on each node.
+Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
 
-   ```bash
-   hostname node101 && echo "node101" > /etc/hostname && echo "127.0.0.1 node101" >> /etc/hosts
-   ```
+Examples: node101, node102, node103
 
-   The reason these are critical are two fold:
+```bash
+hostname node101 && echo "node101" > /etc/hostname && echo "127.0.0.1 node101" >> /etc/hosts
+```
 
-    a) When metrics are stored for containers or nodes, the hostname is added as a label. This is how ComputeStacks is able to filter metrics for the correct container/node.
-    b) Backup jobs are assigned to the node by their hostname. If there is a mismatch in the controller, then jobs will not run.
+The reason these are critical are two fold:
 
-2. Ensure the following are installed prior to running the ansible script.
+a) When metrics are stored for containers or nodes, the hostname is added as a label. This is how ComputeStacks is able to filter metrics for the correct container/node.
+b) Backup jobs are assigned to the node by their hostname. If there is a mismatch in the controller, then jobs will not run.
 
-    ```bash
-    yum -y update && yum -y install epel-release kernel-headers && yum -y install ansible
-    ```
 
-3. Ensure selinux is enabled and activated
+#### Distribution Specific Notes
 
-    * Check if it's enabled and active by running: `sestatus`
-    * If `SELinux status:` is not `enabled`, then please:
-      * Edit `/etc/selinux/config` and set `SELINUX=enforcing`
-      * `touch /.autorelabel`
-      * `reboot`
+##### Debian 10
 
-4. Configure Network MTU Settings
+Install the following packages
 
-    If you're using a setting other than the default `1500`, please add the following to the main `vars:` section of your `inventory.yml` file:
+```bash
+apt update && apt -y install openssl ca-certificates linux-headers-amd64 python3 python3-pip python3-openssl python3-apt && pip3 install ansible
+```
+##### CentOS 7
 
-    ```yaml
-    container_network_mtu: 1400 # Set the desired MTU for containers to use
-    ```
+Please ensure the following has been run on each server.
 
-5. IPv6 and container nodes
+```bash
+yum -y update && yum -y install epel-release kernel-headers && yum -y install ansible
+```
 
-    Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer on a separate virtual machine, or by configuring the controller to proxy ipv6 traffic.
+Additionally, we require selinux to be enabled on CentOS 7.
 
-    For the time being, our installer will disable ipv6 directly on the node. However, we recommend also cleaning out the `/etc/sysconfig/network-scripts/ifcfg-*` files to remove any ipv6 specific settings, and setting `IPV6INIT=no`.
+<details>
+<summary>How to enable selinux</summary>
+<ul>
+<li> Check if it's enabled and active by running: <code>sestatus</code></li>
+<li>
+    If <code>SELinux status:</code> is not <code>enabled</code>, then please
+    <ul>
+        <li>Edit <code>/etc/selinux/config</code> and set <code>SELINUX=enforcing</code></li>
+        <li><code>touch /.autorelabel</code></li>
+        <li><code>reboot</code></li>
+    </ul>
+</li>
+</ul>
+</details>
 
-    We recommend performing this step prior to running this ansible package.
+
+#### Network MTU Settings
+
+If you're using a setting other than the default `1500`, please add the following to the main `vars:` section of your `inventory.yml` file:
+
+```yaml
+container_network_mtu: 1400 # Set the desired MTU for containers to use
+```
+
+#### IPv6 for Container Nodes
+
+Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer on a separate virtual machine, or by configuring the controller to proxy ipv6 traffic.
+
+For the time being, our installer will disable ipv6 directly on the node. However, we recommend also cleaning out the `/etc/sysconfig/network-scripts/ifcfg-*` files to remove any ipv6 specific settings, and setting `IPV6INIT=no`.
+
+We recommend performing this step prior to running this ansible package.
 
 ***
 ## Running
@@ -137,6 +161,17 @@ This will ensure you have the most recent version of ansible.
 
 </p>
 </details>
+
+## Enable Swap Limit
+
+In order to allow swap limitations set on containers, you need to perform the following on each node:
+
+1) Modify the file `/etc/default/grub`
+2) Add `cgroup_enable=memory swapaccount=1` to the existing `GRUB_CMDLINE_LINUX_DEFAULT` setting
+3) run `update-grub`
+4) reboot
+
+_Note: This can add about 1% of overhead._
 
 ## Troubleshooting
 ### NetworkManager Hostname Error

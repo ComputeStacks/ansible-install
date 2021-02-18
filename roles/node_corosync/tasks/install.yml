@@ -1,7 +1,11 @@
 ---
 - name: install packages
-  yum:
-    name: ['pacemaker', 'haveged', 'pcs', 'corosync']
+  package:
+    name:
+      - pacemaker
+      - haveged
+      - pcs
+      - corosync
     state: present
 
 - name: ensure directories exists
@@ -44,14 +48,26 @@
   systemd:
     name: corosync
     enabled: yes
-    state: started
+    state: restarted
 
 - name: run pacemaker
   systemd:
     name: pacemaker
     enabled: yes
-    state: started
+    state: restarted
 
-# Activate only if defaults are not in use.
-- include_tasks: activate.yml
+- name: set stonith
+  command: pcs property set stonith-enabled=false
+  run_once: true
   
+- name: set no-quorum-policy
+  shell: pcs property set no-quorum-policy=ignore
+  run_once: true
+  vars:
+    ansible_ssh_pipelining: no
+
+- include_tasks: platforms/generic.yml
+  when: "cloud_platform == 'generic'"
+
+- include_tasks: platforms/digitalocean.yml
+  when: "cloud_platform == 'digitalocean'"

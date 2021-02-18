@@ -1,0 +1,32 @@
+---
+##
+# Required for postgresql12-devel
+# See: https://qiita.com/tom-sato/items/b5f1263911fdedd5e81b
+- name: install centos-release-scl
+  yum:
+    name: centos-release-scl
+    state: present
+
+- name: setup yum
+  yum:
+    name: "{{ psql_yum_repo_url }}"
+    state: present
+
+# devel package is required to install the python library, used by ansible.
+- name: install packages
+  yum:
+    name: ['postgresql{{ psql_version }}-server','postgresql{{ psql_version }}-contrib', 'postgresql{{ psql_version }}-devel', 'python-psycopg2']
+    state: present
+
+# - name: install psql python library
+#   pip:
+#     name: psycopg2
+#   when: ansible_facts['distribution_major_version'] == "7"
+
+- name: link pg_config
+  file:
+    src: "/usr/pgsql-{{ psql_version }}/bin/pg_config"
+    dest: /usr/bin/pg_config
+    owner: root
+    group: root
+    state: link

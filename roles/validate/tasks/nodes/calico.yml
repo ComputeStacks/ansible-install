@@ -18,6 +18,7 @@
       community.general.docker_container:
         name: portal
         state: absent
+        container_default_behavior: compatibility
     - name: attempt calico recovery
       shell: run_calico >/dev/null 2>&1
       ignore_errors: yes

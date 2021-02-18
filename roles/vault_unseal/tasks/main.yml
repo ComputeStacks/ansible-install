@@ -4,6 +4,8 @@
   register: vault_sealed
   ignore_errors: yes
   no_log: True
+  vars:
+    ansible_ssh_pipelining: no
 
 - include_tasks: unseal.yml
   when: vault_sealed is failed

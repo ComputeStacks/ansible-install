@@ -1,11 +1,22 @@
 ---
 all:
-  vars:
+  vars:    
     license_key: "" # https://accounts.computestacks.com/store/computestacks
     global_region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
+    ansible_python_interpreter: /usr/bin/python # Debian: /usr/bin/python3
+    selinux: false # For CentOS, set to true.
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
+
+    ##
+    # Cloud Platform Specifics
+    # Define what cloud platform you're running on.
+    #
+    # Please leave commented out unless you're running on digital ocean.
+    #
+    # cloud_platform: "generic" # digitalocean
+    # platform_do_token: "" # DigitalOcean Personal Access token to enable Floating IP Migration
 
     ##
     # Container Network

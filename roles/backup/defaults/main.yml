@@ -4,6 +4,10 @@ backup_path: "/var/nfsshare/volume_backups"
 config_directory: "/etc/computestacks"
 iptables_script: "{{ config_directory }}/iptables"
 
+#if ansible_distribution == 'Debian'
+nfs_fs_user: "{% if ansible_distribution == 'CentOS' %}nfsnobody{% else %}nobody{% endif %}"
+nfs_fs_group: "{% if ansible_distribution == 'CentOS' %}nfsnobody{% else %}nogroup{% endif %}"
+
 ##
 # ComputeStacks Bastion Portal
 enable_support_ip: true

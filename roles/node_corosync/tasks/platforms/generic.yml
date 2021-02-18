@@ -1,14 +1,4 @@
 ---
-- name: set stonith
-  command: pcs property set stonith-enabled=false
-  run_once: true
-  
-- name: set no-quorum-policy
-  shell: pcs property set no-quorum-policy=ignore
-  run_once: true
-  vars:
-    ansible_ssh_pipelining: no
-
 - name: create vip without interface
   command: "pcs resource create VIP ocf:heartbeat:IPaddr2 ip={{ floating_ip }} cidr_netmask={{ floating_ip_netmask | int }}"
   when:

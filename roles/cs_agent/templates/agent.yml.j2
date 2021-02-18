@@ -19,5 +19,10 @@ backups:
       user: "{{ backup_nfs_ssh_user }}" # SSH key used to connect to NFS server
       port: "{{ backup_nfs_ssh_port }}"
       keyfile: "{{ backup_nfs_ssh_keyfile }}" # SSH key used to connect to NFS server
+{% if ansible_distribution == 'Debian' %}
+    fs:
+      user: nobody
+      group: nogroup
+{% endif %}
 docker:
   version: "{{ docker_api_version }}"

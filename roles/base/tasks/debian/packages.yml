@@ -1,0 +1,40 @@
+---
+- name: Remove conflicting packages
+  package:
+    name: ['ufw', 'ntp']
+    state: absent
+
+- name: Install base packages
+  apt:
+    name:
+      - apparmor
+      - openssl
+      - vim
+      - dnsutils
+      - gnupg2
+      - ca-certificates
+      - traceroute
+      - sysstat
+      - chrony
+      - curl
+      - wget
+      - tree
+      - iptables
+      - jq
+      - whois
+      - mosh
+      - socat
+      - python-openssl
+      - python3-docker
+      - git
+      - linux-headers-amd64
+      - sudo
+      - apt-transport-https
+      - gnupg-agent
+      - software-properties-common
+    state: present  
+
+- name: install nfs client tools
+  apt:
+    name: nfs-common
+  when: "'nodes' in group_names or 'backup_server' in group_names"

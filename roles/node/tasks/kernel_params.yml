@@ -2,42 +2,42 @@
 - name: Set vm.max_map_count
   sysctl:
     name: vm.max_map_count
-    value: 262144
+    value: "262144"
     state: present
     reload: yes
 
 - name: Set nf_conntrack
   sysctl:
     name: net.netfilter.nf_conntrack_max
-    value: 1000000
+    value: "1000000"
     state: present
     reload: yes
 
 - name: "Set net.core.netdev_max_backlog"
   sysctl:
     name: net.core.netdev_max_backlog
-    value: 30000
+    value: "30000"
     state: present
     reload: yes
 
 - name: "Set net.core.rmem_max"
   sysctl:
     name: net.core.rmem_max
-    value: 134217728
+    value: "134217728"
     state: present
     reload: yes
 
 - name: "Set net.core.wmem_max"
   sysctl:
     name: net.core.wmem_max
-    value: 134217728
+    value: "134217728"
     state: present
     reload: yes
 
 - name: "Set net.ipv4.tcp_max_syn_backlog"
   sysctl:
     name: net.ipv4.tcp_max_syn_backlog
-    value: 3240000
+    value: "3240000"
     state: present
     reload: yes
 
@@ -58,14 +58,14 @@
 - name: "Set net.core.somaxconn"
   sysctl:
     name: net.core.somaxconn
-    value: 500
+    value: "500"
     state: present
     reload: yes
 
 - name: "Set fs.file-max"
   sysctl:
     name: fs.file-max
-    value: 1000000
+    value: "1000000"
     state: present
     reload: yes
 

@@ -1,2 +1,4 @@
 ---
-# defaults file for haproxy
+# https://haproxy.debian.net/#?distribution=Debian&release=buster&version=2.2
+haproxy_deb_key: "https://haproxy.debian.net/bernat.debian.org.gpg"
+haproxy_deb_repo: "deb http://haproxy.debian.net buster-backports-2.2 main"

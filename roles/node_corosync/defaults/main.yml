@@ -1,4 +1,5 @@
 ---
+cloud_platform: "generic"
 enable_floating_ip: true
 
 global_region_name: "dev"
@@ -15,3 +16,7 @@ etcd_listen_ip: "127.0.0.1"
 floating_ip: 0.0.0.0
 floating_ip_netmask: 32
 floating_ip_interface: ""
+
+##
+# CloudPlatform Specifics
+platform_do_token: ""

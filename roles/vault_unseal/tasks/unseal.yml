@@ -10,5 +10,5 @@
 
 - name: unseal with keys
   shell: |
-    docker exec -it vault-bootstrap vault operator unseal {{ item.stdout }}
+    docker exec -i vault-bootstrap vault operator unseal {{ item.stdout }}
   with_items: "{{unseal_keys.results}}"

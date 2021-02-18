@@ -1,6 +1,10 @@
 ---
-- name: Load service state
-  service_facts:
+- include_tasks: install.yml
+  when:
+    - ansible_distribution == 'CentOS'
+    - ansible_facts.services['postgresql-13.service'] is not defined
 
 - include_tasks: install.yml
-  when: ansible_facts.services['postgresql-13.service'] is not defined
+  when:
+    - ansible_distribution == 'Debian'
+    - ansible_facts.services['postgresql.service'] is not defined

@@ -79,3 +79,14 @@
     group: root
     owner: root
     mode: 0400
+
+- name: Setup local etcdctl
+  template:
+    src: etcdctl.j2
+    dest: /etc/profile.d/etcdctl.sh
+
+- name: Enable and start etcd
+  service:
+    name: etcd
+    enabled: yes
+    state: restarted

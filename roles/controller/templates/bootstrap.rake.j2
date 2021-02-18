@@ -150,6 +150,13 @@ floating_ip = "{{ floating_ip }}"
   Feature.setup!
   Feature.find_by(name: 'updated_cr_cert')&.update_column :active, true
 
+  Setting.registry_selinux # Load and create setting
+{% if selinux %}
+  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: false
+{% else %}
+  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: true
+{% endif %}
+
   puts "Done."
 
 end

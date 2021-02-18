@@ -1,6 +1,10 @@
 ---
-- name: Load service state
-  service_facts:
+- include_tasks: install_centos.yml
+  when:
+    - ansible_distribution == 'CentOS' 
+    - ansible_facts.services['node_exporter.service'] is not defined
 
-- include_tasks: install.yml
-  when: ansible_facts.services['node_exporter.service'] is not defined
+- include_tasks: install_debian.yml
+  when:
+    - ansible_distribution == 'Debian' 
+    - ansible_facts.services['prometheus-node-exporter.service'] is not defined

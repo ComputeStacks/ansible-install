@@ -1,0 +1,17 @@
+---
+- name: add haproxy key
+  ansible.builtin.apt_key:
+    url: "{{ haproxy_deb_key }}"
+    state: present
+
+- name: add haproxy repo
+  ansible.builtin.apt_repository:
+    repo: "{{ haproxy_deb_repo }}"
+    state: present
+    filename: haproxy
+
+- name: install packages
+  apt:
+    name: "haproxy=2.2.*"
+    state: present
+    update_cache: yes

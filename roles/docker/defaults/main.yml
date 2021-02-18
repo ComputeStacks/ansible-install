@@ -1,4 +1,8 @@
 ---
+selinux: true
 enable_ipv6: true
 lock_docker_version: true
 docker_ipv6_local_net: "2001:db8:1::/64"
+
+docker_deb_key: "https://download.docker.com/linux/debian/gpg"
+docker_deb_repo: "deb [arch=amd64] https://download.docker.com/linux/debian buster stable"

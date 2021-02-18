@@ -1,7 +1,17 @@
 ---
 - include_tasks: preflight.yml
 
-- include_tasks: packages.yml
+- name: Load service state
+  service_facts:
+
+- include_tasks: centos7/packages.yml
+  when: ansible_distribution == 'CentOS'
+
+- include_tasks: debian/packages.yml
+  when: ansible_distribution == 'Debian'
+
+- include_tasks: debian/setup.yml
+  when: ansible_distribution == 'Debian'
 
 - include_tasks: centos7/kernel.yml
   when: is_centos_7

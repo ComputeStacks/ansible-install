@@ -1,7 +1,4 @@
 ---
-- name: Load service state
-  service_facts:
-
 - include_tasks: install.yml
   when: ansible_facts.services['dnsmasq.service'] is not defined
 

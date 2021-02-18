@@ -4,33 +4,14 @@
     name: portal
   register: portal_container
 
-- name: attempt portal recovery
-  shell: cstacks run >/dev/null 2>&1
-  ignore_errors: yes
-  no_log: True
-  vars:
-    ansible_ssh_pipelining: no
+- name: Controller missing
+  fail:
+    msg: "Controller missing, try running: cstacks run."
   when: not portal_container.exists
 
-- name: recheck controller
-  block:
-    - name: attempt to start portal container
-      community.general.docker_container:
-        name: portal
-        state: started
-    - community.general.docker_container_info:
-        name: portal
-      register: portal_container_final
-    - name: portal does not exist
-      fail:
-        msg: Failed to boot controller
-      when: not portal_container_final.exists
-    - name: portal not running
-      fail:
-        msg: Failed to boot controller
-      when:
-        - portal_container_final.exists
-        - "portal_container.container['State']['Status'] != 'running'"
+- name: Controller offline
+  fail:
+    msg: "Controller offline, try running: docker start portal"
   when:
     - portal_container.exists
     - "portal_container.container['State']['Status'] != 'running'"

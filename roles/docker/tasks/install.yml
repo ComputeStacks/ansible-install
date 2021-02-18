@@ -1,26 +1,9 @@
 ---
-- name: Install docker dependencies
-  yum:
-    name: ['yum-utils', 'device-mapper-persistent-data', 'lvm2']
-    state: present
-    update_cache: true
+- include_tasks: centos/install.yml
+  when: ansible_distribution == 'CentOS'
+- include_tasks: debian/install.yml
+  when: ansible_distribution == 'Debian'
 
-- name: Install docker repo
-  command: yum-config-manager -y --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-  args:
-    warn: false
-
-- name: Install Docker
-  yum:
-    name: ['docker-ce', 'docker-ce-cli', 'containerd.io']
-    state: present
-
-# https://access.redhat.com/solutions/98873
-- name: Lock docker version
-  command: yum versionlock docker-ce docker-ce-cli containerd.io
-  args:
-    warn: false
-  when: lock_docker_version
 
 - name: Ensure docker is running
   service:

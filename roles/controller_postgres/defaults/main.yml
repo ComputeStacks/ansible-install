@@ -2,8 +2,19 @@
 postgres_user: computestacks
 postgres_cs_password: "ch4ng3m3" # pwgen -s 32 1
 
-yum_repo_url: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+psql_yum_repo_url: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+psql_deb_repo_url: "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main"
+psql_deb_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
 
 psql_version: "13"
-psql_base_path: "/usr/pgsql-{{ psql_version }}"
-psql_data_path: "/var/lib/pgsql/{{ psql_version }}"
+
+centos_pg_initdb: "/usr/pgsql-{{ psql_version }}/bin/postgresql-{{ psql_version }}-setup initdb"
+debian_pg_initdb: "/usr/lib/postgresql/{{ psql_version }}/bin/initdb"
+
+psql_initdb_cmd: "{% if ansible_distribution == 'CentOS' %}{{ centos_pg_initdb }}{% else %}{{ debian_pg_initdb }}{% endif %}"
+
+psql_centos_data: "/var/lib/pgsql/{{ psql_version }}/data"
+psql_debian_data: "/etc/postgresql/{{ psql_version }}/main"
+psql_data_path: "{% if ansible_distribution == 'CentOS' %}{{ psql_centos_data }}{% else %}{{ psql_debian_data }}{% endif %}"
+
+psql_service_name: "{% if ansible_distribution == 'CentOS' %}postgresql-{{ psql_version }}{% else %}postgresql{% endif %}"

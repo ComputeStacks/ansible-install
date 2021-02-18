@@ -35,17 +35,3 @@
     src: etcd.service
     dest: /usr/lib/systemd/system/etcd.service
 
-- name: Copy certificates if specified
-  include_tasks: vault-certs.yml
-
-
-- name: Setup local etcdctl
-  template:
-    src: etcdctl.j2
-    dest: /etc/profile.d/etcdctl.sh
-
-- name: Enable and start etcd
-  service:
-    name: etcd
-    enabled: yes
-    state: started

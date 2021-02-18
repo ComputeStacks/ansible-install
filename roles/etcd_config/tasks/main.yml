@@ -1,6 +1,11 @@
 ---
-- name: Load service state
-  service_facts:
-
 - include_tasks: install.yml
   when: ansible_facts.services['etcd.service'] is not defined
+
+- name: Check if certs exist
+  stat:
+    path: "{{ etcd_cert_file }}"
+  register: cert_configured
+
+- include_tasks: vault-certs.yml
+  when: cert_configured.stat.exists == False

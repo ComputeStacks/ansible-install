@@ -1,7 +1,8 @@
-- name: install
-  yum:
-    name: haproxy22
-    state: present
+---
+- include_tasks: centos/install.yml
+  when: ansible_distribution == 'CentOS'
+- include_tasks: debian/install.yml
+  when: ansible_distribution == 'Debian'
 
 - name: create certificate directory
   file:
@@ -13,42 +14,7 @@
     src: default.http
     dest: '/etc/haproxy/default.http'
 
-- name: stats directory
-  file:
-    path: /run/haproxy
-    state: directory
-    owner: haproxy
-    group: haproxy
-
-- name: persist stats
-  copy:
-    src: haproxy.conf
-    dest: /usr/lib/tmpfiles.d/haproxy.conf
-
-- name: create lib
-  file:
-    path: /var/lib/haproxy
-    state: directory
-    owner: haproxy
-    group: haproxy
-
-- name: selinux (haproxy_connect_any)
-  shell: setsebool -P haproxy_connect_any 1
-  vars:
-    ansible_ssh_pipelining: no
-
-- name: selinux (cluster_use_execmem)
-  shell: setsebool -P cluster_use_execmem 1
-  vars:
-    ansible_ssh_pipelining: no
-
-# Ensure that centos nodes have same structure as debian/ubuntu
-- name: copy error files
-  shell: rsync -a /usr/share/haproxy/ /etc/haproxy/errors/
-  vars:
-    ansible_ssh_pipelining: no
-
-- name: start
+- name: start and enable haproxy
   service:
     name: haproxy
     state: started

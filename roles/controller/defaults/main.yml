@@ -1,4 +1,5 @@
 ---
+selinux: true
 license_key: ""
 global_region_name: "dev" # set in inventory
 lb_name: "{{ global_region_name }}-lb"

@@ -1,4 +1,50 @@
 ---
+- name: check for managed etchosts
+  stat:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+  register: managed_hosts #.stat.exists == False
+
+##
+# Add to Managed Hosts File, if applicable, to survive reboots
+- name: Add controller to nodes
+  lineinfile:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+    regexp: "{{ cs_portal_domain }}"
+    line: "{{ hostvars[groups['controller'][0]].node_ip }} {{ cs_portal_domain }}"
+  when: 
+    - "'nodes' in group_names"
+    - managed_hosts.stat.exists
+
+- name: Add controller to metrics
+  lineinfile:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+    regexp: "{{ cs_portal_domain }}"
+    line: "{{ hostvars[groups['controller'][0]].metrics_ip_address }} {{ cs_portal_domain }}"
+  when: 
+    - "'metrics' in group_names"
+    - "'controller' not in group_names"
+    - managed_hosts.stat.exists
+
+- name: Add metrics to nodes
+  lineinfile:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+    regexp: "{{ cs_metrics_domain }}"
+    line: "{{ hostvars[groups['metrics'][0]].node_endpoint }} {{ cs_metrics_domain }}"
+  when: 
+    - "'nodes' in group_names"
+    - managed_hosts.stat.exists
+
+- name: Add metrics to controller
+  lineinfile:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+    regexp: "{{ cs_metrics_domain }}"
+    line: "{{ hostvars[groups['metrics'][0]].controller_endpoint }} {{ cs_metrics_domain }}"
+  when: 
+    - "'controller' in group_names"
+    - managed_hosts.stat.exists
+
+##
+# Add to current etc hosts
 - name: Add controller to nodes
   lineinfile:
     path: /etc/hosts
