@@ -50,7 +50,7 @@
     ansible_ssh_pipelining: no
   when:
     - "acme_challenge_method == 'cloudflare'"
-    - " acme_cf_zone == ''"
+    - "acme_cf_zone == ''"
 
 - name: Request Certificate (Cloudflare)
   shell: "{{ acme_cert_cf_issue_cmd }}"
@@ -62,7 +62,7 @@
     ansible_ssh_pipelining: no
   when:
     - "acme_challenge_method == 'cloudflare'"
-    - " acme_cf_zone != ''"
+    - "acme_cf_zone != ''"
 
 - name: Install Certificate
   shell: "{{ acme_nginx_cert_install }}"
