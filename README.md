@@ -63,7 +63,7 @@ b) Backup jobs are assigned to the node by their hostname. If there is a mismatc
 Install the following packages
 
 ```bash
-apt update && apt -y install openssl ca-certificates linux-headers-amd64 python3 python3-pip python3-openssl python3-apt && pip3 install ansible
+apt update && apt -y install openssl ca-certificates linux-headers-amd64 python3 python3-pip python3-openssl python3-apt python3-setuptools python3-wheel && pip3 install ansible
 ```
 ##### CentOS 7
 
@@ -172,6 +172,28 @@ In order to allow swap limitations set on containers, you need to perform the fo
 4) reboot
 
 _Note: This can add about 1% of overhead._
+
+## Use DNS Validation
+
+We support DNS challenge validation via CloudFlare during the initial provisioning process. 
+
+You will need the following information to enable this:
+* API Token with write access to the zone
+* Account ID
+* Zone ID (Optional)
+
+Both the Account ID and Zone ID can be found on your main domain overview page in CloudFlare.
+
+You can optionally exclude the Zone ID, however you will then need to enable read/write access to _all_ zones for the API Token.
+
+Once you have that information, update the following values in the `inventory.yml` file:
+
+```
+acme_challenge_method: "cloudflare"
+acme_cf_token: "" # API Token
+acme_cf_account: "" # Account ID
+acme_cf_zone: "" # Zone ID (optional)
+```
 
 ## Troubleshooting
 ### NetworkManager Hostname Error

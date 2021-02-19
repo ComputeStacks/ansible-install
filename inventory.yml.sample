@@ -4,7 +4,7 @@ all:
     license_key: "" # https://accounts.computestacks.com/store/computestacks
     global_region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
-    ansible_python_interpreter: /usr/bin/python # Debian: /usr/bin/python3
+    ansible_python_interpreter: /usr/bin/python3 # CentOS: /usr/bin/python
     selinux: false # For CentOS, set to true.
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
@@ -66,7 +66,8 @@ all:
     # acme_challenge_method: "cloudflare" # default is: 'http'
     # acme_cf_token: "" # API Token
     # acme_cf_account: "" # Account ID
-    #
+    # acme_cf_zone: "" # Zone ID (Optional)
+    
     # If you would prefer LetsEncrypt, set:
     # use_zerossl: false # default is: true
 

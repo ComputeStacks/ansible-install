@@ -21,3 +21,11 @@ has_old_kernel: "{{ ansible_kernel is version('5', '<') }}"
 # Cloud Platform Specifics
 cloud_platform: "generic"
 platform_do_token: "" # DigitalOcean Personal Access token
+
+##
+# CloudFlare DNS Challenge
+cloudflare_base_api: "https://api.cloudflare.com/client/v4"
+acme_challenge_method: "http" # or cloudflare
+acme_cf_token: "" # API Token
+acme_cf_account: "" # Account ID
+acme_cf_zone: "" # Zone ID (Optional)

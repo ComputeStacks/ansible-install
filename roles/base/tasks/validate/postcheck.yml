@@ -1,0 +1,40 @@
+---
+# Checks that can only be done after base packages have been installed.
+
+# Will fail and halt if API key is invalid
+- name: Validate CloudFlare Token
+  uri:
+    url: "{{ cloudflare_base_api }}/user/tokens/verify"
+    headers:
+      Authorization: "Bearer {{ acme_cf_token }}"
+      Content-Type: "application/json"
+  when: "acme_challenge_method == 'cloudflare'"
+  run_once: true
+
+- name: Ensure Access to CF Account
+  block:
+    - uri:
+        url: "{{ cloudflare_base_api }}/zones?account.id={{ acme_cf_account }}"
+        headers:
+          Authorization: "Bearer {{ acme_cf_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: cf_account_zones
+    - fail:
+        msg: Unable to list CloudFlare Zones
+      when: cf_account_zones.json.result_info.total_count|int < 1
+  when:
+    - "acme_challenge_method == 'cloudflare'" 
+    - "acme_cf_zone == ''"
+  run_once: true
+
+- name: Ensure Access to CF Zone
+  uri:
+    url: "{{ cloudflare_base_api }}/zones/{{ acme_cf_zone }}"
+    headers:
+      Authorization: "Bearer {{ acme_cf_token }}"
+      Content-Type: "application/json"
+  when:
+    - "acme_challenge_method == 'cloudflare'" 
+    - "acme_cf_zone != ''"
+  run_once: true

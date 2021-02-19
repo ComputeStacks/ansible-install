@@ -58,3 +58,17 @@
   when:
     - "cloud_platform == 'digitalocean'"
     - "platform_do_token == ''"
+
+- name: Ensure CloudFlare Token is present
+  fail:
+    msg: Missing CloudFlare API Token
+  when:
+    - "acme_challenge_method == 'cloudflare'"
+    - "acme_cf_token == ''"
+
+- name: Ensure CloudFlare Account ID is present
+  fail:
+    msg: Missing CloudFlare API Token
+  when:
+    - "acme_challenge_method == 'cloudflare'"
+    - "acme_cf_token == ''"

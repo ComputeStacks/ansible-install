@@ -40,6 +40,7 @@ acme_challenge_method: "http" # or cloudflare
 # Cloudflare DNS Challenge
 acme_cf_token: "" # API Token
 acme_cf_account: "" # Account ID
+acme_cf_zone: "" # Zone ID (Optional)
 
 acme_cert_request: "{% if 'controller' in group_names %}-d {{ cs_portal_domain }}{% endif %}{% if 'registry' in group_names %} -d {{ cs_registry_domain }}{% endif %}{% if 'metrics' in group_names %} -d {{ cs_metrics_domain }}{% endif %}"
 
