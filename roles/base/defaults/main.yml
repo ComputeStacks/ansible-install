@@ -29,3 +29,10 @@ acme_challenge_method: "http" # or cloudflare
 acme_cf_token: "" # API Token
 acme_cf_account: "" # Account ID
 acme_cf_zone: "" # Zone ID (Optional)
+
+##
+# CS Settings
+# Default User
+cs_admin_create: false # CS Support user is already created by default
+cs_admin_email: root@localhost
+cs_admin_password: changeme

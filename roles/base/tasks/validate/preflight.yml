@@ -72,3 +72,15 @@
   when:
     - "acme_challenge_method == 'cloudflare'"
     - "acme_cf_token == ''"
+
+- name: Ensure default admin credentials are not present
+  block:
+    - name: ensure admin email present
+      fail:
+        msg: Missing cs_admin_email
+      when: "cs_admin_email == '' or cs_admin_email == 'root@localhost'"
+    - name: ensure admin password present
+      fail:
+        msg: Missing cs_admin_password
+      when: "cs_admin_password == '' or cs_admin_password == 'changeme'"
+  when: cs_admin_create
