@@ -59,7 +59,7 @@
     line: "{{ hostvars[groups['controller'][0]].metrics_ip_address }} {{ cs_portal_domain }}"
   when: 
     - "'metrics' in group_names"
-    - "'controller' not in group_names" 
+    - "'controller' not in group_names"
 
 - name: Add metrics to nodes
   lineinfile:

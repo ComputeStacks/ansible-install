@@ -1,25 +1,20 @@
 ---
-- name: setup directories
-  file:
-    path: "{{ item }}"
-    state: directory
-  loop:
-    - "{{ config_directory }}"
-    - "{{ certificates_directory }}"
-    - "{{ data_directory }}"
-    - "{{ backups_directory }}"
-    - "{{ ssh_keys_directory }}"
-    - "{{ rake_tasks_directory }}"
-    - "{{ branding_directory }}"
-    - "{{ registry_data_path }}"
+- import_tasks: install.yml
+  tags: ['never', 'bootstrap']
 
-- include_tasks: ssh.yml
-- include_tasks: ssl.yml
+# ##
+# # Generate Bootstrap
+- block:
+    - name: Slurp and store wildcared cert
+      slurp:
+        src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
+      register: lb_shared_cert_raw
 
-- name: check if app installed
-  stat:
-    path: "{{ cs_environmental_file }}"
-  register: app_initialized
-  
-- include_tasks: configuration.yml
-  when: app_initialized.stat.exists == False
+    - name: Decode certificate for assignment
+      set_fact:
+        lb_shared_cert: "{{ lb_shared_cert_raw.content | b64decode }}"
+    - name: Create bootstrap file
+      template:
+        src: bootstrap.rake
+        dest: "{{ rake_tasks_directory }}/bootstrap.rake"
+  tags: ['never', 'bootstrap', 'addnode']

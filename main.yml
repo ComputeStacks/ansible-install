@@ -1,7 +1,12 @@
 ---
+##
+# Tags
+# * bootstrap | Creating a brand new installation from scratch
+# * addnode | Adding a new node to an existing Availability Zone
+
 - hosts:
     - all
-  tags: ['never', 'bootstrap']
+  tags: ['never', 'bootstrap', 'addnode']
   roles:
     - base
     - node_exporter
@@ -22,7 +27,6 @@
 
 - hosts:
     - controller
-  tags: ['never', 'bootstrap']
   roles:
     - controller_postgres
     - controller_redis
@@ -32,59 +36,82 @@
 
 - hosts: 
     - controller
-  tags: ['never', 'vault_unseal']
+  tags: ['never', 'vault_unseal', 'bootstrap', 'addnode']
   roles: 
     - vault_unseal
 
 - hosts:
     - backup_server
-  tags: ['never', 'bootstrap']
   roles:
     - backup
+  any_errors_fatal: true
 
+- hosts:
+    - all
+  tags: ['never', 'bootstrap', 'addnode']
+  roles:
+    - iptables
+    - ssh_transfer
+  any_errors_fatal: true
+
+# ##
+# # Etcd
+- hosts:
+    - nodes
+  tags: ['never', 'bootstrap', 'addnode']
+  roles:
+    - andrewrothstein.etcd
+  any_errors_fatal: true
+- hosts:
+    - nodes
+  serial: 1 # only provision 1 node at a time when adding nodes
+  tags: ['never', 'addnode']
+  roles:
+    - etcd_config
+  any_errors_fatal: true
 - hosts:
     - nodes
   tags: ['never', 'bootstrap']
+  roles:
+    - etcd_config
+  any_errors_fatal: true
+
+- hosts:
+    - nodes
+  tags: ['never', 'bootstrap', 'addnode']
   roles:
     - node_dnsmasq
     - docker
     - cadvisor
     - haproxy
     - loki_driver
-    - andrewrothstein.etcd
-    - etcd_config
     - consul
     - node_docker
     - node
-    - node_calico
     - cs_agent
+    - node_corosync
+  any_errors_fatal: true
+
+- hosts:
+    - nodes
+  roles:
+    - node_calico
+  any_errors_fatal: true
 
 - hosts:
     - metrics
-  tags: ['never', 'bootstrap']
   roles:
     - loki
     - prometheus
     - alertmanager
-
-- hosts:
-    - all
-  tags: ['never', 'bootstrap']
-  roles:
-    - ssh_transfer
-    - iptables
-
-- hosts:
-    - nodes
-  tags: ['never', 'bootstrap']
-  roles:
-    - node_corosync
+  any_errors_fatal: true
 
 - hosts:
     - controller
-  tags: ['never', 'bootstrap']
+  tags: ['never', 'bootstrap', 'addnode']
   roles:
     - controller_bootstrap
+  any_errors_fatal: true
 
 - hosts: 
     - all
@@ -92,8 +119,9 @@
   roles: 
     - validate
 
+# Reboot all nodes
 - hosts:
-    - all
+    - nodes
   tags: ['never', 'bootstrap']
   tasks:
     - debug:
@@ -104,3 +132,19 @@
         reboot_timeout: 1
       ignore_errors: yes
       no_log: True
+
+# Reboot only new nodes
+- hosts:
+    - nodes
+  tags: ['never', 'addnode']
+  tasks:
+    - block:
+        - debug:
+            msg: "Installation complete, new nodes are now rebooting."
+        - name: reboot
+          reboot:
+            msg: "Ansible rebooting to finalize setup"
+            reboot_timeout: 1
+          ignore_errors: yes
+          no_log: True
+      when: etcd_initial_cluster_state == 'existing'

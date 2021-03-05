@@ -1,8 +1,34 @@
 ---
-- name: check if portal is configured
-  docker_container_info:
-    name: portal
-  register: cs_exists
+- name: check if database bootstrapped
+  stat:
+    path: "{{ rake_tasks_directory }}/.db_provisioned"
+  register: db_provisioned
+  
+- name: database
+  shell: /usr/local/bin/cstacks bootstrap-db
+  no_log: True
+  vars:
+    ansible_ssh_pipelining: no
+  when: db_provisioned.stat.exists == False
 
-- include_tasks: cstacks.yml
-  when: not cs_exists.exists
+- name: check if portal is running
+  community.general.docker_container_info:
+    name: portal
+  register: portal_container
+
+- name: stop portal
+  community.general.docker_container:
+    name: portal
+    state: absent
+    container_default_behavior: compatibility
+  when: portal_container.exists
+
+- name: run bootstrap script
+  shell: /usr/local/bin/cstacks bootstrap-app
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: boot portal
+  shell: /usr/local/bin/cstacks run
+  vars:
+    ansible_ssh_pipelining: no

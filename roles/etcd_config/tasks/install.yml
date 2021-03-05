@@ -24,14 +24,29 @@
     state: directory
     owner: etcd
     group: etcd
+    mode: '0700'
 
-- name: Write etcd config file
-  template:
-    src: etcd.conf.j2
-    dest: "{{ etcd_conf_dir }}/etcd.conf"
+- name: Check if etcd conf exists
+  stat:
+    path: "{{ etcd_conf_dir }}/etcd.conf"
+  register: existing_etcd_conf
+
+- block:
+    - name: Write etcd config file (new)
+      template:
+        src: etcd.conf.j2
+        dest: "{{ etcd_conf_dir }}/etcd.conf"
+      when: "etcd_initial_cluster_state == 'new'"
+
+    - name: Write etcd config file (existing)
+      template:
+        src: etcd-existing.conf.j2
+        dest: "{{ etcd_conf_dir }}/etcd.conf"
+      when: "etcd_initial_cluster_state == 'existing'"
+  when: existing_etcd_conf.stat.exists == False
 
 - name: Write etcd service
   copy:
     src: etcd.service
     dest: /usr/lib/systemd/system/etcd.service
-
+  notify: restart etcd

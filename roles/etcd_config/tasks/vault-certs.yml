@@ -71,6 +71,7 @@
     group: root
     owner: root
     mode: 0440
+  notify: restart etcd
 
 - name: Write client key
   copy:
@@ -79,14 +80,9 @@
     group: root
     owner: root
     mode: 0400
+  notify: restart etcd
 
 - name: Setup local etcdctl
   template:
     src: etcdctl.j2
     dest: /etc/profile.d/etcdctl.sh
-
-- name: Enable and start etcd
-  service:
-    name: etcd
-    enabled: yes
-    state: restarted

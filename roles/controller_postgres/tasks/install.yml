@@ -5,6 +5,7 @@
 - include_tasks: debian/packages.yml
   when: ansible_distribution == 'Debian'
 
+# TODO: 3/2/21 -- this produces an error on a fresh build.
 # Ignore errors, because it may already exist which produces an error we don't care about.
 - name: create initial database
   shell: "{{ psql_initdb_cmd }}"

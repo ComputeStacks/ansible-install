@@ -1,8 +1,39 @@
 ---
-- name: check if already configured
+- name: check if certs exist
   stat:
     path: "{{ docker_key_file }}"
-  register: is_configured
+  register: key_exists
 
-- include_tasks: install.yml
-  when: is_configured.stat.exists == False
+- include_tasks: certificates.yml
+  when: key_exists.stat.exists == False
+  
+- name: stop docker
+  service:
+    name: docker
+    state: stopped
+
+- name: create docker startup directory
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+  
+- name: create docker startup script
+  template:
+    src: docker-startup.conf.j2
+    dest: /etc/systemd/system/docker.service.d/startup.conf
+
+- name: reload systemd
+  systemd: daemon_reload=yes
+
+- name: create user for containers
+  user:
+    name: dockremap
+    uid: 1001
+    shell: /bin/false
+    create_home: no
+
+- name: start docker
+  service:
+    name: docker
+    state: started
+    enabled: yes

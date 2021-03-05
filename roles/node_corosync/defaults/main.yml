@@ -2,7 +2,9 @@
 cloud_platform: "generic"
 enable_floating_ip: true
 
-global_region_name: "dev"
+region_name: "dev"
+availability_zone_name: "{{ region_name }}-a"
+
 corosync_config_dir: /etc/corosync
 corosync_config_file: "{{ corosync_config_dir }}/corosync.conf"
 

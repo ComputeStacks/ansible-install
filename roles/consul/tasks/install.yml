@@ -14,6 +14,7 @@
   stat:
     path: "{{ consul_host_config_dir }}/config.json"
   register: consul_config_exists
+  delegate_to: "{{ groups['nodes'][0] }}"
 
 # Read the existing Key
 - name: read existing encryption key
@@ -28,6 +29,7 @@
       set_fact:
         consul_raw_key: "{{ consul_key_read.stdout }}"
   when: consul_config_exists.stat.exists == True
+  delegate_to: "{{ groups['nodes'][0] }}"
 
 - name: generate encryption key
   block:

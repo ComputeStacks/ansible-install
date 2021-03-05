@@ -23,20 +23,20 @@ scrape_configs:
     static_configs:
       - targets: ['{{ hostvars[groups['controller'][0]].metrics_ip_address }}:{{ cadvisor_port }}']
         labels:
-          region: {{ hostvars[groups['controller'][0]].global_region_name }}
+          region: {{ hostvars[groups['controller'][0]].availability_zone_name }}
           node: {{ hostvars[groups['controller'][0]].ansible_hostname }}
       {% if groups['metrics'][0] != groups['controller'][0] %}
 
       - targets: ['{{ hostvars[groups['metrics'][0]].ansible_default_ipv4.address }}:{{ cadvisor_port }}']
         labels:
-          region: {{ hostvars[groups['metrics'][0]].global_region_name }}
+          region: {{ hostvars[groups['metrics'][0]].availability_zone_name }}
           node: {{ hostvars[groups['metrics'][0]].ansible_hostname }}
       {% endif %}
       {% for server in groups['nodes'] %}
 
       - targets: ['{{ hostvars[server].metrics_ip_address }}:{{ cadvisor_port }}']
         labels:
-          region: {{ hostvars[server].global_region_name }}
+          region: {{ hostvars[server].availability_zone_name }}
           node: {{ hostvars[server].ansible_hostname }}
       {% endfor %}
 
@@ -44,27 +44,27 @@ scrape_configs:
     static_configs:
       - targets: ['{{ hostvars[groups['controller'][0]].metrics_ip_address }}:{{ node_exporter_port }}']
         labels:
-          region: {{ hostvars[groups['controller'][0]].global_region_name }}
+          region: {{ hostvars[groups['controller'][0]].availability_zone_name }}
           node: {{ hostvars[groups['controller'][0]].ansible_hostname }}
       {% if groups['metrics'][0] != groups['controller'][0] %}
 
       - targets: ['{{ hostvars[groups['metrics'][0]].ansible_default_ipv4.address }}:{{ node_exporter_port }}']
         labels:
-          region: {{ hostvars[groups['metrics'][0]].global_region_name }}
+          region: {{ hostvars[groups['metrics'][0]].availability_zone_name }}
           node: {{ hostvars[groups['metrics'][0]].ansible_hostname }}
       {% endif %}
       {% for server in groups['nodes'] %}
 
       - targets: ['{{ hostvars[server].metrics_ip_address }}:{{ node_exporter_port }}']
         labels:
-          region: {{ hostvars[server].global_region_name }}
+          region: {{ hostvars[server].availability_zone_name }}
           node: {{ hostvars[server].ansible_hostname }}
       {% endfor %}
       {% for server in groups['backup_server'] %}
 
       - targets: ['{{ hostvars[server].metrics_ip_address }}:{{ node_exporter_port }}']
         labels:
-          region: {{ hostvars[server].global_region_name }}
+          region: {{ hostvars[server].availability_zone_name }}
           node: {{ hostvars[server].ansible_hostname }}
       {% endfor %}
 
@@ -72,19 +72,19 @@ scrape_configs:
     static_configs:
       - targets: ['{{ hostvars[groups['controller'][0]].metrics_ip_address }}:{{ haproxy_stats_port }}']
         labels:
-          region: {{ hostvars[groups['controller'][0]].global_region_name }}
+          region: {{ hostvars[groups['controller'][0]].availability_zone_name }}
           node: {{ hostvars[groups['controller'][0]].ansible_hostname }}
       {% if groups['metrics'][0] != groups['controller'][0] %}
 
       - targets: ['{{ hostvars[groups['metrics'][0]].ansible_default_ipv4.address }}:{{ haproxy_stats_port }}']
         labels:
-          region: {{ hostvars[groups['metrics'][0]].global_region_name }}
+          region: {{ hostvars[groups['metrics'][0]].availability_zone_name }}
           node: {{ hostvars[groups['metrics'][0]].ansible_hostname }}
       {% endif %}
       {% for server in groups['nodes'] %}
 
       - targets: ['{{ hostvars[server].metrics_ip_address }}:{{ haproxy_stats_port }}']
         labels:
-          region: {{ hostvars[server].global_region_name }}
+          region: {{ hostvars[server].availability_zone_name }}
           node: {{ hostvars[server].ansible_hostname }}
       {% endfor %}

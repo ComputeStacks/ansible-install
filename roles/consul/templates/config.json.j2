@@ -19,7 +19,7 @@
   "cert_file": "/consul/config/ssl/server.crt",
   "client_addr": "{{ consul_listen_ip }}",
   "data_dir": "/consul/data",
-  "datacenter": "{{ global_region_name }}",
+  "datacenter": "{{ availability_zone_name }}",
   "disable_update_check": false,
   "domain": "consul",
   "enable_local_script_checks": false,

@@ -12,13 +12,16 @@
 {% endmacro -%}
 task bootstrap: :environment do
 
-  Rake::Task['install'].execute
-
-  region = Region.first
+  location = Location.find_by(name: "{{ region_name }}")
+  location = Location.create!(name: "{{ region_name }}") if location.nil?
+  region = Region.find_by name: "{{ availability_zone_name }}", location: location
+  region = Region.create!(name: "{{ availability_zone_name }}", location: location) if region.nil?
   if region.nil?
     puts "Error, region not available."
     return false
   end
+
+  Rake::Task['install'].execute
 
   puts "Setting General Settings..."
   {% if license_key != "" %}
@@ -41,28 +44,28 @@ task bootstrap: :environment do
   Setting.find_by(name: 'le_validation_server')&.update value: "{{ node_ip }}:3000"
 
   puts "Creating Metric Client"
+  mc = MetricClient.find_by(endpoint: "{{ prometheus_endpoint }}")
   mc = MetricClient.create!(
     endpoint: "{{ prometheus_endpoint }}",
     username: "{{ prometheus_username }}",
     password: "{{ prometheus_password }}"
-  ) unless MetricClient.where(endpoint: "{{ prometheus_endpoint }}").exists?
-  mc = MetricClient.first
+  ) if mc.nil?
 
   # Log Client is used by the controller
   # `loki_*` settings on the region are used by containers.
+  lc = LogClient.find_by(endpoint: "{{ loki_controller_endpoint }}")
   lc = LogClient.create!(
     endpoint: "{{ loki_controller_endpoint }}",
     username: "{{ loki_username }}",
     password: "{{ loki_password }}"
-  ) unless LogClient.where(endpoint: "{{ loki_controller_endpoint }}").exists?
-  lc = LogClient.first
+  ) if lc.nil?
+  
 
   if mc.nil? || lc.nil?
     raise "Missing Log or Metric Client"
   end
 
-  region.update name: "{{ global_region_name }}", 
-                metric_client: mc,
+  region.update metric_client: mc,
                 log_client: lc,
                 loki_endpoint: "{{ loki_node_endpoint }}"
   
@@ -85,14 +88,17 @@ task bootstrap: :environment do
   {%- endfor -%}
   {{ '' }}
   puts "Configuring Network..."
-  unless Network.where(cidr: '{{ calico_network }}').exists?
+  network = Network.find_by(cidr: '{{ calico_network }}')
+  if network
+    network.regions << region unless network.regions.include?(region)
+  else
     network = Network.create!(
       cidr: '{{ calico_network }}',
       is_public: false,
       is_ipv4: true,
       active: true,
       name: '{{ calico_network_name | lower }}',
-      label: '{{ global_region_name }} Network'
+      label: '{{ availability_zone_name }} Network'
     )
     network.regions << region
   end
@@ -106,7 +112,7 @@ task bootstrap: :environment do
     region = Region.first
     group.regions << region if region
   end
-  if User.support_admin.empty?
+  unless User.where(email: '{{ cs_admin_email }}').exists?
     user = User.new(
       fname: 'Admin',
       lname: 'Admin',
@@ -122,7 +128,7 @@ task bootstrap: :environment do
     user.save
   end
 
-  {%- endif -%}
+  {%- endif -%}  
 
 {% if floating_ip == '0.0.0.0' or not enable_floating_ip %}
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
@@ -130,25 +136,33 @@ floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|defa
 floating_ip = "{{ floating_ip }}"
 {% endif %} 
 
-  LoadBalancer.create!(
-    label: "{{ lb_name }}",
-    region: region,
-    domain: "{{ cs_app_url }}",
-    ext_ip: [ {{ lb_cluster() }} ],
-    internal_ip: [ {{ lb_internal_cluster() }} ],
-    public_ip: floating_ip,
-    shared_certificate: "{{ lb_shared_cert }}",
-    direct_connect: {% if calico_network_ipip %}false{% else %}true{% endif %}
-  ) if LoadBalancer.first.nil?
-
-  begin
-    Dns::Zone.create!(name: "{{ cs_app_zone }}")
-  rescue => e
-    ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
+  lb = LoadBalancer.find_by public_ip: floating_ip
+  if lb.nil?
+    lb = LoadBalancer.create!(
+      label: "{{ lb_name }}",
+      region: region,
+      domain: "{{ cs_app_url }}",
+      ext_ip: [ {{ lb_cluster() }} ],
+      internal_ip: [ {{ lb_internal_cluster() }} ],
+      public_ip: floating_ip,
+      shared_certificate: "{{ lb_shared_cert }}",
+      direct_connect: {% if calico_network_ipip %}false{% else %}true{% endif %}
+    )
+  else
+    lb.update ext_ip: [ {{ lb_cluster() }} ], internal_ip: [ {{ lb_internal_cluster() }} ]
   end
 
+  unless Dns::Zone.where(name: "{{ cs_app_zone }}").exists?
+    begin
+      Dns::Zone.create!(name: "{{ cs_app_zone }}")
+    rescue => e
+      ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
+    end
+  end
+
+  existing_installation = Feature.where(name: 'updated_cr_cert').exists?
   Feature.setup!
-  Feature.find_by(name: 'updated_cr_cert')&.update_column :active, true
+  Feature.find_by(name: 'updated_cr_cert').update(active: true) unless existing_installation
 
   Setting.registry_selinux # Load and create setting
 {% if selinux %}

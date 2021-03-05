@@ -1,6 +1,7 @@
 ---
 collections:
   - community.general
+  - community.postgresql
   - ansible.posix
 
 roles:

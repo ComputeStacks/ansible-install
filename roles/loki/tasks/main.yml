@@ -1,3 +1,4 @@
 ---
-- include_tasks: install.yml
+- import_tasks: install.yml
   when: ansible_facts.services['loki.service'] is not defined
+  tags: ['never', 'bootstrap']

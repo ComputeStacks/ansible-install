@@ -1,9 +1,73 @@
 ---
-- name: is configured?
+- name: install packages
+  package:
+    name:
+      - pacemaker
+      - haveged
+      - pcs
+      - corosync
+    state: present
+
+- name: ensure directories exists
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ corosync_config_dir }}"
+    - "{{ corosync_log_dir }}"
+
+- name: load corosync config
+  template:
+    src: corosync.conf.j2
+    dest: "{{ corosync_config_file }}"
+    mode: 0644
+  notify: restart corosync
+
+##
+# Master Key
+- name: master key configured?
   stat:
     path: "{{ corosync_key_file }}"
-  register: key_file
+  register: master_key_file
 
-- include_tasks: install.yml
-  when: key_file.stat.exists == False
+- block:
+    - name: generate master key
+      command: corosync-keygen -l
+    - meta: flush_handlers
+    - name: set stonith
+      command: pcs property set stonith-enabled=false 
+    - name: set no-quorum-policy
+      shell: pcs property set no-quorum-policy=ignore
+      vars:
+        ansible_ssh_pipelining: no
+    - import_tasks: platforms/generic.yml
+      when: "cloud_platform == 'generic'"
+    - import_tasks: platforms/digitalocean.yml
+      when: "cloud_platform == 'digitalocean'"
+  run_once: true
+  delegate_to: "{{ groups['nodes'][0] }}"
+  when: master_key_file.stat.exists == False
 
+##
+# non-master nodes
+- name: is local node configured?
+  stat:
+    path: "{{ corosync_key_file }}"
+  register: local_key_file
+
+- block:
+    - name: read key
+      slurp:
+        src: "{{ corosync_key_file }}"
+      register: corosync_authkey
+      delegate_to: "{{ groups['nodes'][0] }}"
+    - name: store key
+      set_fact:
+        corosync_key: "{{ corosync_authkey.content|b64decode }}"
+    - name: write key
+      copy:
+        dest: "{{ corosync_key_file }}"
+        content: "{{ corosync_key }}"
+  when:
+    - local_key_file.stat.exists == False
+    - "inventory_hostname != groups['nodes'][0]"

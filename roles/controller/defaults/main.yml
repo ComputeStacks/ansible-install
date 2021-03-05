@@ -1,8 +1,11 @@
 ---
 selinux: true
 license_key: ""
-global_region_name: "dev" # set in inventory
-lb_name: "{{ global_region_name }}-lb"
+
+region_name: "dev"
+availability_zone_name: "{{ region_name }}-a"
+
+lb_name: "{{ availability_zone_name }}-lb"
 
 controller_use_lets_encrypt: true
 ssh_port: 22

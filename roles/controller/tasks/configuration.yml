@@ -27,22 +27,6 @@
     dest: /etc/bash_completion.d/cstacks.sh
     mode: 0740
 
-##
-# Generate Bootstrap
-- name: Slurp and store wildcared cert
-  slurp:
-    src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
-  register: lb_shared_cert_raw
-
-- name: Decode certificate for assignment
-  set_fact:
-    lb_shared_cert: "{{ lb_shared_cert_raw.content | b64decode }}"
-
-- name: Create bootstrap file
-  template:
-    src: bootstrap.rake.j2
-    dest: "{{ rake_tasks_directory }}/bootstrap.rake"
-
 - name: branding css
   get_url:
     url: "{{ branding_css_url }}"

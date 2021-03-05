@@ -1,2 +1,9 @@
 ---
-# handlers file for node_corosync
+- name: restart corosync
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: restarted
+  with_items:
+    - corosync
+    - pacemaker

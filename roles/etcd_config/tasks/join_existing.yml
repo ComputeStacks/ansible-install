@@ -1,0 +1,44 @@
+---
+- name: Register Node with etcd master
+  shell: "ETCDCTL_ENDPOINTS=\"https://{{ hostvars[groups['nodes'][0]].etcd_listen_ip }}:2379\" {{ etcd_command_base }} member add {{ ansible_hostname }} --peer-urls=\"https://{{ etcd_listen_ip }}:2380\""
+  register: add_node_output
+  vars:
+    ansible_ssh_pipelining: no
+  delegate_to: "{{ groups['nodes'][0] }}"
+
+- name: extract new etcd cluster list
+  set_fact:
+    etcd_conf_append: "{{ item }}"
+  when: "item.split('=')[0] == 'ETCD_INITIAL_CLUSTER'"
+  with_items:
+    - "{{ add_node_output.stdout_lines }}"
+
+- name: Update etcdconf
+  lineinfile:
+    dest: "{{ etcd_conf_dir }}/etcd.conf"
+    line: "{{ etcd_conf_append }}"
+    insertafter: EOF
+
+- name: restart etcd
+  service:
+    name: etcd
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+
+# - name: "15 second pause to allow etcd to join cluster"
+#   pause:
+#     seconds: 15
+
+##
+# Ensure node was successfully addded to the etcd cluster. Halt here if it failed.
+- name: verify node was successfully added
+  shell: "ETCDCTL_ENDPOINTS=\"https://{{ hostvars[groups['nodes'][0]].etcd_listen_ip }}:2379\" {{ etcd_command_base }} member list | grep {{ ansible_hostname }} | wc -l"
+  register: etcd_node_present
+  vars:
+    ansible_ssh_pipelining: no
+  delegate_to: "{{ groups['nodes'][0] }}"
+
+- fail:
+    msg: "Failed to bring {{ ansible_hostname }} online"
+  when: "etcd_node_present.stdout == '0'" 

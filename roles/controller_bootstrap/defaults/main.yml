@@ -1,1 +1,3 @@
 ---
+data_directory: "/var/lib/computestacks"
+rake_tasks_directory: "{{ data_directory }}/rake"

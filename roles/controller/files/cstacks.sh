@@ -58,7 +58,8 @@ bootstrap-db()
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
         --net=host \
         --log-driver=journald \
-        $CS_REG bundle exec rails db:schema:load
+        $CS_REG bundle exec rails db:schema:load \
+  && touch $CS_RAKE_PATH/.db_provisioned
 }
 
 console()

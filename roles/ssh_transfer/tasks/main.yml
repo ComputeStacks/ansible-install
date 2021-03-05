@@ -23,8 +23,18 @@
     - "{{ ssh_app }}"
     - "{{ ssh_admin }}"
 
+- name: generate ssh client config file
+  template:
+    src: ssh_config.j2
+    dest: /root/.ssh/config
+    owner: root
+    group: root
+    mode: '0700'
+  when: "'controller' in group_names"
+
 - name: verify controller can connect
-  shell: "ssh -o 'StrictHostKeyChecking no' {{ inventory_hostname }} -C date"
+  shell: "ssh -o 'StrictHostKeyChecking no' {{ ansible_hostname }} -C date"
   delegate_to: "{{ groups['controller'][0] }}"
   vars:
     ansible_ssh_pipelining: no
+  when: "'controller' not in group_names"

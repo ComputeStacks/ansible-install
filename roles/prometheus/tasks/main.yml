@@ -1,3 +1,15 @@
 ---
-- include_tasks: install.yml
+- import_tasks: install.yml
   when: ansible_facts.services['prometheus.service'] is not defined
+  tags: ['never', 'bootstrap']
+
+- block:
+    - name: update prometheus configuration
+      template:
+        src: prometheus.yml.j2
+        dest: /etc/prometheus/prometheus.yml
+    - name: restart prometheus
+      systemd:
+        name: prometheus
+        state: restarted
+  tags: ['never', 'addnode']
