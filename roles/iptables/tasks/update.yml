@@ -1,0 +1,74 @@
+---
+##
+# Controller
+- name: Add Nodes (to controller)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].consul_listen_ip }} -j ACCEPT"
+    regexp: "{{ hostvars[item].consul_listen_ip }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['nodes'] }}"
+  notify: activate rules
+  when: "'controller' in group_names"
+
+- name: Add Backups (to controller)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].controller_ip }} -j ACCEPT"
+    regexp: "{{ hostvars[item].controller_ip }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['backup_server'] }}"
+  notify: activate rules
+  when: "'controller' in group_names"
+
+- name: Add Metrics (to controller)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].controller_endpoint }} -j ACCEPT"
+    regexp: "{{ hostvars[item].controller_endpoint }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['metrics'] }}"
+  notify: activate rules
+  when: "'controller' in group_names"
+
+##
+# Metrics
+- name: Add Nodes (to metrics)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].metrics_ip_address }} -j ACCEPT"
+    regexp: "{{ hostvars[item].metrics_ip_address }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['nodes'] }}"
+  notify: activate rules
+  when: "'metrics' in group_names"
+
+##
+# Nodes
+- name: Add Nodes (to each other)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].etcd_listen_ip }} -j ACCEPT"
+    regexp: "{{ hostvars[item].etcd_listen_ip }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['nodes'] }}"
+  notify: activate rules
+  when: "'nodes' in group_names"
+
+##
+# Backup Server
+- name: Add Nodes (to backup)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].backup_ip }} -j ACCEPT"
+    regexp: "{{ hostvars[item].backup_ip }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['nodes'] }}"
+  notify: activate rules
+  when: "'backup_server' in group_names"

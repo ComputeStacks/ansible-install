@@ -29,22 +29,12 @@ ip6tables -A INPUT -j REJECT --reject-with icmp6-adm-prohibited
 {% endif %}
 
 # HTTP/HTTPS
-{% if 'controller' in group_names %}
+{% if 'controller' in group_names or 'metrics' in group_names or 'registry' in group_names %}
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 {% endif %}
 {% if 'registry' in group_names %}
 iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
-{% if 'controller' not in group_names %}
-iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-{% endif %}
-{% endif %}
-{% if 'metrics' in group_names %}
-{% if 'controller' not in group_names %}
-iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-{% endif %}
 {% endif %}
 
 # Allow Controller
@@ -96,9 +86,9 @@ iptables -A INPUT -p all -s {{ hostvars[host].etcd_listen_ip }} -j ACCEPT
 {% endif %}
 {% endfor %}
 
-# Controller
 {% if 'controller' in group_names %}
 {% if hostvars[groups['controller'][0]].metrics_ip_address != hostvars[groups['metrics'][0]].controller_endpoint %}
+# Controller
 iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].controller_endpoint }} -j ACCEPT
 {% endif %}
 {% endif %}

@@ -125,7 +125,7 @@ After running and allowing the servers to reboot, you can perform some basic val
 ansible-playbook -u root -i inventory.yml main.yml --tags "validate"
 ```
 
-## Adding Nodes
+## Adding nodes to an existing availability zone
 To add nodes to existing Availability Zone, simply add the new nodes to the same inventory file you used to deploy the initial cluster and change `etcd_initial_cluster_state` for each _NEW_ node from `new` to `existing`. Existing nodes _MUST_ remain at `new`.
 
 Please note that you will need to ensure the number of nodes you're deploying will keep the etcd cluster in quorum. As per the etcd documentation, this should be `(n/2)+1` nodes. So 3, 5, 7, or 9 nodes per availability zone.
@@ -156,7 +156,17 @@ ansible-playbook -u root -i inventory.yml main.yml --tags "addnode"
 ```
 
 ## Add Region / Availability Zone
-To add a new region or availability zone, make a copy of the previous `inventory.yml` file and make the following changes:
+To add a new region or availability zone, make a copy of your previous `inventory.yml` file and make the following changes:
+
+1. Change `region_name` and/or, `availability_zone_name`
+2. Replace all nodes with your new nodes
+3. (optional) Change metrics / backup servers. You can re-use the existing ones if you wish.
+
+Re-run the bootstrap command:
+
+```bash
+ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
+```
 
 
 ## FAQ

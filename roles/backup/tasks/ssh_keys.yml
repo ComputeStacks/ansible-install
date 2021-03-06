@@ -1,12 +1,4 @@
 ---
-- name: write exports
-  template:
-    src: exports.j2
-    dest: /etc/exports
-
-- name: reload exports
-  command: 'exportfs -ra'
-
 - name: fetch node ssh keys
   fetch:
     src: "/root/.ssh/id_ed25519.pub"

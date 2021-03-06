@@ -18,16 +18,6 @@
     - alerts_node.yml
     - alerts_prometheus.yml
 
-- name: install prom config
-  template:
-    src: prometheus.yml.j2
-    dest: /etc/prometheus/prometheus.yml
-
-- name: install alerts_containers
-  template:
-    src: alerts_containers.yml.j2
-    dest: /etc/prometheus/alerts_containers.yml
-
 - name: check if volume exists
   shell: docker volume inspect prometheus-data >/dev/null 2>&1
   register: prometheus_vol_exists
@@ -45,10 +35,4 @@
   template:
     src: prometheus.service.j2
     dest: /etc/systemd/system/prometheus.service
-
-- name: start prometheus
-  systemd:
-    name: prometheus
-    state: started
-    enabled: yes
-    daemon_reload: yes
+  notify: restart prometheus

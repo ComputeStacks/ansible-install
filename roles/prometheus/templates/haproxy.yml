@@ -1,0 +1,15 @@
+---
+{% if groups['metrics'][0] != groups['controller'][0] %}
+
+- targets: ['{{ hostvars[groups['metrics'][0]].ansible_default_ipv4.address }}:{{ haproxy_stats_port }}']
+  labels:
+    region: {{ hostvars[groups['metrics'][0]].availability_zone_name }}
+    node: {{ hostvars[groups['metrics'][0]].ansible_hostname }}
+{% endif %}
+{% for server in groups['nodes'] %}
+
+- targets: ['{{ hostvars[server].metrics_ip_address }}:{{ haproxy_stats_port }}']
+  labels:
+    region: {{ hostvars[server].availability_zone_name }}
+    node: {{ hostvars[server].ansible_hostname }}
+{% endfor %}

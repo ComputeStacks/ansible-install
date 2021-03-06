@@ -1,4 +1,12 @@
 ---
+- name: check if existing iptables file exists
+  stat:
+    path: /usr/local/bin/cs-recover_iptables
+  register: existing_iptables
+
+- include_tasks: update.yml
+  when: existing_iptables.stat.exists
+
 - name: install config script
   template:
     src: iptables.sh.j2
@@ -6,17 +14,11 @@
     owner: root
     group: root
     mode: '0655'
+  notify: activate rules
+  when: existing_iptables.stat.exists == False
 
 - name: install systemd
   copy:
     src: iptables.service
     dest: /etc/systemd/system/cs-iptables.service
-
-- name: reload systemd
-  systemd:
-    name: "cs-iptables.service"
-    enabled: yes
-    daemon_reload: yes
-
-- name: activate rules
-  command: /usr/local/bin/cs-recover_iptables
+  notify: reload iptables systemd

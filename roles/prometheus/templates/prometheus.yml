@@ -1,0 +1,45 @@
+---
+global:
+  scrape_interval:     10s
+  evaluation_interval: 10s
+
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - 'alertmanager:9093'
+
+rule_files:
+  - "alerts_prom.yml"
+  - "alerts_node.yml"
+  - "alerts_containers.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'cadvisor'
+    file_sd_configs:
+      - files: 
+          - /etc/prometheus/cadvisor/*.yml
+    static_configs:
+      - targets: ['{{ hostvars[groups['controller'][0]].metrics_ip_address }}:{{ cadvisor_port }}']
+        labels:
+          region: {{ hostvars[groups['controller'][0]].availability_zone_name }}
+          node: {{ hostvars[groups['controller'][0]].ansible_hostname }}
+
+  - job_name: 'node-exporter'
+    file_sd_configs:
+      - files: 
+          - /etc/prometheus/node_exporter/*.yml
+    static_configs:
+      - targets: ['{{ hostvars[groups['controller'][0]].metrics_ip_address }}:{{ node_exporter_port }}']
+        labels:
+          region: {{ hostvars[groups['controller'][0]].availability_zone_name }}
+          node: {{ hostvars[groups['controller'][0]].ansible_hostname }}
+
+  - job_name: 'haproxy'
+    file_sd_configs:
+      - files: 
+          - /etc/prometheus/haproxy/*.yml

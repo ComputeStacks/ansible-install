@@ -1,2 +1,9 @@
 ---
-# handlers file for iptables
+- name: reload iptables systemd
+  systemd:
+    name: "cs-iptables.service"
+    enabled: yes
+    daemon_reload: yes
+
+- name: activate rules
+  command: /usr/local/bin/cs-recover_iptables

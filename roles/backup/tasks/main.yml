@@ -2,5 +2,18 @@
 - import_tasks: install.yml
   tags: ['never', 'bootstrap']
 
-- import_tasks: update.yml
+- block:
+    - name: Setup Exports
+      lineinfile:
+        dest: /etc/exports
+        line: "{{ backup_path }} {{ hostvars[item].backup_ip }}(rw,sync,no_subtree_check,all_squash)"
+        regexp: "{{ hostvars[item].backup_ip }}"
+        insertafter: EOF
+      with_items:
+        - "{{ groups['nodes'] }}"
+    - name: reload exports
+      command: 'exportfs -ra'
+  tags: ['never', 'bootstrap', 'addnode']
+
+- import_tasks: "ssh_keys.yml"
   tags: ['never', 'addnode']

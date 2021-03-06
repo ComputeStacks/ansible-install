@@ -7,10 +7,17 @@
                     /_/                                                    
 
 {{ '' }}
+{% if 'controller' in group_names %}
+{% for item in motd_info_controller %}
+{% for key, value in item.items() %}
+{{ key }}{{ value }}
+{% endfor %}
+{% endfor %}
+{% else %}
 {% for item in motd_info %}
 {% for key, value in item.items() %}
 {{ key }}{{ value }}
 {% endfor %}
 {% endfor %}
-
+{% endif %}
 {{ '' }}

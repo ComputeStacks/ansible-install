@@ -13,16 +13,11 @@
     owner: "{{ nfs_fs_user }}"
     group: "{{ nfs_fs_group }}"
 
-- name: write exports
-  template:
-    src: exports.j2
-    dest: /etc/exports
-
 - name: restart services
   service:
     name: "{{ item }}"
     enabled: yes
-    state: restarted
+    state: started
   loop:
     - rpcbind
     - nfs-server
@@ -34,27 +29,7 @@
   service:
     name: nfs-kernel-server
     enabled: yes
-    state: restarted
+    state: started
   when: ansible_distribution == 'Debian'
 
-- name: fetch node ssh keys
-  fetch:
-    src: "/root/.ssh/id_ed25519.pub"
-    dest: "tmp/nodes/{{ item }}.pub"
-    flat: yes
-  delegate_to: "{{ item }}"
-  with_items: "{{ groups.nodes }}"
-  register: node_ssh_keys
-  changed_when: false
-  
-- name: add ssh keys to backup server
-  ansible.posix.authorized_key:
-    user: "root"
-    key: "{{ lookup('file', item) }}"
-    state: present
-  with_flattened: 
-    - "{{ node_ssh_keys.results | default({}) | map(attribute='dest') | list }}"
-
-- name: remove temp local pubkey copies
-  local_action: file dest="tmp/nodes" state=absent
-  changed_when: false
+- import_tasks: "ssh_keys.yml"
