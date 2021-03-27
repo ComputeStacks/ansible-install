@@ -72,3 +72,14 @@
     - "{{ groups['nodes'] }}"
   notify: activate rules
   when: "'backup_server' in group_names"
+
+- name: Add Controller (to backup)
+  lineinfile:
+    dest: /usr/local/bin/cs-recover_iptables
+    line: "iptables -A INPUT -p all -s {{ hostvars[item].controller_ip }} -j ACCEPT"
+    regexp: "{{ hostvars[item].controller_ip }}"
+    insertafter: EOF
+  with_items:
+    - "{{ groups['backup_server'] }}"
+  notify: activate rules
+  when: "'backup_server' in group_names"
