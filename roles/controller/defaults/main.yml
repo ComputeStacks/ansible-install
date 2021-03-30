@@ -17,7 +17,7 @@ controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{
 ##
 # Controller Image
 docker_registry: ghcr.io
-controller_version: "6.0"
+controller_version: "6.1"
 controller_image: computestacks/controller
 controller_image_path: "{{ docker_registry }}/{{ controller_image }}:{{ controller_version }}"
 
@@ -39,7 +39,7 @@ registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry']
 
 ##
 # App Configuration
-cs_version: "6.0"
+cs_version: "6.1"
 cs_app_id: "dev"
 cs_locale: "en"
 cs_currency: "USD"

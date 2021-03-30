@@ -55,9 +55,13 @@ iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_addr
 
 {% if 'nodes' in group_names %}
 # Nodes
+iptables -t nat -N expose-ports
+iptables -t nat -A OUTPUT -j expose-ports
+iptables -t nat -A PREROUTING -j expose-ports
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
+iptables -A INPUT -p udp --dport 10000:50000 -j ACCEPT
 {% if hostvars[groups['controller'][0]].node_ip != hostvars[groups['metrics'][0]].node_endpoint %}
 iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].node_endpoint }} -j ACCEPT
 {% endif %}
