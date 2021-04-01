@@ -28,6 +28,7 @@
       - python3-docker
       - git
       - linux-headers-amd64
+      - rsync
       - sudo
       - apt-transport-https
       - gnupg-agent

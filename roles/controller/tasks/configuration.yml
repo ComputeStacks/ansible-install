@@ -1,13 +1,19 @@
 ---
-- name: Generate Keys
-  command: openssl rand -hex 64
-  register: secret_key_raw
-- command: openssl rand -hex 64
-  register: secret_auth_key_raw
-- set_fact:
-    secret_key: "{{ secret_key_raw.stdout }}"
-- set_fact:
-    secret_auth_key: "{{ secret_auth_key_raw.stdout }}"
+- name: Generate Secret Key
+  block:
+    - command: openssl rand -hex 64
+      register: secret_key_raw
+    - set_fact:
+        secret_key: "{{ secret_key_raw.stdout }}"
+  when: secret_key == ""
+
+- name: Generate Auth Key
+  block:  
+    - command: openssl rand -hex 64
+      register: secret_auth_key_raw
+    - set_fact:
+        secret_auth_key: "{{ secret_auth_key_raw.stdout }}"
+  when: secret_auth_key == ""
 
 - name: Write cstacks command script
   copy:

@@ -2,6 +2,9 @@
 selinux: true
 license_key: ""
 
+secret_key: ""
+secret_auth_key: ""
+
 region_name: "dev"
 availability_zone_name: "{{ region_name }}-a"
 
