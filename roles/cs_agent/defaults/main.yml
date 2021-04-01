@@ -32,5 +32,5 @@ nfs_host_path: "/var/nfsshare/volume_backups"
 
 # Backup NFS SSH Settings
 backup_nfs_ssh_user: "root"
-backup_nfs_ssh_port: "22"
+backup_nfs_ssh_port: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].ssh_port }}{% else %}22{% endif %}"
 backup_nfs_ssh_keyfile: "/root/.ssh/id_ed25519" # path to private key on the node

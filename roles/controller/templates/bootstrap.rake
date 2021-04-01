@@ -39,6 +39,8 @@ task bootstrap: :environment do
   Setting.find_by(name: 'registry_base_url')&.update value: "{{ cs_registry_domain }}"
   puts "...Node"
   Setting.find_by(name: 'registry_node')&.update value: "{{ registry_server_ip }}"
+  puts "...SSH Port"
+  Setting.find_by(name: 'registry_ssh_port')&.update value: "{{ registry_ssh_port }}"
 
   puts "LetsEncrypt..."
   Setting.find_by(name: 'le_validation_server')&.update value: "{{ node_ip }}:3000"
@@ -166,9 +168,9 @@ floating_ip = "{{ floating_ip }}"
 
   Setting.registry_selinux # Load and create setting
 {% if selinux %}
-  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: false
-{% else %}
   Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: true
+{% else %}
+  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: false
 {% endif %}
 
   puts "Done."

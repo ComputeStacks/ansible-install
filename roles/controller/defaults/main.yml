@@ -37,9 +37,6 @@ ssh_keys_directory: "{{ data_directory }}/sshkeys"
 rake_tasks_directory: "{{ data_directory }}/rake"
 branding_directory: "{{ data_directory }}/branding"
 
-registry_data_path: "/computestacks-mnt"
-registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry'][0]].controller_ip }}{% else %}127.0.0.1{% endif %}"
-
 ##
 # App Configuration
 cs_version: "6.1"
@@ -108,3 +105,9 @@ redis_host: 127.0.0.1
 # ComputeStacks Bastion Portal
 enable_support_ip: true
 support_ip: 192.155.86.87
+
+##
+# Container Registry
+registry_data_path: "/computestacks-mnt"
+registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry'][0]].controller_ip }}{% else %}127.0.0.1{% endif %}"
+registry_ssh_port: "{{ hostvars[groups['registry'][0]].ssh_port }}"
