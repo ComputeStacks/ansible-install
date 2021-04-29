@@ -12,6 +12,7 @@
       - vim
       - dnsutils
       - gnupg2
+      - pass
       - ca-certificates
       - traceroute
       - sysstat
