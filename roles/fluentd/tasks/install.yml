@@ -1,0 +1,31 @@
+---
+- name: pull image
+  community.general.docker_image:
+    name: "{{ fluentd_image_name }}"
+    tag: "{{ fluentd_image_tag }}"
+    source: pull
+
+- name: create directories
+  file:
+    path: "{{ fluentd_config_dir }}"
+    state: directory
+
+- name: install fluentd config
+  copy:
+    src: fluent.conf
+    dest: "{{ fluentd_config }}"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: install systemd
+  template:
+    src: fluentd.service
+    dest: /etc/systemd/system/fluentd.service
+
+- name: start fluentd
+  systemd:
+    name: fluentd
+    state: started
+    enabled: yes
+    daemon_reload: yes

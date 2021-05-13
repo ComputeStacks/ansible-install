@@ -29,6 +29,7 @@ bootstrap-app()
           -e RACK_ENV=production \
           -e DOCKER_CERT_PATH=/root/.docker \
           -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+          -e CS_BOOTSTRAP=true \
           --net=host \
           --log-driver=journald \
           $CS_REG bundle exec rake bootstrap
@@ -56,6 +57,7 @@ bootstrap-db()
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_BOOTSTRAP=true \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rails db:schema:load \

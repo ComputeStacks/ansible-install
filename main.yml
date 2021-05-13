@@ -84,12 +84,12 @@
     - docker
     - cadvisor
     - haproxy
-    - loki_driver
     - consul
     - node_docker
+    - fluentd
     - node
     - cs_agent
-    - node_corosync
+    - node_corosync    
   any_errors_fatal: true
 
 - hosts:

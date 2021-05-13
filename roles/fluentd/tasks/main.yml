@@ -1,0 +1,8 @@
+---
+- name: check if fluentd is configured
+  stat:
+    path: /etc/systemd/system/fluentd.service
+  register: fluentd_config_exists
+
+- include_tasks: install.yml
+  when: fluentd_config_exists.stat.exists == False

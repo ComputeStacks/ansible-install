@@ -56,40 +56,11 @@ a) When metrics are stored for containers or nodes, the hostname is added as a l
 b) Backup jobs are assigned to the node by their hostname. If there is a mismatch in the controller, then jobs will not run.
 
 
-#### Distribution Specific Notes
-
-##### Debian 10
-
-Install the following packages
+#### Install the following packages
 
 ```bash
 apt update && apt -y install openssl ca-certificates linux-headers-amd64 python3 python3-pip python3-openssl python3-apt python3-setuptools python3-wheel && pip3 install ansible
 ```
-##### CentOS 7
-
-Please ensure the following has been run on each server.
-
-```bash
-yum -y update && yum -y install epel-release kernel-headers && yum -y install ansible
-```
-
-Additionally, we require selinux to be enabled on CentOS 7.
-
-<details>
-<summary>How to enable selinux</summary>
-<ul>
-<li> Check if it's enabled and active by running: <code>sestatus</code></li>
-<li>
-    If <code>SELinux status:</code> is not <code>enabled</code>, then please
-    <ul>
-        <li>Edit <code>/etc/selinux/config</code> and set <code>SELINUX=enforcing</code></li>
-        <li><code>touch /.autorelabel</code></li>
-        <li><code>reboot</code></li>
-    </ul>
-</li>
-</ul>
-</details>
-
 
 #### Network MTU Settings
 

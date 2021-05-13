@@ -1,0 +1,13 @@
+---
+fluentd_config_dir: /etc/fluentd
+fluentd_config: "{{ fluentd_config_dir }}/fluent.conf"
+fluentd_port: 9432
+
+loki_username: "loguser"
+loki_password: "{{ hostvars[groups['metrics'][0]].loki_password }}"
+cs_metrics_domain: ""
+loki_node_endpoint: "https://{{ cs_metrics_domain }}:3102"
+
+fluentd_image_name: "grafana/fluent-plugin-loki"
+fluentd_image_tag: "main"
+fluentd_image: "{{ fluentd_image_name }}:{{ fluentd_image_tag }}"

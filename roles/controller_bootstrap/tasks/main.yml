@@ -6,7 +6,6 @@
   
 - name: database
   shell: /usr/local/bin/cstacks bootstrap-db
-  no_log: True
   vars:
     ansible_ssh_pipelining: no
   when: db_provisioned.stat.exists == False
