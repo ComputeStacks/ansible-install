@@ -6,8 +6,8 @@
 
 - name: install container registry renewal_script
   copy:
-    src: reload_container_reg.sh
-    dest: /usr/local/bin/reload_container_reg.sh
+    src: post_acme_reload.sh
+    dest: /usr/local/bin/post_acme_reload
     mode: 0777
   when: "'registry' in group_names"
 
@@ -92,7 +92,13 @@
 
 - name: enable acme renew
   systemd:
-    name: acme_letsencrypt
+    name: acme_letsencrypt.service
+    state: started
+    daemon_reload: yes
+
+- name: enable acme renew timer
+  systemd:
+    name: acme_letsencrypt.timer
     state: started
     enabled: yes
     daemon_reload: yes

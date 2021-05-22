@@ -51,4 +51,4 @@ acme_cert_cf_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_cf"
 acme_cert_name: "{% if 'controller' in group_names %}{{ cs_portal_domain }}{% elif 'registry' in group_names %}{{ cs_registry_domain }}{% elif 'metrics' in group_names %}{{ cs_metrics_domain }}{% endif %}"
 
 acme_nginx_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ nginx_cert_key }} --fullchain-file {{ nginx_cert_fullchain }} --reloadcmd \"systemctl reload nginx\""
-acme_reg_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ container_registry_key }} --fullchain-file {{ container_registry_fullchain }} --reloadcmd \"bash /usr/local/bin/reload_container_reg.sh\""
+acme_reg_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ container_registry_key }} --fullchain-file {{ container_registry_fullchain }} --reloadcmd \"bash /usr/local/bin/post_acme_reload\""

@@ -6,6 +6,6 @@ After=nginx.service
 
 [Service]
 Type=oneshot
-ExecStart={{ acme_executable }} --cron --home "{{ acme_data_path }}"
+ExecStart=/usr/bin/bash /root/.acme.sh/acme.sh --cron --home "/root/.acme.sh"
 
 SuccessExitStatus=0 2
