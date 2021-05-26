@@ -11,9 +11,9 @@ ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill fluentd 2>/dev/null'
 ExecStart=/usr/bin/env docker run --rm --name fluentd \
       --log-driver none \
       --network=host \
-      -e LOKI_URL="{{ loki_node_endpoint }}" \
-      -e LOKI_USERNAME="{{ loki_username }}" \
-      -e LOKI_PASSWORD="{{ loki_password }}" \
+      -e LOKI_URL={{ loki_node_endpoint }} \
+      -e LOKI_USERNAME={{ loki_username }} \
+      -e LOKI_PASSWORD={{ loki_password }} \
       -v {{ fluentd_config }}:/fluentd/etc/fluent.conf:ro \
       {{ fluentd_image }}
 

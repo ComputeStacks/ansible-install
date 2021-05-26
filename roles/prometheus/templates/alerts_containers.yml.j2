@@ -2,8 +2,8 @@ groups:
 - name: ContainerHealth
   rules:
     - alert: ContainerCpuUsage
-      expr: (sum(rate(container_cpu_usage_seconds_total{name!~"{{ container_ignore_list }}"}[3m])) BY (instance, name) * 100) > {{ container_cpu_limit }}
-      for: 1m
+      expr: (sum(rate(container_cpu_usage_seconds_total{{{ prom_selector }}}[3m])) BY (instance, name) * 100) > {{ container_cpu_limit }} < 150
+      for: 2m
       labels:
         severity: warning
       annotations:
@@ -11,8 +11,8 @@ groups:
         description: "Container CPU usage is above {{ container_cpu_limit }}%\n  VALUE = {{ '{{ $value }}' }}\n  LABELS: {{ '{{ $labels }}' }}"
         value: "{{ '{{ $value }}' }}"
     - alert: ContainerMemoryUsage
-      expr: (sum(container_memory_usage_bytes{name!~"{{ container_ignore_list }}"}) BY (instance, name) / sum(container_spec_memory_limit_bytes{name!~"{{ container_ignore_list }}"}) BY (instance, name) * 100) > {{ container_memory_limit }}
-      for: 1m
+      expr: (sum(container_memory_rss{{{ prom_selector }}}) BY (instance, name) / sum(container_spec_memory_limit_bytes{{{ prom_selector }}}) BY (instance, name) * 100) > {{ container_memory_limit }} < 150
+      for: 2m
       labels:
         severity: warning
       annotations:
