@@ -7,4 +7,16 @@
 
     - include_tasks: install.yml
       when: vault_configured.stat.exists == False
+
+    - name: ensure vault-bootstrap exists
+      community.general.docker_container_info:
+        name: vault-bootstrap
+      register: vault_container
+
+    # if we're configured, but it's missing, re-rerun the container
+    - include_tasks: install_container.yml
+      when: 
+        - not vault_container.exists
+        - vault_configured.stat.exists
+
   tags: ['never', 'bootstrap']

@@ -1,0 +1,21 @@
+---
+# Duplicate of `install.yml` -- we're just brining the container back online
+- name: Run vault container
+  docker_container:
+    name: vault-bootstrap
+    image: vault:latest
+    container_default_behavior: compatibility
+    recreate: yes
+    volumes:
+      - "{{ vault_storage_path }}/file:/vault/file:Z"
+      - "{{ vault_storage_path }}/logs:/vault/logs:Z"
+      - "{{ vault_storage_path }}/keys/rootkey:/root/.vault-token:Z"
+    env:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_LOCAL_CONFIG: '{"backend": {"file": {"path": "/vault/file"}}, "default_lease_ttl": "168h", "max_lease_ttl": "87600h", "listener": {"tcp": {"address": "127.0.0.1:8200", "tls_disable": "true"}}}'
+    capabilities:
+      - IPC_LOCK
+    command: server
+    restart_policy: unless-stopped
+
+# Not unsealing here -- will be done in `vault_unseal` role.
