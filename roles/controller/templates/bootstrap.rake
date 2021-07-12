@@ -131,13 +131,13 @@ task bootstrap: :environment do
   end
 
   {%- endif -%}  
-
+{{ '' }}
 {% if floating_ip == '0.0.0.0' or not enable_floating_ip %}
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
 {% else %}
 floating_ip = "{{ floating_ip }}"
 {% endif %} 
-
+{{ '' }}
   lb = LoadBalancer.find_by public_ip: floating_ip
   if lb.nil?
     lb = LoadBalancer.create!(
