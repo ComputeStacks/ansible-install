@@ -12,6 +12,6 @@
 
 - name: install packages
   apt:
-    name: "haproxy=2.2.*"
+    name: "haproxy=2.4.*"
     state: present
     update_cache: yes

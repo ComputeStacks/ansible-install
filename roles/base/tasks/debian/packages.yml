@@ -25,7 +25,7 @@
       - whois
       - mosh
       - socat
-      - python-openssl
+      - python3-openssl
       - python3-docker
       - git
       - linux-headers-amd64

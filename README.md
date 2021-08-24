@@ -177,15 +177,6 @@ This will ensure you have the most recent version of ansible.
 </p>
 </details>
 
-## Use Updated Kernel
-If you wish to use the latest kernel from Debian backports, please perform the following:
-
-```bash
-echo "deb http://deb.debian.org/debian buster-backports main" > /etc/apt/sources.list.d/backports.list
-apt update
-apt -t buster-backports install linux-image-amd64 linux-headers-amd64
-```
-
 ## Enable Swap Limit
 
 In order to allow swap limitations set on containers, you need to perform the following on each node:
