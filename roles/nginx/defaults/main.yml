@@ -30,7 +30,7 @@ container_registry_key: "{{ container_registry_cert_home }}/privkey.pem"
 
 ##
 # Acme.SH
-acme_data_path: "/opt/acme"
+acme_data_path: "/root/.acme.sh"
 nginx_acme_path: "/var/www/acme-sh" # Path to validate certificate
 acme_install_path: "{{ acme_data_path }}/src"
 acme_config_home: "{{ acme_data_path }}/data"

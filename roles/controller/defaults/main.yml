@@ -20,7 +20,7 @@ controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{
 ##
 # Controller Image
 docker_registry: ghcr.io
-controller_version: "6.2"
+controller_version: "6.3"
 controller_image: computestacks/controller
 controller_image_path: "{{ docker_registry }}/{{ controller_image }}:{{ controller_version }}"
 
@@ -39,7 +39,7 @@ branding_directory: "{{ data_directory }}/branding"
 
 ##
 # App Configuration
-cs_version: "6.2"
+cs_version: "{{ controller_version }}"
 cs_app_id: "dev"
 cs_locale: "en"
 cs_currency: "USD"
