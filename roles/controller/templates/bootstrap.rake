@@ -15,7 +15,13 @@ task bootstrap: :environment do
   location = Location.find_by(name: "{{ region_name }}")
   location = Location.create!(name: "{{ region_name }}") if location.nil?
   region = Region.find_by name: "{{ availability_zone_name }}", location: location
-  region = Region.create!(name: "{{ availability_zone_name }}", location: location) if region.nil?
+  region = Region.create!(
+    name: "{{ availability_zone_name }}", 
+    location: location,
+    pid_limit: 150,
+    ulimit_nofile_soft: 1024,
+    ulimit_nofile_hard: 1024
+  ) if region.nil?
   if region.nil?
     puts "Error, region not available."
     return false
@@ -83,7 +89,11 @@ task bootstrap: :environment do
     public_ip: '{{ hostvars[host].ansible_default_ipv4.address }}',
     region: region,
     active: true,    
-    ssh_port: {{ hostvars[host].ssh_port | int }}
+    ssh_port: {{ hostvars[host].ssh_port | int }},
+    block_write_bps: 0,
+    block_read_bps: 0,
+    block_write_iops: 0,
+    block_read_iops: 0
   ) unless Node.where(primary_ip: '{{ hostvars[host].consul_listen_ip }}').exists?
   {{ '' }}
   {{ '' }}

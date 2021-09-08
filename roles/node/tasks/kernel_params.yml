@@ -62,12 +62,45 @@
     state: present
     reload: yes
 
+##
+# The following are for lots of containers. Source: https://github.com/systemd/systemd/issues/17992#issuecomment-765007653
+
+# View current usage with `sysctl fs.file-nr`
 - name: "Set fs.file-max"
   sysctl:
     name: fs.file-max
-    value: "1000000"
+    value: "16777216"
     state: present
     reload: yes
+
+- name: "Set fs.inotify.max_queued_events"
+  sysctl:
+    name: fs.inotify.max_queued_events
+    value: "8388608"
+    state: present
+    reload: yes
+
+- name: "Set fs.inotify.max_user_instances"
+  sysctl:
+    name: fs.inotify.max_user_instances
+    value: "8388608"
+    state: present
+    reload: yes
+
+- name: "Set fs.inotify.max_user_watches"
+  sysctl:
+    name: fs.inotify.max_user_watches
+    value: "16777216"
+    state: present
+    reload: yes
+
+- name: "Set kernel.pid_max"
+  sysctl:
+    name: kernel.pid_max
+    value: "16777216"
+    state: present
+    reload: yes
+
 
 - name: "Set net.ipv4.tcp_mem"
   sysctl:
@@ -76,10 +109,18 @@
     state: present
     reload: yes
 
-# This was found on an ubuntu 16.04 container node -- not sure if it's useful.
-# - name: "Set nfs.aio-max-nr"
-#   sysctl:
-#     name: fs.aio-max-nr
-#     value: "2097152"
-#     state: present
-#     reload: yes
+- name: "Set nfs.aio-max-nr"
+  sysctl:
+    name: fs.aio-max-nr
+    value: "2097152"
+    state: present
+    reload: yes
+
+# Problem:
+#    root@cnode:~# systemctl stop cs-agent
+#    Failed to allocate directory watch: Too many open files
+#
+# Solution:
+#     cat /proc/sys/fs/inotify/max_user_watches
+#     sysctl fs.inotify.max_user_watches=2097152
+#     cat /proc/sys/fs/inotify/max_user_watches

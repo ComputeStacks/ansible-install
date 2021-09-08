@@ -19,7 +19,7 @@ ExecStart=/usr/bin/env docker run --rm --name cadvisor \
       -v /var/lib/docker/:/var/lib/docker:ro \
       -v /dev/disk/:/dev/disk:ro \
       -v /etc/machine-id:/etc/machine-id:ro \
-      -v /cgroup:/cgroup:ro \
+      --device=/dev/kmsg \
       {{ cadvisor_full_image }}
 
 ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill cadvisor 2>/dev/null'
