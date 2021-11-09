@@ -41,6 +41,12 @@
     tag: "10.5"
     source: pull
 
+- name: Pull image mariadb-backup 10.6
+  docker_image:
+    name: cmptstks/mariadb-backup
+    tag: "10.6"
+    source: pull
+
 - name: Pull image borg
   docker_image:
     name: cmptstks/borg
