@@ -1,4 +1,4 @@
 ---
 loki_image: "grafana/loki"
-loki_image_tag: "2.2.1" # https://github.com/grafana/loki/releases
+loki_image_tag: "2.4.1" # https://github.com/grafana/loki/releases
 loki_full_image: "{{ loki_image }}:{{ loki_image_tag }}"

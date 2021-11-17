@@ -21,6 +21,8 @@ ingester:
   chunk_target_size: 1048576
   chunk_retain_period: 30s
   max_transfer_retries: 0
+  wal:
+    dir: /loki/ruler-wal
 
 schema_config:
   configs:
