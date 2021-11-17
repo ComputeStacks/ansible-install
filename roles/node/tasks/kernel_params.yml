@@ -97,10 +97,9 @@
 - name: "Set kernel.pid_max"
   sysctl:
     name: kernel.pid_max
-    value: "16777216"
+    value: "4194304"
     state: present
     reload: yes
-
 
 - name: "Set net.ipv4.tcp_mem"
   sysctl:
