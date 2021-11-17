@@ -1,4 +1,9 @@
 ---
+- name: Ensure vault is running
+  community.docker.docker_container:
+    name: vault-bootstrap
+    state: started
+
 - name: check if vault is sealed
   shell: vault operator key-status >/dev/null 2>&1
   register: vault_sealed
