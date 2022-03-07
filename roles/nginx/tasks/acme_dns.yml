@@ -1,0 +1,33 @@
+---
+- include_tasks: dns/autodns.yml
+  when: "acme_challenge_method == 'autodns'"
+
+- include_tasks: dns/aws.yml
+  when: "acme_challenge_method == 'aws'"
+
+- include_tasks: dns/cpanel.yml
+  when: "acme_challenge_method == 'cpanel'"
+
+- include_tasks: dns/digital_ocean.yml
+  when: "acme_challenge_method == 'do'"
+
+- include_tasks: dns/gandi.yml
+  when: "acme_challenge_method == 'gandi'"
+
+- include_tasks: dns/cloudflare.yml
+  when: "acme_challenge_method == 'cloudflare'"
+
+- include_tasks: dns/godaddy.yml
+  when: "acme_challenge_method == 'godaddy'"
+
+- include_tasks: dns/ionos.yml
+  when: "acme_challenge_method == 'ionos'"
+
+- include_tasks: dns/linode.yml
+  when: "acme_challenge_method == 'linode'"
+
+- include_tasks: dns/powerdns.yml
+  when: "acme_challenge_method == 'pdns'"
+
+- include_tasks: dns/vultr.yml
+  when: "acme_challenge_method == 'vultr'"

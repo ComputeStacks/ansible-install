@@ -1,3 +1,7 @@
 ---
 - include_tasks: install.yml
   when: ansible_facts.services['docker.service'] is not defined
+
+# This ensures we have the latest version
+- include_tasks: install_binary.yml
+  when: ansible_facts.services['docker.service'] is defined

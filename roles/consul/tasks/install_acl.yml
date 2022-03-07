@@ -1,0 +1,20 @@
+---
+- name: collect and register consul token
+  uri:
+    url: "http://{{ consul_listen_ip }}:8500/v1/acl/bootstrap"
+    method: PUT
+    return_content: yes
+    status_code: 200
+    body_format: json
+  register: consul_token_raw
+
+- set_fact:
+    consul_token: "{{ consul_token_raw['json']['SecretID'] }}"
+
+- name: store token
+  template:
+    src: consul-secret
+    dest: /root/.consul.secret
+    mode: 0600
+    owner: root
+    group: root

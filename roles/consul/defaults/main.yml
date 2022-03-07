@@ -5,7 +5,6 @@ availability_zone_name: "{{ region_name }}-a"
 enable_debug: false
 consul_listen_ip: 127.0.0.1
 consul_bootstrap: true
-selinux: true
 consul_image: "consul"
 consul_image_tag: "latest"
 consul_raw_key: ""

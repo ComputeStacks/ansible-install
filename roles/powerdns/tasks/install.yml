@@ -1,0 +1,79 @@
+---
+- name: import key
+  apt_key:
+    url: https://repo.powerdns.com/FD380FBB-pub.asc
+    state: present
+- name: add repo
+  apt_repository:
+    repo: "deb [arch=amd64] http://repo.powerdns.com/debian bullseye-auth-46 main"
+    state: present
+    filename: docker
+- name: pin package
+  copy:
+    src: package-pin
+    dest: /etc/apt/preferences.d/pdns
+- name: install package
+  apt:
+    name:
+      - "pdns-server"
+      - "pdns-backend-pgsql"
+    state: present
+    update_cache: yes
+
+- import_tasks: passwords.yml
+  delegate_to: "{{ groups['primary_nameserver'][0] }}"
+  run_once: true
+
+- name: stop powerdns
+  systemd:
+    name: pdns
+    state: stopped
+
+- name: clean default files
+  file:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/powerdns/named.conf
+    - /etc/powerdns/pdns.d/bind.conf
+
+- name: write database settings
+  template:
+    src: pdns-psql.conf.j2
+    dest: /etc/powerdns/pdns.d/pdns.local.gpgsql.conf
+
+- include_tasks: install_leader.yml
+  when: "'primary_nameserver' in group_names"
+  
+- include_tasks: install_follower.yml
+  when: "'follower_nameservers' in group_names"
+
+- name: check that database is configured
+  postgresql_ping:
+    db: pdns
+    login_host: localhost
+    login_user: pdns
+    login_password: "{{ pdns_db_pass }}"
+  register: pdns_psql_db_up_final
+
+- name: Halt if postgresql is offline
+  fail:
+    msg: Failed to bring up postgresql
+  when: not pdns_psql_db_up_final.is_available
+
+- name: start powerdns
+  systemd:
+    name: pdns
+    state: started
+    enabled: yes
+
+- service_facts:
+
+- name: Halt if powerdns is offline
+  fail:
+    msg: PowerDNS failed to boot
+  when: ansible_facts.services['pdns.service']['state'] != 'running'
+
+- name: add zone to pdns
+  shell: "pdnsutil create-zone {{ cs_app_zone }} {{ pdns_name }}"
+  when: "'primary_nameserver' in group_names"

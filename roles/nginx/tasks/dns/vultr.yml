@@ -1,0 +1,7 @@
+---
+- name: Request Certificate (Vultr)
+  shell: "{{ acme_cert_vultr_issue_cmd }}"
+  environment:
+    VULTR_API_KEY: "{{ acme_vultr_key }}"
+  vars:
+    ansible_ssh_pipelining: no

@@ -7,28 +7,22 @@
     path: /root/.A8C477EE.asc
   register: gpg_key_exists
 
-- name: Load signing key
-  copy:
-    src: gpg_keys/A8C477EE.asc
-    dest: /root/.A8C477EE.asc
+- block:
+    - name: Load signing key
+      copy:
+        src: gpg_keys/A8C477EE.asc
+        dest: /root/.A8C477EE.asc
+    - name: Install gpg key
+      shell: gpg --import /root/.A8C477EE.asc  
+      vars:
+        ansible_ssh_pipelining: no
   when: gpg_key_exists.stat.exists == False
 
-- name: Install gpg key
-  shell: gpg --import /root/.A8C477EE.asc
-  when: gpg_key_exists.stat.exists == False
-  vars:
-    ansible_ssh_pipelining: no
-
-- name: Check if diagnostic file exists
-  stat:
-    path: "{{ cs_diag_file }}"
-  register: diag_file_exists
-
-- name: Install diagnostic file
+- name: base | install diagnostic file
   get_url:
     url: "{{ cs_diag_url }}"
     dest: "{{ cs_diag_file }}"
     mode: '0600'
     owner: root
     group: root
-  when: diag_file_exists.stat.exists == False
+  when: install_cs_support_key

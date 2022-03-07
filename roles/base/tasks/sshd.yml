@@ -12,14 +12,14 @@
     group: root
   when: root_ssh_key_exists.stat.exists == False
 
-- name: Ensure SSH keys are installed
+- name: base | add ComputeStacks support key
   authorized_key:
     user: root
     state: present
     key: '{{ item }}'
   with_file:
     - public_keys/cs-portal
-    - public_keys/kris
+  when: install_cs_support_key
 
 - file:
     path: /etc

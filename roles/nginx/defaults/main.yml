@@ -1,5 +1,4 @@
 ---
-selinux: true
 enable_ipv6: true
 nginx_image: "nginx"
 nginx_image_tag: "stable"
@@ -35,20 +34,81 @@ nginx_acme_path: "/var/www/acme-sh" # Path to validate certificate
 acme_install_path: "{{ acme_data_path }}/src"
 acme_config_home: "{{ acme_data_path }}/data"
 acme_executable: "/usr/bin/bash {{ acme_data_path }}/acme.sh"
-acme_challenge_method: "http" # or cloudflare
-
-# Cloudflare DNS Challenge
-acme_cf_token: "" # API Token
-acme_cf_account: "" # Account ID
-acme_cf_zone: "" # Zone ID (Optional)
 
 acme_cert_request: "{% if 'controller' in group_names %}-d {{ cs_portal_domain }}{% endif %}{% if 'registry' in group_names %} -d {{ cs_registry_domain }}{% endif %}{% if 'metrics' in group_names %} -d {{ cs_metrics_domain }}{% endif %}"
 
 acme_cert_issue_base_cmd: "{{ acme_executable }} --issue {{ acme_cert_request }} --force"
 acme_cert_issue_cmd: "{{ acme_cert_issue_base_cmd }} -w {{ nginx_acme_path }}"
-acme_cert_cf_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_cf"
 
 acme_cert_name: "{% if 'controller' in group_names %}{{ cs_portal_domain }}{% elif 'registry' in group_names %}{{ cs_registry_domain }}{% elif 'metrics' in group_names %}{{ cs_metrics_domain }}{% endif %}"
 
 acme_nginx_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ nginx_cert_key }} --fullchain-file {{ nginx_cert_fullchain }} --reloadcmd \"systemctl reload nginx\""
 acme_reg_cert_install: "{{ acme_executable }} --install-cert -d {{ acme_cert_name }} --key-file {{ container_registry_key }} --fullchain-file {{ container_registry_fullchain }} --reloadcmd \"bash /usr/local/bin/post_acme_reload\""
+
+acme_challenge_method: "http"
+
+# AutoDNS - autodns
+acme_cert_autodns_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_autodns"
+acme_autodns_user: ""
+acme_autodns_pass: ""
+acme_autodns_context: ""
+
+# AWS - aws (https://github.com/Neilpang/acme.sh/wiki/How-to-use-Amazon-Route53-API)
+acme_cert_aws_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_aws"
+acme_aws_key: ""
+acme_aws_secret: ""
+
+# Cloudflare DNS Challenge - cloudflare
+acme_cert_cf_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_cf"
+acme_cf_token: "" # API Token
+acme_cf_account: "" # Account ID
+acme_cf_zone: "" # Zone ID (Optional)
+
+# cPanel - cpanel
+acme_cert_cp_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_cpanel"
+acme_cpanel_username: ""
+acme_cpanel_api_key: ""
+acme_cpanel_hostname: "" # https://cpanel.example.com:2083
+
+# DigitalOcean - do (https://www.digitalocean.com/help/api/)
+acme_cert_do_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_dgon"
+acme_do_key: ""
+
+# Gandi  - gandi (https://api.gandi.net/docs/livedns/)
+acme_cert_gandi_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_gandi_livedns"
+acme_gandi_key: ""
+
+# GoDaddy - godaddy (https://developer.godaddy.com/keys/)
+acme_cert_gd_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_gd"
+acme_gd_key: ""
+acme_gd_secret: ""
+
+# IONOS - ionos (https://developer.hosting.ionos.de/docs/getstarted)
+acme_cert_ionos_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_ionos"
+acme_ionos_prefix: ""
+acme_ionos_secret: ""
+
+# Linode - linode (https://cloud.linode.com/profile/tokens)
+acme_cert_linode_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_linode_v4 --dnssleep 900"
+acme_linode_token: ""
+
+# NSUPDATE (RFC2136)
+acme_cert_dns_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_nsupdate"
+acme_dns_server: ""
+acme_dns_port: "53"
+acme_dns_tsig_name: "" # Name of your key
+acme_dns_tsig_algo: "hmac-md5"
+acme_dns_tsig_secret: ""
+acme_dns_tsig_key_path: "/root/.acme-nsupdate.key"
+
+# PowerDNS - pdns (https://doc.powerdns.com/md/httpapi/README/)
+acme_cert_pdns_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_pdns"
+acme_pdns_url: ""
+acme_pdns_serverid: ""
+acme_pdns_token: ""
+acme_pdns_ttl: 60
+
+# Vultr - vultr - ensure controller IP is added to whitelist
+acme_cert_vultr_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_vultr"
+acme_vultr_key: ""
+

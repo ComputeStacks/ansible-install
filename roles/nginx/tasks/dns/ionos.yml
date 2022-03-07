@@ -1,0 +1,8 @@
+---
+- name: Request Certificate (IONOS)
+  shell: "{{ acme_cert_ionos_issue_cmd }}"
+  environment:
+    IONOS_PREFIX: "{{ acme_ionos_prefix }}"
+    IONOS_SECRET: "{{ acme_ionos_secret }}"
+  vars:
+    ansible_ssh_pipelining: no

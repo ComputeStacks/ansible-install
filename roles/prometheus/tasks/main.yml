@@ -1,7 +1,22 @@
 ---
+- name: prometheos | pull image
+  community.general.docker_image:
+    name: "{{ prometheus_image }}"
+    tag: "{{ prometheus_image_tag }}"
+    source: pull
+  tags: ['never', 'bootstrap', 'addnode']
+
 - import_tasks: install.yml
   when: ansible_facts.services['prometheus.service'] is not defined
   tags: ['never', 'bootstrap']
 
 - import_tasks: configuration.yml
+  tags: ['never', 'bootstrap', 'addnode']
+
+- name: prometheus | restart
+  systemd:
+    name: prometheus
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
   tags: ['never', 'bootstrap', 'addnode']

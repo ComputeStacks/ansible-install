@@ -1,3 +1,6 @@
 ---
 - include_tasks: install.yml
   when: ansible_facts.services['cs-agent.service'] is not defined
+
+- include_tasks: install_binary.yml
+  when: ansible_facts.services['cs-agent.service'] is defined

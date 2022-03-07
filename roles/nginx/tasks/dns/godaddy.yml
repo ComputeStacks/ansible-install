@@ -1,0 +1,8 @@
+---
+- name: Request Certificate (GoDaddy)
+  shell: "{{ acme_cert_gd_issue_cmd }}"
+  environment:
+    GD_Key: "{{ acme_gd_key }}"
+    GD_Secret: "{{ acme_gd_secret }}"
+  vars:
+    ansible_ssh_pipelining: no

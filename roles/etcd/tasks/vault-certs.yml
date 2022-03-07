@@ -1,0 +1,86 @@
+---
+- name: Create etcd certs directory
+  file:
+    state: directory
+    path: "{{ item }}"
+    owner: etcd
+    group: etcd
+    mode: 0740
+  with_items:
+    - "{{ etcd_certs_dir }}"
+    - "{{ etcd_certs_dir }}/server"
+    - "{{ etcd_certs_dir }}/client"
+
+- name: Request etcd server certificate
+  shell: |
+    docker exec -it vault-bootstrap vault write -format json pki/etcd/issue/server \
+                                                common_name={{ hostvars[inventory_hostname].ansible_hostname }} \
+                                                ip_sans="{{ etcd_ip_sans }}" \
+                                                ttl=43800h
+  register: etcd_server_cert
+  delegate_to: "{{ groups['controller'][0] }}"
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Parse output of vault server generate
+  set_fact:
+    server_cert_parsed: "{{ etcd_server_cert.stdout | from_json }}"
+
+- name: Write CA
+  copy:
+    content: "{{ server_cert_parsed.data.issuing_ca }}\n"
+    dest: "{{ etcd_ca_file }}"
+    group: root
+    owner: root
+    mode: 0444
+
+- name: Write server certificate
+  copy:
+    content: "{{ server_cert_parsed.data.certificate }}\n"
+    dest: "{{ etcd_cert_file }}"
+    group: etcd
+    owner: etcd
+    mode: 0400
+
+- name: Write server key
+  copy:
+    content: "{{ server_cert_parsed.data.private_key }}\n"
+    dest: "{{ etcd_key_file }}"
+    group: etcd
+    owner: etcd
+    mode: 0400
+
+- name: Request etcd client certificate
+  shell: |
+    docker exec -it vault-bootstrap vault write -format json pki/etcd/issue/client \
+                                                common_name={{ hostvars[inventory_hostname].ansible_hostname }} \
+                                                ttl=43800h
+  register: etcd_client_cert
+  delegate_to: "{{ groups['controller'][0] }}"
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Parse output of vault client generate
+  set_fact:
+    client_cert_parsed: "{{ etcd_client_cert.stdout | from_json }}"
+
+- name: Write client certificate
+  copy:
+    content: "{{ client_cert_parsed.data.certificate }}\n"
+    dest: "{{ etcd_client_cert_file }}"
+    group: root
+    owner: root
+    mode: 0440
+
+- name: Write client key
+  copy:
+    content: "{{ client_cert_parsed.data.private_key }}\n"
+    dest: "{{ etcd_client_key_file }}"
+    group: root
+    owner: root
+    mode: 0400
+
+- name: Setup local etcdctl
+  template:
+    src: etcdctl.j2
+    dest: /etc/profile.d/etcdctl.sh

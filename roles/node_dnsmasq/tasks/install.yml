@@ -4,12 +4,51 @@
     name: dnsmasq
     state: present  
 
+- name: stop and disable resolvconf
+  systemd:
+    name: resolvconf
+    state: stopped
+    enabled: no
+  ignore_errors: yes
+  no_log: True
 
-- include_tasks: centos.yml
-  when: ansible_distribution == 'CentOS'
+- name: Disable systemd resolve
+  systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: no
+  ignore_errors: yes
+  no_log: True
 
-- include_tasks: debian.yml
-  when: ansible_distribution == 'Debian'
+- name: install dnsmasq conf
+  copy:
+    src: dnsmasq-debian.conf
+    dest: /etc/dnsmasq.conf
+
+- name: install dnsmasq.resolv
+  copy:
+    src: resolv.dnsmasq
+    dest: /etc/resolv.dnsmasq
+
+- name: check if using dhcp conf
+  stat:
+    path: /etc/dhcp/dhclient.conf
+  register: dhcp_conf
+
+- name: modify dhcp conf dns servers
+  lineinfile:
+    dest: /etc/dhcp/dhclient.conf
+    regexp: "^prepend domain-name-servers"
+    line: "prepend domain-name-servers 127.0.0.1, 8.8.8.8;"
+    state: present
+  when: dhcp_conf.stat.exists
+
+# For Resolvconf, /etc/resolv.conf may be a symlink, 
+# so lets just wipe that out before we install our version
+- name: clean resolvconf
+  file:
+    path: /etc/resolv.conf
+    state: absent
 
 - name: install new resolv.conf
   copy:

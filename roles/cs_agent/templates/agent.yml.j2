@@ -4,6 +4,7 @@ computestacks:
 consul:
   host: "{{ consul_listen_ip }}:{{ consul_listen_port }}"
   tls: true
+  token: "{{ consul_token }}"
 backups:
   enabled: {{ backups_enabled | lower }}
   check_freq: "{{ backups_check_freq }}"
@@ -19,10 +20,8 @@ backups:
       user: "{{ backup_nfs_ssh_user }}" # SSH key used to connect to NFS server
       port: "{{ backup_nfs_ssh_port }}"
       keyfile: "{{ backup_nfs_ssh_keyfile }}" # SSH key used to connect to NFS server
-{% if ansible_distribution == 'Debian' %}
     fs:
       user: nobody
       group: nogroup
-{% endif %}
 docker:
   version: "{{ docker_api_version }}"

@@ -1,35 +1,49 @@
-{% for host in groups['nodes'] %}
+{% for host in groups['nodes'] -%}
 Host {{ hostvars[host].ansible_hostname }}
   User root
   HostName {{ hostvars[host].consul_listen_ip }}
   Port {{ hostvars[host].ssh_port }}
 {{ '' }}
-{% endfor %}
-{% for host in groups['backup_server'] %}
+{% endfor -%}
+{% for host in groups['backup_server'] -%}
 Host {{ hostvars[host].ansible_hostname }}
   User root
   HostName {{ hostvars[host].controller_ip }}
   Port {{ hostvars[host].ssh_port }}
 {{ '' }}
-{% endfor %}
-{% if 'metrics' not in group_names %}
-{% for host in groups['metrics'] %}
+{% endfor -%}
+{% if 'metrics' not in group_names -%}
+{% for host in groups['metrics'] -%}
 Host {{ hostvars[host].ansible_hostname }}
   User root
   HostName {{ hostvars[host].controller_endpoint }}
   Port {{ hostvars[host].ssh_port }}
 {{ '' }}
-{% endfor %}
-{% endif %}
-{% if 'registry' not in group_names %}
-{% for host in groups['registry'] %}
+{% endfor -%}
+{% endif -%}
+{% if 'registry' not in group_names -%}
+{% for host in groups['registry'] -%}
 Host {{ hostvars[host].ansible_hostname }}
   User root
   HostName {{ hostvars[host].controller_ip }}
   Port {{ hostvars[host].ssh_port }}
 {{ '' }}
-{% endfor %}
-{% endif %}
+{% endfor -%}
+{% endif -%}
+{% for host in groups['primary_nameserver'] -%}
+Host {{ hostvars[host].ansible_hostname }}
+  User root
+  HostName {{ hostvars[host].ansible_default_ipv4.address }}
+  Port {{ hostvars[host].ssh_port }}
+{{ '' }}
+{% endfor -%}
+{% for host in groups['follower_nameservers'] -%}
+Host {{ hostvars[host].ansible_hostname }}
+  User root
+  HostName {{ hostvars[host].ansible_default_ipv4.address }}
+  Port {{ hostvars[host].ssh_port }}
+{{ '' }}
+{% endfor -%}
 
 Host *
   ServerAliveInterval 60

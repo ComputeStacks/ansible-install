@@ -3,7 +3,6 @@
   apt:
     name: nfs-kernel-server
     state: present
-  when: ansible_distribution == 'Debian'
 
 - name: setup nfsshare
   file:
@@ -15,21 +14,8 @@
 
 - name: restart services
   service:
-    name: "{{ item }}"
-    enabled: yes
-    state: started
-  loop:
-    - rpcbind
-    - nfs-server
-    - nfs-lock
-    - nfs-idmap
-  when: ansible_distribution == 'CentOS'
-
-- name: restart services
-  service:
     name: nfs-kernel-server
     enabled: yes
     state: started
-  when: ansible_distribution == 'Debian'
 
 - import_tasks: "ssh_keys.yml"

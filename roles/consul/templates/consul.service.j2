@@ -18,7 +18,7 @@ ExecStart=/usr/bin/env docker run --rm --name consul \
       -e CONSUL_CLIENT_CERT=/consul/config/ssl/server.crt \
       -e CONSUL_CLIENT_KEY=/consul/config/ssl/server.key \
       -e CONSUL_HTTP_ADDR=https://{{ consul_listen_ip }}:8501 \
-      -v {{ consul_host_config_dir }}:/consul/config{% if selinux %}:z{% endif %} \
+      -v {{ consul_host_config_dir }}:/consul/config \
       {{ consul_image }}:{{ consul_image_tag }} consul agent -config-file=/consul/config/config.json
 
 ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill consul 2>/dev/null'

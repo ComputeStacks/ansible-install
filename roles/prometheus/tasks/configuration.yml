@@ -12,28 +12,23 @@
   template:
     src: prometheus.yml
     dest: /etc/prometheus/prometheus.yml
-  notify: restart prometheus
 
 - name: install cadvisor config
   template:
     src: cadvisor.yml
     dest: "/etc/prometheus/cadvisor/{{ availability_zone_name }}.yml"
-  notify: restart prometheus
 
 - name: install node_exporter config
   template:
     src: node_exporter.yml
     dest: "/etc/prometheus/node_exporter/{{ availability_zone_name }}.yml"
-  notify: restart prometheus
 
 - name: install haproxy config
   template:
     src: haproxy.yml
     dest: "/etc/prometheus/haproxy/{{ availability_zone_name }}.yml"
-  notify: restart prometheus
 
 - name: install alerts_containers
   template:
     src: alerts_containers.yml.j2
     dest: /etc/prometheus/alerts_containers.yml
-  notify: restart prometheus

@@ -6,6 +6,7 @@ enable_debug: false
 cs_portal_domain: ""
 consul_listen_ip: "127.0.0.1"
 consul_listen_port: 8501
+consul_token: "" # placeholder
 
 ##
 # Agent Configuration

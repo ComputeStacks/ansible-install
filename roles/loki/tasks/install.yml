@@ -4,6 +4,11 @@
     name: ops
     state: present
 
+- name: create loki volume
+  community.general.docker_volume:
+    name: loki-data
+    state: present
+
 - name: create directories
   file:
     path: "{{ item }}"
@@ -16,26 +21,3 @@
   copy:
     src: loki-config.yml
     dest: /etc/loki/loki-config.yml
-
-- name: pull image
-  community.general.docker_image:
-    name: "{{ loki_image }}"
-    tag: "{{ loki_image_tag }}"
-    source: pull
-
-- name: create loki volume
-  community.general.docker_volume:
-    name: loki-data
-    state: present
-
-- name: install loki systemd
-  template:
-    src: loki.service.j2
-    dest: /etc/systemd/system/loki.service
-
-- name: start loki
-  systemd:
-    name: loki
-    state: started
-    enabled: yes
-    daemon_reload: yes

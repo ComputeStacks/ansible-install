@@ -15,23 +15,11 @@
         secret_auth_key: "{{ secret_auth_key_raw.stdout }}"
   when: secret_auth_key == ""
 
-- name: Write cstacks command script
-  copy:
-    src: cstacks.sh
-    dest: /usr/local/bin/cstacks
-    mode: 0740
-
 - name: Write cstacks settings
   template:
     src: default-computestacks.j2
     dest: "{{ cs_environmental_file }}"
     mode: 0640
-
-- name: Install bash completion script for cstacks
-  copy:
-    src: cstacks_completion.sh
-    dest: /etc/bash_completion.d/cstacks.sh
-    mode: 0740
 
 - name: branding css
   get_url:

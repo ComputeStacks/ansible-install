@@ -32,7 +32,14 @@
   vars:
     ansible_ssh_pipelining: no
 
-- name: Enable ZeroSSL for future certificates
+- name: Use LetsEncrypt for SSL
+  shell:
+    cmd: "{{ acme_executable }} --set-default-ca --server letsencrypt"
+  when: not use_zerossl
+  vars:
+    ansible_ssh_pipelining: no
+
+- name: Use ZeroSSL for SSL
   shell:
     cmd: "{{ acme_executable }} --set-default-ca --server zerossl"
   when: use_zerossl

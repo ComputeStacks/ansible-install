@@ -1,22 +1,8 @@
 ---
 - include_tasks: validate/preflight.yml
-
-- name: Load service state
-  service_facts:
-
-- include_tasks: centos7/packages.yml
-  when: ansible_distribution == 'CentOS'
-
 - include_tasks: debian/packages.yml
-  when: ansible_distribution == 'Debian'
-
 - include_tasks: validate/postcheck.yml
-
 - include_tasks: debian/setup.yml
-  when: ansible_distribution == 'Debian'
-
-- include_tasks: centos7/kernel.yml
-  when: is_centos_7
 
 - name: install tmux.conf
   get_url:
@@ -37,18 +23,12 @@
     src: motd.j2
     dest: /etc/motd
 
-- name: Check if docker console script exists
-  stat:
-    path: /etc/profile.d/docker_console.sh
-  register: docker_console_exists
-
 - name: Install docker console script
   copy:
     src: docker_console.sh
     dest: /etc/profile.d/
     owner: root
     group: root
-  when: docker_console_exists.stat.exists == False
 
 - include_tasks: sshd.yml
 

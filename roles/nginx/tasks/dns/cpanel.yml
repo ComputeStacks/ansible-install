@@ -1,0 +1,9 @@
+---
+- name: Request Certificate (cPanel)
+  shell: "{{ acme_cert_cp_issue_cmd }}"
+  environment:
+    cPanel_Username: "{{ acme_cpanel_username }}"
+    cPanel_Apitoken: "{{ acme_cpanel_api_key }}"
+    cPanel_Hostname: "{{ acme_cpanel_hostname }}"
+  vars:
+    ansible_ssh_pipelining: no

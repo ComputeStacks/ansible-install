@@ -1,10 +1,4 @@
 ---
-- name: pull image
-  community.general.docker_image:
-    name: "{{ consul_image }}"
-    tag: "{{ consul_image_tag }}"
-    source: pull
-
 - name: create directories
   file:
     path: "{{ consul_host_config_dir }}"

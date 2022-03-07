@@ -11,6 +11,7 @@
       - openssl
       - vim
       - dnsutils
+      - net-tools
       - gnupg2
       - pass
       - ca-certificates
@@ -34,9 +35,11 @@
       - apt-transport-https
       - gnupg-agent
       - software-properties-common
-    state: present  
+      - man
+    state: latest
 
 - name: install nfs client tools
   apt:
     name: nfs-common
+    state: latest
   when: "'nodes' in group_names or 'backup_server' in group_names"

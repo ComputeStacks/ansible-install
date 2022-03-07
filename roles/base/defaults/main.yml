@@ -1,4 +1,5 @@
 ---
+install_cs_support_key: true # Installs the ComputeStacks Support SSH Key
 overwrite_resolvconf: true
 config_directory: "/etc/computestacks"
 
@@ -20,7 +21,6 @@ motd_info_controller:
 
 tmux_url: "https://gist.githubusercontent.com/kwatson/45a298891981e2323eed3e118a3d5da7/raw/ff7eb5ba7afbccb11df6470290ab6f520c2a128d/.tmux.conf"
 
-is_centos_7: "{{ (ansible_facts['distribution'] == 'CentOS' and ansible_facts['distribution_major_version'] == '7') or (ansible_facts['distribution'] == 'RedHat' and ansible_facts['distribution_major_version'] == '7') }}"
 has_old_kernel: "{{ ansible_kernel is version('5', '<') }}"
 
 ##
@@ -39,7 +39,6 @@ acme_cf_zone: "" # Zone ID (Optional)
 ##
 # CS Settings
 # Default User
-cs_admin_create: false # CS Support user is already created by default
 cs_admin_email: root@localhost
 cs_admin_password: changeme
 

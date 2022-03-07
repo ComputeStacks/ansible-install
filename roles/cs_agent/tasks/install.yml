@@ -5,31 +5,20 @@
     state: directory
     mode: '0740'
 
-- name: Download agent
-  unarchive:
-    src: "{{ agent_download_url }}"
-    dest: /usr/local/src/
-    remote_src: yes
+- import_tasks: install_binary.yml
+- import_tasks: ssl_consul.yml
+- import_tasks: ssl_docker.yml
 
-# Should fail and kill ansible
-# see: https://stackoverflow.com/questions/34340562/evaluating-return-code-in-ansible-conditional
-- name: Verify integrity
-  shell: |
-    cd /usr/local/src && gpg --verify cs-agent.sig cs-agent
-  args:
-    warn: false
+- name: read consul token
+  slurp:
+    src: "/root/.consul.secret"
+  register: consul_token_raw
+  delegate_to: "{{ groups['nodes'][0] }}"
+  run_once: true
 
-- name: Install agent binary
-  copy:
-    remote_src: true
-    src: /usr/local/src/cs-agent
-    dest: /usr/local/bin/cs-agent
-    owner: root
-    group: root
-    mode: '0655'
-
-- include_tasks: ssl_consul.yml
-- include_tasks: ssl_docker.yml
+- set_fact:
+    consul_token: "{{ consul_token_raw.content | b64decode }}"
+  run_once: true
 
 - name: Install agent config
   template:

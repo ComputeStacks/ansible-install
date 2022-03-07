@@ -1,0 +1,9 @@
+---
+- name: Request Certificate (AutoDNS)
+  shell: "{{ acme_cert_autodns_issue_cmd }}"
+  environment:
+    AUTODNS_USER: "{{ acme_autodns_user }}"
+    AUTODNS_PASSWORD: "{{ acme_autodns_pass }}"
+    AUTODNS_CONTEXT: "{{ acme_autodns_context }}"
+  vars:
+    ansible_ssh_pipelining: no

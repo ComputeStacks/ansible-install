@@ -1,5 +1,5 @@
 [Service]
 ExecStart=
-ExecStart={{ docker_bin }} -H unix:// -H tcp://0.0.0.0:2376{{ ' ' }}{%- if disable_ipv6 -%}--ipv6=false{{ ' ' }}{%- endif -%}{{ ' ' }}{%- if docker_registry_mirror != '' -%}--registry-mirror={{ docker_registry_mirror }}{{ ' ' }}{%- endif -%}{{ ' ' }}{%- if selinux -%}--selinux-enabled{{ ' ' }}{%- endif -%}--icc=false --userland-proxy=false --cluster-store=etcd://{{ etcd_listen_ip }}:2379 --tlsverify --tlscacert={{ docker_ca_file }} --tlscert={{ docker_cert_file }} --tlskey={{ docker_key_file }} --cluster-store-opt kv.cacertfile={{ etcd_ca_file }} --cluster-store-opt kv.certfile={{ etcd_client_cert_file }} --cluster-store-opt kv.keyfile={{ etcd_client_key_file }}
+ExecStart={{ docker_bin }} -H unix:// -H tcp://0.0.0.0:2376{{ ' ' }}{%- if disable_ipv6 -%}--ipv6=false{{ ' ' }}{%- endif -%}{{ ' ' }}{%- if docker_registry_mirror != '' -%}--registry-mirror={{ docker_registry_mirror }}{{ ' ' }}{%- endif -%}{{ ' ' }}--icc=false --userland-proxy=false --cluster-store=etcd://{{ etcd_listen_ip }}:2379 --tlsverify --tlscacert={{ docker_ca_file }} --tlscert={{ docker_cert_file }} --tlskey={{ docker_key_file }} --cluster-store-opt kv.cacertfile={{ etcd_ca_file }} --cluster-store-opt kv.certfile={{ etcd_client_cert_file }} --cluster-store-opt kv.keyfile={{ etcd_client_key_file }}
 {{ '' }}
 TasksMax=infinity

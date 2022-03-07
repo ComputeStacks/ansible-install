@@ -3,12 +3,4 @@
   fail:
     msg: node_exporter is not running
   when:
-    - ansible_distribution == 'CentOS' 
-    - ansible_facts.services['node_exporter.service']['state'] != 'running'
-
-- name: node_exporter
-  fail:
-    msg: node_exporter is not running
-  when:
-    - ansible_distribution == 'Debian' 
     - ansible_facts.services['prometheus-node-exporter.service']['state'] != 'running'

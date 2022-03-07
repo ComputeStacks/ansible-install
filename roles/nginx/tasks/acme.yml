@@ -41,28 +41,8 @@
     ansible_ssh_pipelining: no
   when: "acme_challenge_method == 'http'"
 
-- name: Request Certificate (Cloudflare)
-  shell: "{{ acme_cert_cf_issue_cmd }}"
-  environment:
-    CF_Token: "{{ acme_cf_token }}"
-    CF_Account_ID: "{{ acme_cf_account }}"
-  vars:
-    ansible_ssh_pipelining: no
-  when:
-    - "acme_challenge_method == 'cloudflare'"
-    - "acme_cf_zone == ''"
-
-- name: Request Certificate (Cloudflare)
-  shell: "{{ acme_cert_cf_issue_cmd }}"
-  environment:
-    CF_Token: "{{ acme_cf_token }}"
-    CF_Account_ID: "{{ acme_cf_account }}"
-    CF_ZONE_ID: "{{ acme_cf_zone }}"
-  vars:
-    ansible_ssh_pipelining: no
-  when:
-    - "acme_challenge_method == 'cloudflare'"
-    - "acme_cf_zone != ''"
+- include_tasks: acme_dns.yml
+  when: "acme_challenge_method != 'http'"
 
 - name: Install Certificate
   shell: "{{ acme_nginx_cert_install }}"

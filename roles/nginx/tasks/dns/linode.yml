@@ -1,0 +1,7 @@
+---
+- name: Request Certificate (Linode)
+  shell: "{{ acme_cert_linode_issue_cmd }}"
+  environment:
+    LINODE_V4_API_KEY: "{{ acme_linode_token }}"
+  vars:
+    ansible_ssh_pipelining: no

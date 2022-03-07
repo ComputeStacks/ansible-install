@@ -1,8 +1,5 @@
 ---
-- include_tasks: centos/install.yml
-  when: ansible_distribution == 'CentOS'
 - include_tasks: debian/install.yml
-  when: ansible_distribution == 'Debian'
 
 - name: create certificate directory
   file:

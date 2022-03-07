@@ -1,7 +1,7 @@
 ---
 - include_tasks: preflight.yml
 
-- name: Check if Acme initialized
+- name: nginx | check for acme
   stat:
     path: "{{ nginx_cert_fullchain }}"
   register: le_initialized
@@ -11,7 +11,7 @@
 
 - include_tasks: finalize.yml
 
-- name: start nginx
+- name: nginx | restart
   systemd:
     name: nginx
     state: restarted

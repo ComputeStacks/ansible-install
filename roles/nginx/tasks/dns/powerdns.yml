@@ -1,0 +1,10 @@
+---
+- name: Request Certificate (PowerDNS)
+  shell: "{{ acme_cert_pdns_issue_cmd }}"
+  environment:
+    PDNS_Url: "{{ acme_pdns_url }}"
+    PDNS_ServerId: "{{ acme_pdns_serverid }}"
+    PDNS_Token: "{{ acme_pdns_token }}"
+    PDNS_Ttl: "{{ acme_pdns_ttl }}"
+  vars:
+    ansible_ssh_pipelining: no

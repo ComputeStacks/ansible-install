@@ -1,0 +1,7 @@
+---
+- name: Request Certificate (Gandi)
+  shell: "{{ acme_cert_gandi_issue_cmd }}"
+  environment:
+    GANDI_LIVEDNS_KEY: "{{ acme_gandi_key }}"
+  vars:
+    ansible_ssh_pipelining: no

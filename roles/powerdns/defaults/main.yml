@@ -1,0 +1,30 @@
+---
+pdns_name: "ns1.example.com"
+pdns_default_soa: "{{ pdns_name }} hostmaster.@ 0 10800 3600 604800 3600"
+pdns_default_ttl: 14400
+pdns_query_cache: 20
+
+pdns_dns_address: "0.0.0.0, ::"
+
+pdns_web_address: "0.0.0.0"
+pdns_web_allow: "0.0.0.0/0"
+
+pdns_credentials_dir: "/root/.credentials"
+pdns_credentials_api_file: "{{ pdns_credentials_dir }}/.powerdns.api.secret"
+pdns_credentials_web_file: "{{ pdns_credentials_dir }}/.powerdns.web.secret"
+pdns_credentials_db_file: "{{ pdns_credentials_dir }}/.powerdns.db.secret"
+
+pdns_leader_ip: "{{ hostvars[groups['primary_nameserver'][0]].postgres_ip }}"
+
+# By default, even if it's enabled, nobody can use nsupdate to update zones.
+# With this enabled, you will still need to configure `tsig` and `allow-dnsupdate-from`
+# metadata on each zone. See: https://doc.powerdns.com/authoritative/dnsupdate.html#per-zone-settings
+enable_dnsupdate: true
+
+# Postgres
+pdns_postgresql_repo: "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main"
+pdns_postgresql_repo_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+pdns_postgresql_version: 13
+pdns_postgresql_data_dir: "/var/lib/postgresql/{{ pdns_postgresql_version }}"
+pdns_postgresql_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/postgresql.conf"
+pdns_postgresql_hba_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/pg_hba.conf"

@@ -1,0 +1,22 @@
+---
+- name: add pg key
+  apt_key:
+    url: "{{ pdns_postgresql_repo_key }}"
+    state: present
+
+- name: add pg repo
+  apt_repository:
+    repo: "{{ pdns_postgresql_repo }}"
+    state: present
+    filename: postgresql
+  
+- name: install pg packages
+  apt:
+    name:
+      - "postgresql-{{ pdns_postgresql_version }}"
+      - python3-psycopg2
+    state: present
+    update_cache: yes
+
+- include_tasks: install_postgres_leader.yml
+  when: "'primary_nameserver' in group_names"

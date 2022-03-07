@@ -1,10 +1,11 @@
 ---
-- include_tasks: install_centos.yml
-  when:
-    - ansible_distribution == 'CentOS' 
-    - ansible_facts.services['node_exporter.service'] is not defined
+- name: install node exporter
+  apt:
+    name: prometheus-node-exporter
+    state: latest
 
-- include_tasks: install_debian.yml
-  when:
-    - ansible_distribution == 'Debian' 
-    - ansible_facts.services['prometheus-node-exporter.service'] is not defined
+- name: activate and run
+  systemd:
+    name: prometheus-node-exporter
+    state: started
+    enabled: yes

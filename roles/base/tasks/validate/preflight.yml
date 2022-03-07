@@ -1,11 +1,4 @@
 ---
-- name: Ensure SELinux is enabled
-  fail:
-    msg: SELinux is disabled
-  when:
-    - ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
-    - ansible_selinux == False or ansible_selinux.status == 'disabled'
-
 - name: Ensure portal domain exists
   fail:
     msg: "'cs_portal_domain' is not defined"
@@ -38,23 +31,15 @@
 
 - name: Ensure correct linux variant
   fail:
-    msg: "Invalid OS distribution. Only CentOS 7 and Debian 10 are supported."
+    msg: "Invalid OS distribution. Only Debian 11 are supported."
   when:
-    - ansible_distribution != "CentOS"
     - ansible_distribution != 'Debian'
 
-- name: Ensure supported linux version (CentOS)
+- name: Ensure supported linux version
   fail:
-    msg: "Invalid CentOS version. Only version 7 is supported"
+    msg: "Invalid Debian version. Only version 11 is supported"
   when: 
-    - ansible_facts['distribution_major_version']|int < 7 or ansible_facts['distribution_major_version']|int > 7
-    - ansible_distribution == 'CentOS'
-
-- name: Ensure supported linux version (Debian)
-  fail:
-    msg: "Invalid Debian version. Only version 10 is supported"
-  when: 
-    - ansible_facts['distribution_major_version']|int == "10"
+    - ansible_facts['distribution_major_version']|int == "11"
     - ansible_distribution == 'Debian'
 
 - name: Ensure DigitalOcean token exists
@@ -88,7 +73,6 @@
       fail:
         msg: Missing cs_admin_password
       when: "cs_admin_password == '' or cs_admin_password == 'changeme'"
-  when: cs_admin_create
 
 - name: Validate etcd_initial_cluster_state
   fail:

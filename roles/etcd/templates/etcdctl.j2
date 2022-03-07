@@ -1,0 +1,4 @@
+export ETCDCTL_ENDPOINT=https://{{ etcd_listen_ip }}:2379
+export ETCDCTL_CA_FILE={{ etcd_ca_file }}
+export ETCDCTL_CERT_FILE={{ etcd_client_cert_file }}
+export ETCDCTL_KEY_FILE={{ etcd_client_key_file }}

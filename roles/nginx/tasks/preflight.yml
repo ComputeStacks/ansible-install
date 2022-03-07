@@ -45,12 +45,6 @@
     - error_files/503-error.html
     - error_files/504-error.html
 
-- name: nginx install image
-  community.general.docker_image:
-    name: "{{ nginx_image }}"
-    tag: "{{ nginx_image_tag }}"
-    source: pull
-
 - name: install dhparam
   get_url:
     url: https://ssl-config.mozilla.org/ffdhe2048.txt
@@ -69,6 +63,12 @@
     src: error_pages.conf
     dest: /etc/nginx/common/error_pages.conf
 
+- name: nginx install image
+  community.general.docker_image:
+    name: "{{ nginx_image }}"
+    tag: "{{ nginx_image_tag }}"
+    source: pull
+    
 - name: install nginx systemd
   template:
     src: nginx.service

@@ -56,5 +56,5 @@
 - name: Pull image ssh
   docker_image:
     name: cmptstks/ssh
-    tag: latest
+    tag: v2
     source: pull

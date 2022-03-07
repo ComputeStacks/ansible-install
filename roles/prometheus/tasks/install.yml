@@ -1,10 +1,4 @@
 ---
-- name: pull image
-  community.general.docker_image:
-    name: "{{ prometheus_image }}"
-    tag: "{{ prometheus_image_tag }}"
-    source: pull
-
 - name: create directories
   file:
     path: "/etc/prometheus"
@@ -35,4 +29,3 @@
   template:
     src: prometheus.service.j2
     dest: /etc/systemd/system/prometheus.service
-  notify: restart prometheus

@@ -30,6 +30,7 @@ bootstrap-app()
           -e DOCKER_CERT_PATH=/root/.docker \
           -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
           -e CS_BOOTSTRAP=true \
+          -e SENTRY_DSN=$SENTRY_DSN \
           --net=host \
           --log-driver=journald \
           $CS_REG bundle exec rake bootstrap
@@ -58,6 +59,7 @@ bootstrap-db()
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
         -e CS_BOOTSTRAP=true \
+        -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rails db:schema:load \
@@ -90,6 +92,7 @@ console()
         -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
+        -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rails c
@@ -122,6 +125,7 @@ container()
         -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
+        -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --log-driver=journald \
         $CS_REG ash
@@ -163,6 +167,7 @@ upgrade()
           -e RACK_ENV=production \
           -e DOCKER_CERT_PATH=/root/.docker \
           -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+          -e SENTRY_DSN=$SENTRY_DSN \
           --net=host \
           --log-driver=journald \
           $CS_REG bundle exec rails db:migrate
@@ -196,6 +201,7 @@ run()
         -e QUEUE_SYSTEM=$QUEUE_SYSTEM \
         -e QUEUE_DEPLOYMENTS=$QUEUE_DEPLOYMENTS \
         -e QUEUE_LE=$QUEUE_LE \
+        -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --restart=unless-stopped \
         --log-driver=journald \
@@ -229,6 +235,7 @@ test()
         -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
+        -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rake test_connection:all

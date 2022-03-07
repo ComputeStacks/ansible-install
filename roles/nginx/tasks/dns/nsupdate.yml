@@ -1,0 +1,15 @@
+---
+- name: Write nsupdate key
+  template:
+    src: acme-dns/nsupdate.conf
+    dest: "{{ acme_dns_tsig_key_path }}"
+    mode: 0600
+
+- name: Request Certificate (NSUPDATE)
+  shell: "{{ acme_cert_dns_issue_cmd }}"
+  environment:
+    NSUPDATE_SERVER: "{{ acme_dns_server }}"
+    NSUPDATE_SERVER_PORT: "{{ acme_dns_port }}"
+    NSUPDATE_KEY: "{{ acme_dns_tsig_key_path }}"
+  vars:
+    ansible_ssh_pipelining: no

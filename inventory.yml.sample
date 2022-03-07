@@ -1,16 +1,24 @@
 ---
 all:
-  vars:    
-    license_key: "" # https://accounts.computestacks.com/store/computestacks
+  vars:
+    # Installs the ComputeStacks Support SSH Key, and adds our support ip to the firewall.
+    install_cs_support_key: true
     
     region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     availability_zone_name: "{{ region_name }}-a"
     
     overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
-    ansible_python_interpreter: /usr/bin/python3 # CentOS: /usr/bin/python
-    selinux: false # For CentOS, set to true.
+    ansible_python_interpreter: /usr/bin/python3
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
+
+    ##
+    # Bug Reporting
+    #
+    # 1) Uncomment and leave blank to disable bug reporting completely.
+    # 2) Leave commented out to report bugs to ComputeStacks. 
+    # 3) Uncomment and set to your own Sentry DSN.
+    # sentry_dsn: ""
 
     ##
     # Cloud Platform Specifics
@@ -18,20 +26,29 @@ all:
     #
     # Please leave commented out unless you're running on digital ocean.
     #
-    # cloud_platform: "generic" # digitalocean
+    # cloud_platform: "digitalocean"
     # platform_do_token: "" # DigitalOcean Personal Access token to enable Floating IP Migration
 
     ##
     # Container Network
 
-    # We recommend not going larger than a `/24`. If you need more, you can create additional networks later.
-    calico_network: 10.100.10.0/24
-    calico_network_name: "net100" # some unique identifier. should not include spaces, capitals, or special characters.
-    calico_network_ipip: false # required when private network performs source/dest filtering
+    # We recommend not going larger than a `/21`. If you need more, you can create additional networks later.
+    calico_network: 10.100.10.0/21
+
+    # some unique identifier. should not include spaces, capitals, or special characters.
+    calico_network_name: "net100"
+
+    # required when private network performs source/dest filtering
+    calico_network_ipip: false
 
     ##
     # Floating IP
+
+    # Configures corosync & pacemaker for automated failover.
     enable_floating_ip: false
+
+    # Even if enable_floating_ip is false, set this to the public IP of your availability zone.
+    # for single-node environments, this can be just the public ip of the node.
     floating_ip: 0.0.0.0
     floating_ip_netmask: 32
 
@@ -40,16 +57,11 @@ all:
     # If, however, floating IP is in the same network as the primary ip
     # on that interface, you may leave the interface field blank and it should
     # correctly pick the correct interface.
-    floating_ip_interface: "eth0"
+    #
+    # floating_ip_interface: ""
 
     ##
     # CS Controller Settings
-
-    # This helps us identify your installation when you contact us for support
-    # Please choose a unique name that is all lower case, has no spaces, and only '-' and '_' characters.
-    # We generally recommend your company name, so if you were 'Acme, Inc.', we would recommend 'acme'.
-    # Alternatively, if you do not want us to see this, you can generate a random string with: `pwgen -s 12 1`
-    cs_app_id: dev
     
     cs_app_url: a.dev.cmptstks.net
     cs_app_zone: cmptstks.net # The zone file for the app url
@@ -60,23 +72,17 @@ all:
 
     ##
     # Create Admin Account
-    cs_admin_create: true
     cs_admin_email: "root@localhost"
     cs_admin_password: changeme
 
     ##
     # Management SSL Certificates
-    # Controller, Registry, and Metrics will all receive ZeroSSL certificates during installation. By default,
-    # this will be done through HTTP validation. If you're using CloudFlare, you may optionally use DNS validation.
+    # Controller, Registry, and Metrics will all receive ZeroSSL certificates during installation. By default, this will be done through HTTP validation.
     #
-    # acme_challenge_method: "cloudflare" # default is: 'http'
-    # acme_cf_token: "" # API Token
-    # acme_cf_account: "" # Account ID
-    # acme_cf_zone: "" # Zone ID (Optional)
+    # acme_challenge_method: 'http'
+    #
+    # To use DNS validation, see `ACME_VALIDATIONS.md`. 
     
-    # If you would prefer LetsEncrypt, set:
-    # use_zerossl: false # default is: true
-
     ##
     # Additional Management Ips
     # Add any additional IP Addresses that you want to have full access
@@ -133,3 +139,20 @@ all:
           controller_ip: 127.0.0.1 # IP Addresses used by controller to connect to registry
           enable_ipv6: true
           ssh_port: 22
+    primary_nameserver:
+      hosts:
+        192.168.173.20:
+          pdns_name: "ns1.example.com"  
+          enable_ipv6: true
+          ssh_port: 22
+
+          # The ip used for internal postgres replication. 
+          # This may often times be separate than the primary public ip
+          postgres_ip: 192.168.173.20
+    follower_nameservers:
+        hosts: # Note that we only support 1 follower!
+          192.168.173.21:
+            pdns_name: "ns2.example.com"
+            enable_ipv6: true
+            ssh_port: 22      
+            postgres_ip: 192.168.173.21

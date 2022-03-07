@@ -26,8 +26,8 @@ etcd_listen_ip: 127.0.0.1
 
 ##
 # etcd certificates
-etcd_conf_dir: /etc/etcd
-etcd_certs_dir: "{{ etcd_conf_dir }}/certs"
+etcd_data_dir: /var/lib/etcd
+etcd_certs_dir: "{{ etcd_data_dir }}/certs"
 etcd_ca_file: "{{ etcd_certs_dir }}/ca.crt"
 etcd_client_cert_file: "{{ etcd_certs_dir }}/client/client.crt"
 etcd_client_key_file: "{{ etcd_certs_dir }}/client/client.key"

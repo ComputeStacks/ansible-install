@@ -1,9 +1,16 @@
 ---
-selinux: true
-license_key: ""
+##
+# Bug Reporting
+#
+# 1) Comment out and set to blank will disable bug reporting completely.
+# 2) Leave as below to enable bug reporting to ComputeStacks. 
+# 3) Set to your own Sentry DSN to report bugs to your own installation of Sentry.
+sentry_dsn: "https://dfcc28e876f549d887c1ff443775e107@sentry.cmptstks.com/2"
 
 secret_key: ""
 secret_auth_key: ""
+
+consul_token: ""
 
 region_name: "dev"
 availability_zone_name: "{{ region_name }}-a"
@@ -20,9 +27,9 @@ controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{
 ##
 # Controller Image
 docker_registry: ghcr.io
-controller_version: "6.4"
+controller_version: "7.0"
 controller_image: computestacks/controller
-controller_image_path: "{{ docker_registry }}/{{ controller_image }}:{{ controller_version }}"
+controller_image_path: "{{ docker_registry }}/{{ controller_image }}:v{{ controller_version }}"
 
 ##
 # Directory Structure & Paths
@@ -38,14 +45,21 @@ rake_tasks_directory: "{{ data_directory }}/rake"
 branding_directory: "{{ data_directory }}/branding"
 
 ##
+# Helps ComputeStacks support link bugs to your installation.
+# Note: Does not apply if you disable bug reporting
+#
+# 1) Leave as 'default' -- will generate a unique identifier for your installation
+# 2) Set your own name -- should be a single word, lowercase, without any numbers or special characters.
+#    For example, if your company is called Acme, Inc., I would recommend 'acme'.
+cs_app_id: "default"
+
+##
 # App Configuration
 cs_version: "{{ controller_version }}"
-cs_app_id: "dev"
 cs_locale: "en"
 cs_currency: "USD"
 
 # Default User
-cs_admin_create: false # CS Support user is already created by default
 cs_admin_email: root@localhost
 cs_admin_password: changeme
 
@@ -102,12 +116,14 @@ postgres_pool: 30
 redis_host: 127.0.0.1
 
 ##
-# ComputeStacks Bastion Portal
-enable_support_ip: true
-support_ip: 192.155.86.87
-
-##
 # Container Registry
 registry_data_path: "/computestacks-mnt"
 registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry'][0]].controller_ip }}{% else %}127.0.0.1{% endif %}"
 registry_ssh_port: "{{ hostvars[groups['registry'][0]].ssh_port }}"
+
+##
+# PowerDNS
+pdns_credentials_dir: "/root/.credentials"
+pdns_credentials_api_file: "{{ pdns_credentials_dir }}/.powerdns.api.secret"
+pdns_credentials_web_file: "{{ pdns_credentials_dir }}/.powerdns.web.secret"
+pdns_credentials_db_file: "{{ pdns_credentials_dir }}/.powerdns.db.secret"

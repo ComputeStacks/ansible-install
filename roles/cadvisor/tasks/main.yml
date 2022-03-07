@@ -1,8 +1,18 @@
 ---
-- name: check if exists
-  community.general.docker_container_info:
-    name: cadvisor
-  register: cadvisor_container
+- name: cadvisor | pull latest image
+  community.general.docker_image:
+    name: "{{ cadvisor_image }}"
+    tag: "{{ cadvisor_image_tag }}"
+    source: pull
 
-- include_tasks: install.yml
-  when: not cadvisor_container.exists
+- name: cadvisor | configure systemd
+  template:
+    src: cadvisor.service.j2
+    dest: /etc/systemd/system/cadvisor.service
+
+- name: cadvisor | reload and start
+  systemd:
+    name: cadvisor
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

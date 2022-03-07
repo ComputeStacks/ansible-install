@@ -1,12 +1,12 @@
 ---
 - name: install packages
-  package:
+  apt:
     name:
       - pacemaker
       - haveged
       - pcs
       - corosync
-    state: present
+    state: latest
 
 - name: ensure directories exists
   file:

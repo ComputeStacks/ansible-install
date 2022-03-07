@@ -1,9 +1,23 @@
 ---
-- include_tasks: centos/packages.yml
-  when: ansible_distribution == 'CentOS'
+- name: add pg key
+  ansible.builtin.apt_key:
+    url: "{{ psql_deb_key }}"
+    state: present
 
-- include_tasks: debian/packages.yml
-  when: ansible_distribution == 'Debian'
+- name: add pg repo
+  ansible.builtin.apt_repository:
+    repo: "{{ psql_deb_repo_url }}"
+    state: present
+    filename: postgresql
+  
+- name: install packages
+  apt:
+    name:
+      - "postgresql-{{ psql_version }}"
+      - "postgresql-{{ psql_version }}-ip4r"
+      - python3-psycopg2
+    state: present
+    update_cache: yes
 
 # TODO: 3/2/21 -- this produces an error on a fresh build.
 # Ignore errors, because it may already exist which produces an error we don't care about.
@@ -37,6 +51,7 @@
     name: root
     encoding: UTF-8
     state: present
+    template: template0
   become_user: postgres
   become: yes
   become_method: su
@@ -46,6 +61,7 @@
     name: "{{ postgres_user }}"
     encoding: UTF-8
     state: present
+    template: template0
   become_user: postgres
   become: yes
   become_method: su
@@ -84,6 +100,7 @@
     name: cloudportal
     owner: "{{ postgres_user }}"
     encoding: UTF-8
+    template: template0
   become_user: postgres
   become: yes
   become_method: su

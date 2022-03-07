@@ -22,9 +22,6 @@
     src: docker-startup.conf.j2
     dest: /etc/systemd/system/docker.service.d/startup.conf
 
-- name: reload systemd
-  systemd: daemon_reload=yes
-
 - name: create user for containers
   user:
     name: dockremap
@@ -33,7 +30,8 @@
     create_home: no
 
 - name: start docker
-  service:
+  systemd:
     name: docker
     state: started
     enabled: yes
+    daemon_reload: yes

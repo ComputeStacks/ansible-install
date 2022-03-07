@@ -1,0 +1,22 @@
+---
+- name: Adjust postgres listen ip
+  lineinfile:
+    path: "{{ pdns_postgresql_conf }}"
+    regexp: "listen_address"
+    line: "listen_addresses = 'localhost,{{ postgres_ip }}'"
+
+- name: Add followers to leader pg
+  postgresql_pg_hba:
+    dest: "{{ pdns_postgresql_hba_conf }}"
+    contype: host
+    users: repuser
+    databases: replication
+    method: trust
+    source: "{{ hostvars[groups['follower_nameservers'][0]].postgres_ip }}"
+    keep_comments_at_rules: yes
+
+- name: restart postgresql
+  systemd:
+    name: postgresql
+    state: restarted
+    enabled: yes

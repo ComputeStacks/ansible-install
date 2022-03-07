@@ -1,0 +1,7 @@
+---
+- name: Request Certificate (DigitalOcean)
+  shell: "{{ acme_cert_do_issue_cmd }}"
+  environment:
+    DO_API_KEY: "{{ acme_do_key }}"
+  vars:
+    ansible_ssh_pipelining: no

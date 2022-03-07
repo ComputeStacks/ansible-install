@@ -1,38 +1,16 @@
 ---
 - name: install
-  yum:
-    name: redis5
-    state: present
-  when: ansible_distribution == 'CentOS'
-
-- name: install
   package:
     name: redis-server
     state: present
-  when: ansible_distribution == 'Debian'
-
-- name: install config
-  copy:
-    src: redis.conf
-    dest: /etc/redis.conf
-  when: ansible_distribution == 'CentOS'
 
 - name: install config
   copy:
     src: redis-debian.conf
     dest: /etc/redis/redis.conf
-  when: ansible_distribution == 'Debian'
-
-- name: start
-  service:
-    name: redis
-    enabled: yes
-    state: restarted
-  when: ansible_distribution == 'CentOS'
 
 - name: start
   service:
     name: redis-server
     enabled: yes
     state: restarted
-  when: ansible_distribution == 'Debian'

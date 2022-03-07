@@ -7,10 +7,21 @@
 - hosts:
     - all
   tags: ['never', 'bootstrap', 'addnode']
+  tasks:
+    - name: Load service state
+      service_facts:
   roles:
     - base
     - node_exporter
     - local_dns
+  any_errors_fatal: true
+
+- hosts:
+    - primary_nameserver
+    - follower_nameservers
+  tags: ['never', 'bootstrap']
+  roles:
+    - powerdns
   any_errors_fatal: true
 
 - hosts:
@@ -31,7 +42,6 @@
     - controller_postgres
     - controller_redis
     - vault
-    - controller
   any_errors_fatal: true
 
 - hosts: 
@@ -47,33 +57,17 @@
   any_errors_fatal: true
 
 - hosts:
-    - all
-  tags: ['never', 'bootstrap', 'addnode']
-  roles:
-    - iptables
-    - ssh_transfer
-  any_errors_fatal: true
-
-# ##
-# # Etcd
-- hosts:
-    - nodes
-  tags: ['never', 'bootstrap', 'addnode']
-  roles:
-    - andrewrothstein.etcd
-  any_errors_fatal: true
-- hosts:
     - nodes
   serial: 1 # only provision 1 node at a time when adding nodes
   tags: ['never', 'addnode']
   roles:
-    - etcd_config
+    - etcd
   any_errors_fatal: true
 - hosts:
     - nodes
   tags: ['never', 'bootstrap']
   roles:
-    - etcd_config
+    - etcd
   any_errors_fatal: true
 
 - hosts:
@@ -89,13 +83,27 @@
     - fluentd
     - node
     - cs_agent
-    - node_corosync    
+    - node_corosync
   any_errors_fatal: true
 
 - hosts:
     - nodes
   roles:
     - node_calico
+  any_errors_fatal: true
+
+- hosts:
+    - controller
+  roles:
+    - controller
+  any_errors_fatal: true
+
+- hosts:
+    - all
+  tags: ['never', 'bootstrap', 'addnode']
+  roles:
+    - iptables
+    - ssh_transfer
   any_errors_fatal: true
 
 - hosts:

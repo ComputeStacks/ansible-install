@@ -1,0 +1,19 @@
+---
+- name: Request Certificate (Cloudflare)
+  shell: "{{ acme_cert_cf_issue_cmd }}"
+  environment:
+    CF_Token: "{{ acme_cf_token }}"
+    CF_Account_ID: "{{ acme_cf_account }}"
+  vars:
+    ansible_ssh_pipelining: no
+  when: "acme_cf_zone == ''"
+
+- name: Request Certificate (Cloudflare)
+  shell: "{{ acme_cert_cf_issue_cmd }}"
+  environment:
+    CF_Token: "{{ acme_cf_token }}"
+    CF_Account_ID: "{{ acme_cf_account }}"
+    CF_ZONE_ID: "{{ acme_cf_zone }}"
+  vars:
+    ansible_ssh_pipelining: no
+  when: "acme_cf_zone != ''"

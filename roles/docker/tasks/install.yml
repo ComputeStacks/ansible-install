@@ -1,15 +1,5 @@
 ---
-- include_tasks: centos/install.yml
-  when: ansible_distribution == 'CentOS'
-- include_tasks: debian/install.yml
-  when: ansible_distribution == 'Debian'
-
-
-- name: Ensure docker is running
-  service:
-    name: docker
-    enabled: yes
-    state: started
+- import_tasks: install_binary.yml
 
 - name: Ensure docker startup directory exists
   file:
@@ -21,10 +11,8 @@
     src: startup.conf
     dest: /etc/systemd/system/docker.service.d/startup.conf
 
-- name: reload systemd
-  systemd: daemon_reload=yes
-
 - name: restart docker
-  service:
+  systemd:
     name: docker
     state: restarted
+    daemon_reload: yes

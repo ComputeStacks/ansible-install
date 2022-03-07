@@ -1,0 +1,26 @@
+---
+- name: stop follower postgres
+  systemd:
+    name: postgresql
+    state: stopped
+
+- name: write pdns conf
+  template:
+    src: pdns-follower.conf.j2
+    dest: /etc/powerdns/pdns.conf
+
+- name: wipe out follower postgres db
+  file:
+    name: "{{ pdns_postgresql_data_dir }}/main/"
+    state: absent
+
+- name: sync db postgres leader 
+  shell: "pg_basebackup -h {{ pdns_leader_ip }} -U repuser --checkpoint=fast -D {{ pdns_postgresql_data_dir }}/main/ -R --slot=ns2 -C"
+
+- name: fix permissions
+  shell: "chown -R postgres: {{ pdns_postgresql_data_dir }}/main"
+
+- name: start follower postgres
+  systemd:
+    name: postgresql
+    state: started

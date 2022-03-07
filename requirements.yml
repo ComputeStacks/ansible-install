@@ -4,5 +4,3 @@ collections:
   - community.postgresql
   - ansible.posix
 
-roles:
-  - name: andrewrothstein.etcd

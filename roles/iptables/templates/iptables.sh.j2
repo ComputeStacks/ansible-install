@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT --match limit --limit 30/minute
 
 {% if 'controller' in group_names or 'metrics' in group_names %}
 # Grant host access to local docker containers
 iptables -A INPUT -p all -s 172.18.0.2/16 -j ACCEPT
 {% endif %}
 
+{% if install_cs_support_key %}
 # ComptueStacks Support
 iptables -A INPUT -p all -s 192.155.86.87 -j ACCEPT
-
 {% if enable_ipv6 %}
 ip6tables -A INPUT -p all -s 2600:3c01::f03c:92ff:feaa:fc7e -j ACCEPT
+{% endif %}
 {% endif %}
 
 {% if enable_ipv6 %}
 ip6tables -A INPUT -i lo -j ACCEPT
 ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-ip6tables -A INPUT -p ipv6-icmp -j ACCEPT
+ip6tables -A INPUT -p ipv6-icmp --icmp-type echo-request -j ACCEPT --match limit --limit 30/minute
 {% if extra_allowed_ipv6_addresses is defined %}
 {% for ip in extra_allowed_ipv6_addresses %}
 
@@ -28,17 +30,19 @@ ip6tables -A INPUT -j LOG --log-prefix=v6_input_deny --log-level=4
 ip6tables -A INPUT -j REJECT --reject-with icmp6-adm-prohibited
 {% endif %}
 
-# HTTP/HTTPS
+
 {% if 'controller' in group_names or 'metrics' in group_names or 'registry' in group_names %}
+# HTTP/HTTPS
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 {% endif %}
+
 {% if 'registry' in group_names %}
 iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
 {% endif %}
 
-# Allow Controller
 {% if 'controller' not in group_names %}
+# Allow Controller
 {% if 'metrics' in group_names %}
 iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
 {% endif %}
@@ -51,6 +55,9 @@ iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].node_ip }} -j A
 {% if 'registry' in group_names %}
 iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
 {% endif %}
+{% if 'primary_nameserver' in group_names or 'follower_nameservers' in group_names %}
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].ansible_default_ipv4.address }} -j ACCEPT
+{% endif %}
 {% endif %}
 
 {% if 'nodes' in group_names %}
@@ -62,6 +69,7 @@ iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
 iptables -A INPUT -p udp --dport 10000:50000 -j ACCEPT
+iptables -A INPUT -p all -s {{ calico_network }} -j ACCEPT
 {% if hostvars[groups['controller'][0]].node_ip != hostvars[groups['metrics'][0]].node_endpoint %}
 iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].node_endpoint }} -j ACCEPT
 {% endif %}
@@ -113,6 +121,22 @@ iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].controller_endpoin
 {% for ip in extra_allowed_ipv4_addresses %}
 
 iptables -A INPUT -p all -s {{ ip }} -j ACCEPT
+{% endfor %}
+{% endif %}
+
+{% if 'primary_nameserver' in group_names or 'follower_nameservers' in group_names %}
+iptables -A INPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
+{% for host in groups['primary_nameserver'] %}
+{% if hostvars[host].postgres_ip != postgres_ip %}
+iptables -A INPUT -p all -s {{ hostvars[host].postgres_ip }} -j ACCEPT
+{% endif %}
+{% endfor %}
+{% for host in groups['follower_nameservers'] %}
+{% if hostvars[host].postgres_ip != postgres_ip %}
+iptables -A INPUT -p all -s {{ hostvars[host].postgres_ip }} -j ACCEPT
+{% endif %}
 {% endfor %}
 {% endif %}
 

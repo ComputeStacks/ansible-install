@@ -8,26 +8,10 @@
   fail:
     msg: redis is not running
   when: 
-    - ansible_distribution == 'CentOS' 
-    - ansible_facts.services['redis.service']['state'] != 'running'
-
-- name: redis
-  fail:
-    msg: redis is not running
-  when: 
-    - ansible_distribution == 'Debian' 
     - ansible_facts.services['redis-server.service']['state'] != 'running'
 
 - name: postgres
   fail:
     msg: postgresql is not running
   when:
-    - ansible_distribution == 'CentOS' 
-    - ansible_facts.services['postgresql-13.service']['state'] != 'running'
-
-- name: postgres
-  fail:
-    msg: postgresql is not running
-  when:
-    - ansible_distribution == 'Debian'
     - ansible_facts.services['postgresql@13-main.service']['state'] != 'running'

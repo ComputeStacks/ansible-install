@@ -1,0 +1,51 @@
+---
+- name: remove existing packages
+  apt:
+    name: 
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+    state: absent
+
+- name: add docker key
+  ansible.builtin.apt_key:
+    url: "{{ docker_deb_key }}"
+    state: present
+
+- name: add docker repo
+  ansible.builtin.apt_repository:
+    repo: "{{ docker_deb_repo }}"
+    state: present
+    filename: docker
+
+- name: Unlock docker for update
+  command: apt-mark unhold docker-ce docker-ce-cli
+  args:
+    warn: false
+
+- name: install packages
+  apt:
+    name: 
+      - "docker-ce"
+      - "docker-ce-cli"
+      - "containerd.io"
+    state: latest
+    update_cache: yes
+
+##
+# use apt-mark to hold packages
+# remove hold with: `apt-mark unhold`
+# show holds with: `apt-mark showhold`
+- name: Lock docker version
+  command: apt-mark hold docker-ce docker-ce-cli
+  args:
+    warn: false
+  when: lock_docker_version
+
+- name: Ensure docker is running
+  systemd:
+    name: docker
+    enabled: yes
+    state: restarted

@@ -12,6 +12,33 @@
 {% endmacro -%}
 task bootstrap: :environment do
 
+  nslist = []
+  {% for host in groups['primary_nameserver'] -%}
+  nslist << "{{ hostvars[host].pdns_name }}."
+  {% endfor %}
+  {%- for host in groups['follower_nameservers'] -%}
+  nslist << "{{ hostvars[host].pdns_name }}."
+  {% endfor %}
+
+  pdns_driver = ProvisionDriver.create!(
+    endpoint: 'http://{{ hostvars[groups['primary_nameserver'][0]].pdns_name }}:8081/api/v1/servers',
+    settings: {
+      config: {
+        zone_type: 'Native',
+        masters: [],
+        nameservers: nslist,
+        server: 'localhost'
+      }
+    },
+    module_name: 'Pdns',
+    username: 'admin',
+    api_key: Secret.encrypt!("{{ pdns_web_key }}"), # WebServer PW
+    api_secret: Secret.encrypt!("{{ pdns_api_key }}") # API-Key
+  )
+  
+  dns_type = ProductModule.create!(name: 'dns', primary: pdns_driver)
+  pdns_driver.product_modules << dns_type
+
   location = Location.find_by(name: "{{ region_name }}")
   location = Location.create!(name: "{{ region_name }}") if location.nil?
   region = Region.find_by name: "{{ availability_zone_name }}", location: location
@@ -20,7 +47,8 @@ task bootstrap: :environment do
     location: location,
     pid_limit: 150,
     ulimit_nofile_soft: 1024,
-    ulimit_nofile_hard: 1024
+    ulimit_nofile_hard: 1024,
+    consul_token: "{{ consul_token }}"
   ) if region.nil?
   if region.nil?
     puts "Error, region not available."
@@ -30,10 +58,6 @@ task bootstrap: :environment do
   Rake::Task['install'].execute
 
   puts "Setting General Settings..."
-  {% if license_key != "" %}
-  puts "...License Key"
-  Setting.find_by(name: 'license_key')&.update value: "{{ license_key }}"
-  {% endif %}
 
   puts "...Hostname"
   Setting.find_by(name: 'hostname')&.update value: "{{ cs_portal_domain }}"
@@ -115,7 +139,6 @@ task bootstrap: :environment do
     network.regions << region
   end
 
-  {% if cs_admin_create -%}
   puts "Creating default admin account"
   group = UserGroup.find_by(is_default: true)
   if group.nil?
@@ -139,10 +162,8 @@ task bootstrap: :environment do
     user.skip_confirmation!
     user.save
   end
-
-  {%- endif -%}  
 {{ '' }}
-{% if floating_ip == '0.0.0.0' or not enable_floating_ip %}
+{% if floating_ip == '0.0.0.0' %}
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
 {% else %}
 floating_ip = "{{ floating_ip }}"
@@ -166,7 +187,11 @@ floating_ip = "{{ floating_ip }}"
 
   unless Dns::Zone.where(name: "{{ cs_app_zone }}").exists?
     begin
-      Dns::Zone.create!(name: "{{ cs_app_zone }}")
+      Dns::Zone.create!(
+        name: "{{ cs_app_zone }}", 
+        provider_ref: "{{ cs_app_zone }}.",
+        provision_driver: pdns_driver
+      )
     rescue => e
       ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
     end
@@ -175,13 +200,6 @@ floating_ip = "{{ floating_ip }}"
   existing_installation = Feature.where(name: 'updated_cr_cert').exists?
   Feature.setup!
   Feature.find_by(name: 'updated_cr_cert').update(active: true) unless existing_installation
-
-  Setting.registry_selinux # Load and create setting
-{% if selinux %}
-  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: true
-{% else %}
-  Setting.find_by(name: 'registry_selinux', category: 'container_registry').update value: false
-{% endif %}
 
   puts "Done."
 

@@ -1,0 +1,8 @@
+---
+- name: Request Certificate (AWS)
+  shell: "{{ acme_cert_aws_issue_cmd }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ acme_aws_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ acme_aws_secret }}"
+  vars:
+    ansible_ssh_pipelining: no

@@ -1,4 +1,10 @@
 ---
+- name: fluentd | pull latest image
+  community.general.docker_image:
+    name: "{{ fluentd_image_name }}"
+    tag: "{{ fluentd_image_tag }}"
+    source: pull
+
 - name: check if fluentd is configured
   stat:
     path: /etc/systemd/system/fluentd.service
@@ -6,3 +12,9 @@
 
 - include_tasks: install.yml
   when: fluentd_config_exists.stat.exists == False
+
+- name: fluentd | restart
+  systemd:
+    name: fluentd
+    state: restarted
+  when: fluentd_config_exists.stat.exists

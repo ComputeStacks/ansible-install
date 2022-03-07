@@ -1,0 +1,38 @@
+---
+- name: Slurp and store wildcared cert
+  slurp:
+    src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
+  register: lb_shared_cert_raw
+
+- name: Decode certificate for assignment
+  set_fact:
+    lb_shared_cert: "{{ lb_shared_cert_raw.content | b64decode }}"
+
+- name: read consul token
+  slurp:
+    src: "/root/.consul.secret"
+  register: consul_token_raw
+  delegate_to: "{{ groups['nodes'][0] }}"
+
+- set_fact:
+    consul_token: "{{ consul_token_raw.content | b64decode }}"
+
+- block:
+    - name: read pdns api
+      slurp:
+        src: "{{ pdns_credentials_api_file }}"
+      register: pdns_cred_api_raw
+    - slurp:
+        src: "{{ pdns_credentials_web_file }}"
+      register: pdns_cred_web_raw
+  delegate_to: "{{ groups['primary_nameserver'][0] }}"
+
+- set_fact:
+    pdns_api_key: "{{ pdns_cred_api_raw.content | b64decode }}"
+- set_fact:
+    pdns_web_key: "{{ pdns_cred_web_raw.content | b64decode }}"
+
+- name: Create bootstrap file
+  template:
+    src: bootstrap.rake
+    dest: "{{ rake_tasks_directory }}/bootstrap.rake"

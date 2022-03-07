@@ -2,19 +2,19 @@
 - import_tasks: install.yml
   tags: ['never', 'bootstrap']
 
-# ##
-# # Generate Bootstrap
+# Ensure we always have an updated cstacks script
 - block:
-    - name: Slurp and store wildcared cert
-      slurp:
-        src: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
-      register: lb_shared_cert_raw
+    - name: controller | cstacks script
+      copy:
+        src: cstacks.sh
+        dest: /usr/local/bin/cstacks
+        mode: 0740
+    - name: controller | cstacks bash completion
+      copy:
+        src: cstacks_completion.sh
+        dest: /etc/bash_completion.d/cstacks.sh
+        mode: 0740
+  tags: ['never', 'bootstrap', 'addnode']
 
-    - name: Decode certificate for assignment
-      set_fact:
-        lb_shared_cert: "{{ lb_shared_cert_raw.content | b64decode }}"
-    - name: Create bootstrap file
-      template:
-        src: bootstrap.rake
-        dest: "{{ rake_tasks_directory }}/bootstrap.rake"
+- import_tasks: generate_bootstrap.yml
   tags: ['never', 'bootstrap', 'addnode']

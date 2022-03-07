@@ -2,3 +2,17 @@
 - import_tasks: install.yml
   when: ansible_facts.services['alertmanager.service'] is not defined
   tags: ['never', 'bootstrap']
+
+# Always pull the latest version
+- block:
+    - name: alertmanager | pull image
+      community.general.docker_image:
+        name: "{{ alertmanager_image }}"
+        tag: "{{ alertmanager_image_tag }}"
+        source: pull
+    - name: alertmanager | restart service
+      systemd:
+        name: alertmanager
+        state: restarted
+  when: ansible_facts.services['alertmanager.service'] is defined
+  tags: ['never', 'bootstrap', 'addnode']
