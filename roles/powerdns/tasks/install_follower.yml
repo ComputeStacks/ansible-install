@@ -24,3 +24,4 @@
   systemd:
     name: postgresql
     state: started
+    enabled: true

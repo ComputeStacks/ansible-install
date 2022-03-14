@@ -2,21 +2,15 @@
     path: "{{ config_directory }}"
     state: directory
 
-- name: Check if key exists
-  stat:
-    path: /root/.A8C477EE.asc
-  register: gpg_key_exists
+- name: Load signing key
+  copy:
+    src: gpg_keys/A8C477EE.asc
+    dest: /root/.A8C477EE.asc
 
-- block:
-    - name: Load signing key
-      copy:
-        src: gpg_keys/A8C477EE.asc
-        dest: /root/.A8C477EE.asc
-    - name: Install gpg key
-      shell: gpg --import /root/.A8C477EE.asc  
-      vars:
-        ansible_ssh_pipelining: no
-  when: gpg_key_exists.stat.exists == False
+- name: Install gpg key
+  shell: gpg --import /root/.A8C477EE.asc
+  vars:
+    ansible_ssh_pipelining: no
 
 - name: base | install diagnostic file
   get_url:

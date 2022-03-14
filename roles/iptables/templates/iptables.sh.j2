@@ -69,7 +69,7 @@ iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 iptables -A INPUT -p tcp --dport 10000:50000 -j ACCEPT
 iptables -A INPUT -p udp --dport 10000:50000 -j ACCEPT
-iptables -A INPUT -p all -s {{ calico_network }} -j ACCEPT
+iptables -A INPUT -p tcp -s {{ calico_network }} -j ACCEPT
 {% if hostvars[groups['controller'][0]].node_ip != hostvars[groups['metrics'][0]].node_endpoint %}
 iptables -A INPUT -p all -s {{ hostvars[groups['metrics'][0]].node_endpoint }} -j ACCEPT
 {% endif %}

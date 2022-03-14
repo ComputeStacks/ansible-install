@@ -12,6 +12,9 @@ all:
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
 
+    # Set to false for LetsEncrypt
+    use_zerossl: true
+    
     ##
     # Bug Reporting
     #
@@ -33,7 +36,7 @@ all:
     # Container Network
 
     # We recommend not going larger than a `/21`. If you need more, you can create additional networks later.
-    calico_network: 10.100.10.0/21
+    calico_network: 10.100.0.0/21
 
     # some unique identifier. should not include spaces, capitals, or special characters.
     calico_network_name: "net100"

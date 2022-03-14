@@ -13,7 +13,6 @@
     databases: replication
     method: trust
     source: "{{ hostvars[groups['follower_nameservers'][0]].postgres_ip }}"
-    keep_comments_at_rules: yes
 
 - name: restart postgresql
   systemd:

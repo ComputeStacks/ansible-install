@@ -1,9 +1,11 @@
 ---
 - include_tasks: install_postgres.yml
-  when: ansible_facts.services['postgresql.service'] is not defined
+  when: (ansible_facts.services['postgresql.service'] is not defined) or
+        (ansible_facts.services['postgresql.service']['status'] == "disabled")
 
 - include_tasks: install.yml
-  when: ansible_facts.services['pdns.service'] is not defined
+  when: (ansible_facts.services['pdns.service'] is not defined) or
+        (ansible_facts.services['pdns.service']['state'] != "running")
 
 - name: upgrade pdns packages
   apt:
@@ -11,4 +13,6 @@
       - "pdns-server"
       - "pdns-backend-pgsql"
     state: latest
-  when: ansible_facts.services['pdns.service'] is defined
+  when: 
+    - ansible_facts.services['postgresql.service'] is defined
+    - ansible_facts.services['postgresql.service']['status'] == "enabled"
