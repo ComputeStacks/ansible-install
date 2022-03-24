@@ -26,10 +26,10 @@ controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{
 
 ##
 # Controller Image
-docker_registry: ghcr.io
-controller_version: "7.0"
-controller_image: computestacks/controller
-controller_image_path: "{{ docker_registry }}/{{ controller_image }}:v{{ controller_version }}"
+# docker_registry: ghcr.io
+controller_version: "7.1"
+controller_image: cmptstks/controller
+controller_image_path: "{{ controller_image }}:v{{ controller_version }}"
 
 ##
 # Directory Structure & Paths
