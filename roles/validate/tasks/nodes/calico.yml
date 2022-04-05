@@ -6,7 +6,7 @@
 
 - name: attempt calico recovery
   shell: run_calico >/dev/null 2>&1
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no
@@ -21,7 +21,7 @@
         container_default_behavior: compatibility
     - name: attempt calico recovery
       shell: run_calico >/dev/null 2>&1
-      ignore_errors: yes
+      ignore_errors: true
       no_log: True
       vars:
         ansible_ssh_pipelining: no

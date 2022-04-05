@@ -122,8 +122,44 @@ registry_server_ip: "{% if 'registry' in groups %}{{ hostvars[groups['registry']
 registry_ssh_port: "{{ hostvars[groups['registry'][0]].ssh_port }}"
 
 ##
+# DNS
+
+# Valid DNS Driver options are:
+# - autodns
+# - powerdns
+dns_driver: powerdns
+
+# AutoDNS
+autodns_endpoint: "gateway.autodns.com" # https://{{ endpoint }}
+autodns_username: ""
+autodns_password: ""
+autodns_context: 0
+autodns_nameservers:
+  - ns1.auto-dns.com
+  - ns2.auto-dns.com
+  - ns3.autodns.nl
+  - ns4.autodns.nl
+autodns_master_ns: ns1.auto-dns.com
+autodns_ns_ttl: 86400
+autodns_soa_email: 'dns@example.org'
+autodns_soa_level: 2
+
 # PowerDNS
 pdns_credentials_dir: "/root/.credentials"
 pdns_credentials_api_file: "{{ pdns_credentials_dir }}/.powerdns.api.secret"
 pdns_credentials_web_file: "{{ pdns_credentials_dir }}/.powerdns.web.secret"
 pdns_credentials_db_file: "{{ pdns_credentials_dir }}/.powerdns.db.secret"
+
+pdns_zone_type: Native # or Master
+
+pdns_endpoint: "http://{{ hostvars[groups['primary_nameserver'][0]].pdns_name }}:8081/api/v1/servers"
+
+# Manual Provisioning
+pdns_skip_provisioning: false
+pdns_api_key: "" # PowerDNS API Key
+pdns_web_key: "" # WebServer Password
+pdns_nslist: []
+#  - "ns1.example.com"
+#  - "ns2.example.com"
+pdns_masters: [] # Leave empty for Native replication
+#  - "ns1.example.com" # In most situations this will be the first, primary, nameserver.

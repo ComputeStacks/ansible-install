@@ -26,7 +26,7 @@
 - name: ensure nginx is running
   shell: "systemctl status nginx >/dev/null 2>&1"
   register: nginx_is_active
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no

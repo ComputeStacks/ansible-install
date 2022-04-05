@@ -1,0 +1,53 @@
+---
+- name: Ensure powerdns exists
+  fail:
+    msg: "Missing PowerDNS Servers"
+  run_once: true
+  delegate_to: groups['controller'][0]
+  when: 
+    - (groups['primary_nameserver'] | length < 1) or (groups['follower_nameservers'] | length < 1)
+    - not hostvars[groups['controller'][0]].pdns_skip_provisioning | default(false)
+
+- block:
+    - name: Ensure powerdns endpoint
+      fail:
+        msg: Missing powerdns Endpoint
+      when: (hostvars[groups['controller'][0]].pdns_endpoint) or (hostvars[groups['controller'][0]].pdns_endpoint == '')
+    - name: Ensure correct zone type
+      fail:
+        msg: Zone must be Native or Master
+      when:
+        - (hostvars[groups['controller'][0]].pdns_zone_type | default('Native')) != 'Native'
+        - (hostvars[groups['controller'][0]].pdns_zone_type | default('Native')) != 'Master'
+    - name: Ensure pdns api key exists
+      fail:
+        msg: "Missing pdns_api_key"
+      when: (hostvars[groups['controller'][0]].pdns_api_key | default('')) == ''
+    - name: Ensure pdns_web_key exists
+      fail:
+        msg: "Missing pdns_web_key"
+      when: (hostvars[groups['controller'][0]].pdns_web_key | default('')) == ''
+    - name: Ensure pdns_nslist exists
+      fail:
+        msg: "Missing pdns_nslist"
+      when: (hostvars[groups['controller'][0]].pdns_nslist | default([])) | length < 1
+    - name: Ensure pdns_masters exists
+      fail:
+        msg: "Missing pdns_masters. Required when zone type is Master"
+      when: 
+        - (hostvars[groups['controller'][0]].pdns_masters | default([])) | length < 1
+        - (hostvars[groups['controller'][0]].pdns_zone_type | default('Native')) == 'Master'
+    - name: Ensure we can connect to PowerDNS
+      uri:
+        url: "{{ hostvars[groups['controller'][0]].pdns_endpoint }}"
+        user: admin
+        password: "{{ hostvars[groups['controller'][0]].pdns_web_key }}"
+        method: GET
+        status_code: 200
+        force_basic_auth: true
+        headers:
+          "X-API-Key": "{{ hostvars[groups['controller'][0]].pdns_api_key }}"
+        timeout: 10
+  run_once: true
+  delegate_to: groups['controller'][0]
+  when: hostvars[groups['controller'][0]].pdns_skip_provisioning | default(false)

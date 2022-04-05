@@ -7,7 +7,7 @@
 - name: check if vault is sealed
   shell: vault operator key-status >/dev/null 2>&1
   register: vault_sealed
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no

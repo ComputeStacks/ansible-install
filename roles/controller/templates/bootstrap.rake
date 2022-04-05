@@ -13,19 +13,29 @@
 task bootstrap: :environment do
 
   nslist = []
+  masters = []
+  {% if pdns_skip_provisioning -%}
+  {% for host in pdns_masters -%}
+  masters << "{{ host }}."
+  {% endfor -%}
+  {% for host in pdns_nslist -%}
+  nslist << "{{ host }}."
+  {% endfor -%}
+  {%- else -%}
   {% for host in groups['primary_nameserver'] -%}
   nslist << "{{ hostvars[host].pdns_name }}."
   {% endfor %}
   {%- for host in groups['follower_nameservers'] -%}
   nslist << "{{ hostvars[host].pdns_name }}."
-  {% endfor %}
+  {% endfor -%}
+  {%- endif -%}
 
   pdns_driver = ProvisionDriver.create!(
-    endpoint: 'http://{{ hostvars[groups['primary_nameserver'][0]].pdns_name }}:8081/api/v1/servers',
+    endpoint: '{{ pdns_endpoint }}',
     settings: {
       config: {
-        zone_type: 'Native',
-        masters: [],
+        zone_type: '{{ pdns_zone_type }}',
+        masters: masters,
         nameservers: nslist,
         server: 'localhost'
       }

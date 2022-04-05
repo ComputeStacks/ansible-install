@@ -26,7 +26,7 @@
         template: template0
         state: present
       become_user: postgres
-      become: yes
+      become: true
       become_method: su
 
     - name: create psql pdns role
@@ -36,7 +36,7 @@
         role_attr_flags: "superuser,login"
         password: "{{ pdns_db_pass }}"
         state: present
-      become: yes
+      become: true
       become_user: postgres
       become_method: su
 
@@ -45,7 +45,7 @@
         name: repuser
         role_attr_flags: "replication"
         state: present
-      become: yes
+      become: true
       become_user: postgres
       become_method: su
 
@@ -54,7 +54,7 @@
         name: pdns
         state: restore
         target: /usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql
-      become: yes
+      become: true
       become_user: postgres
       become_method: su
   when: not pdns_psql_db_up.is_available

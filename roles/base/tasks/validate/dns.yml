@@ -1,0 +1,5 @@
+---
+- include_tasks: validate/dns/autodns.yml
+  when: (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) == 'autodns'
+- include_tasks: validate/dns/powerdns.yml
+  when: (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) == 'powerdns'

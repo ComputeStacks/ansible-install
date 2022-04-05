@@ -138,7 +138,7 @@
       reboot:
         msg: "Ansible rebooting to finalize setup"
         reboot_timeout: 1
-      ignore_errors: yes
+      ignore_errors: true
       no_log: True
 
 # Reboot only new nodes
@@ -153,6 +153,6 @@
           reboot:
             msg: "Ansible rebooting to finalize setup"
             reboot_timeout: 1
-          ignore_errors: yes
+          ignore_errors: true
           no_log: True
       when: etcd_initial_cluster_state == 'existing'

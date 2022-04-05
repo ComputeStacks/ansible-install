@@ -23,7 +23,7 @@
 # Ignore errors, because it may already exist which produces an error we don't care about.
 - name: create initial database
   shell: "{{ psql_initdb_cmd }}"
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no
@@ -53,7 +53,7 @@
     state: present
     template: template0
   become_user: postgres
-  become: yes
+  become: true
   become_method: su
 
 - name: Create PG CS DB
@@ -63,7 +63,7 @@
     state: present
     template: template0
   become_user: postgres
-  become: yes
+  become: true
   become_method: su
 
 - name: Create PostgreSQL Users
@@ -73,7 +73,7 @@
     role_attr_flags: SUPERUSER
     state: present
   become_user: postgres
-  become: yes
+  become: true
   become_method: su
 
 - name: Create ComputeStacks user
@@ -84,7 +84,7 @@
     role_attr_flags: SUPERUSER
     state: present
   become_user: postgres
-  become: yes
+  become: true
   become_method: su
 
 - name: Set ComputeStacks DB owner
@@ -92,7 +92,7 @@
     name: "{{ postgres_user }}"
     owner: "{{ postgres_user }}"
   become_user: postgres
-  become: yes
+  become: true
   become_method: su
 
 - name: Create PG CloudPortal DB
@@ -102,5 +102,5 @@
     encoding: UTF-8
     template: template0
   become_user: postgres
-  become: yes
+  become: true
   become_method: su

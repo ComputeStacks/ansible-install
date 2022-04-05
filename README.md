@@ -2,18 +2,15 @@
 
 Before proceeding, be sure to review our [architecture overview](https://docs.computestacks.com/admin_guide/getting_started/architecture_overview/), and our [minimum requirements](https://docs.computestacks.com/admin_guide/getting_started/onprem-demo/). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
 
-_Note: We do not recommend running this on an existing cluster at this time. We have made efforts to ensure this script is idempotent, however we are not 100% there just yet._
-
 ## Prerequisites
 
-1.  You will need a valid license to proceed with the installation. You can purchase, or request a demo license, by visiting: [accounts.computestacks.com/store/computestacks](https://accounts.computestacks.com/store/computestacks)
-
-2.  Ensure your local machine:
+1. Ensure your local machine:
     * Has ansible installed and configured, with the following plugins installed:
 
         ```bash
         ansible-galaxy install -r requirements.yml
         ```
+
 
 ### Inventory File
 
@@ -80,6 +77,8 @@ We recommend performing this step prior to running this ansible package.
 
 ***
 ## Running
+
+**Verify that your computer's IP has been added to `extra_allowed_ipv4_addresses`, otherwise your installation fail!!**
 
 ```bash
 ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"

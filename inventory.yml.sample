@@ -114,6 +114,17 @@ all:
           metrics_ip_address: 192.168.173.9 # The ip used by prom to connect for stats.
           enable_ipv6: true
           ssh_port: 22
+          ##
+          # Example with pre-existing powerdns cluster
+          # pdns_skip_provisioning: true
+          # pdns_endpoint: "http://ns1.example.com:8081/api/v1/servers"
+          # pdns_api_key: "" # PowerDNS API Key
+          # pdns_web_key: "" # WebServer Password
+          # pdns_nslist:
+          #   - "ns1.example.com"
+          #   - "ns2.example.com"
+          # pdns_zone_type: Native
+          # pdns_masters: [] # Leave empty for Native replication
     metrics:
       hosts:
         192.168.173.9:
@@ -144,7 +155,7 @@ all:
           ssh_port: 22
     primary_nameserver:
       hosts:
-        192.168.173.20:
+        192.168.173.20: # Comment out this if you have an existing cluster
           pdns_name: "ns1.example.com"  
           enable_ipv6: true
           ssh_port: 22
@@ -154,7 +165,7 @@ all:
           postgres_ip: 192.168.173.20
     follower_nameservers:
         hosts: # Note that we only support 1 follower!
-          192.168.173.21:
+          192.168.173.21: # Comment out this if you have an existing cluster
             pdns_name: "ns2.example.com"
             enable_ipv6: true
             ssh_port: 22      

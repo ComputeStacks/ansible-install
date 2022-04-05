@@ -2,7 +2,7 @@
 - name: check if network exists
   shell: docker network inspect ops >/dev/null 2>&1
   register: net_exists
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
 
 - name: create ops network

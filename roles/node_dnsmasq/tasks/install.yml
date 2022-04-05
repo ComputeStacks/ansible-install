@@ -9,7 +9,7 @@
     name: resolvconf
     state: stopped
     enabled: no
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
 
 - name: Disable systemd resolve
@@ -17,7 +17,7 @@
     name: systemd-resolved
     state: stopped
     enabled: no
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
 
 - name: install dnsmasq conf
@@ -64,7 +64,7 @@
 - name: ensure dnsmasq is running
   shell: "systemctl status dnsmasq >/dev/null 2>&1"
   register: dnsmasq_is_active
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no

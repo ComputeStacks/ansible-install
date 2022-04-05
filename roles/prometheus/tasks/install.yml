@@ -15,7 +15,7 @@
 - name: check if volume exists
   shell: docker volume inspect prometheus-data >/dev/null 2>&1
   register: prometheus_vol_exists
-  ignore_errors: yes
+  ignore_errors: true
   no_log: True
   vars:
     ansible_ssh_pipelining: no
