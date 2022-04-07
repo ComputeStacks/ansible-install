@@ -40,4 +40,4 @@
     state: started
     enabled: yes
 
-- include_tasks: dns.yml
+- include_tasks: validate/dns.yml
