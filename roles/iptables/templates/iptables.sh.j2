@@ -22,7 +22,7 @@ ip6tables -A INPUT -p all -s 2600:3c01::f03c:92ff:feaa:fc7e -j ACCEPT
 {% if enable_ipv6 %}
 ip6tables -A INPUT -i lo -j ACCEPT
 ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-ip6tables -A INPUT -p ipv6-icmp --icmp-type echo-request -j ACCEPT --match limit --limit 30/minute
+ip6tables -A INPUT -p ipv6-icmp -j ACCEPT --match limit --limit 30/minute
 {% if extra_allowed_ipv6_addresses is defined %}
 {% for ip in extra_allowed_ipv6_addresses %}
 
