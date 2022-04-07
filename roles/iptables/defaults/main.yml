@@ -1,6 +1,7 @@
 ---
 install_cs_support_key: true # Adds our support ip to the firewall.
 calico_network: ""
+default_allow_ssh: true
 # Any additional IPs to add to the allow list
 # You can enter either single IPv4 addresses, or ranges like: 192.168.10.0/24.
 # Example:

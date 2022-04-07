@@ -3,6 +3,9 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT --match limit --limit 30/minute
 
+{% if default_allow_ssh %}
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+{% endif -%}
 {% if 'controller' in group_names or 'metrics' in group_names %}
 # Grant host access to local docker containers
 iptables -A INPUT -p all -s 172.18.0.2/16 -j ACCEPT

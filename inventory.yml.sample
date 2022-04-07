@@ -97,6 +97,13 @@ all:
     #   - "192.168.10.33"
     # extra_allowed_ipv6_addresses:
     #   - "2600:3c01::f03c:92ff:feaa:fc7e"
+    
+    ##
+    # Restrict SSH to only allowed IPs and services created here?
+    #
+    # You may also allow individual servers by adding this to specific servers below.
+    # 
+    # default_allow_ssh: false # Default is true!
   children:
     backup_server:
       hosts:
