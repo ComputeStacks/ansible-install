@@ -78,8 +78,6 @@ We recommend performing this step prior to running this ansible package.
 ***
 ## Running
 
-**Verify that your computer's IP has been added to `extra_allowed_ipv4_addresses`, otherwise your installation fail!!**
-
 ```bash
 ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
 ```
