@@ -12,7 +12,7 @@
     - name: Ensure powerdns endpoint
       fail:
         msg: Missing powerdns Endpoint
-      when: (hostvars[groups['controller'][0]].pdns_endpoint) or (hostvars[groups['controller'][0]].pdns_endpoint == '')
+      when: (not hostvars[groups['controller'][0]].pdns_endpoint) or (hostvars[groups['controller'][0]].pdns_endpoint == '')
     - name: Ensure correct zone type
       fail:
         msg: Zone must be Native or Master
@@ -49,5 +49,5 @@
           "X-API-Key": "{{ hostvars[groups['controller'][0]].pdns_api_key }}"
         timeout: 10
   run_once: true
-  delegate_to: groups['controller'][0]
+  delegate_to: "{{ groups['controller'][0] }}"
   when: hostvars[groups['controller'][0]].pdns_skip_provisioning | default(false)
