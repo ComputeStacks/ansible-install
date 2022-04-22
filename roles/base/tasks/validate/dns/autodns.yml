@@ -1,2 +1,57 @@
 ---
-# TODO: Validate AutoDNS Configuration
+- block:
+    - name: Ensure AutoDNS endpoint Exists
+      fail:
+        msg: "Missing AutoDNS Endpoint"
+      when: dns_autodns_endpoint == ''
+    
+    - name: Ensure AutoDNS json endpoint Exists for testing
+      fail:
+        msg: "Missing AutoDNS JSON Endpoint"
+      when: dns_autodns_json_endpoint == ''
+    
+    - name: Ensure AutoDNS Username Exists
+      fail:
+        msg: "Missing AutoDNS Username"
+      when: dns_autodns_username == ''
+    
+    - name: Ensure AutoDNS Password Exists
+      fail:
+        msg: "Missing AutoDNS Password"
+      when: dns_autodns_password == ''
+      
+    - name: Ensure AutoDNS Context Exists
+      fail:
+        msg: "Missing AutoDNS Context"
+      when: dns_autodns_context == ''
+    
+    - name: Ensure we can connect to AutoDNS
+      uri:
+        url: "https://{{ dns_autodns_json_endpoint }}/v1/login"
+        method: POST
+        status_code: 200
+        body_format: json
+        body: "{{ lookup('template', 'autodns_auth.json') }}"
+        timeout: 20
+        return_content: true
+      register: autodns_session_rsp
+    - set_fact:
+        autodns_session_id: "{{ autodns_session_rsp.x_domainrobot_sessionid }}"
+    - name: check if cs_app_zone exists
+      uri:
+        url: "https://{{ dns_autodns_json_endpoint }}/v1/zone/{{ cs_app_zone }}/{{ dns_autodns_primaryns }}"
+        status_code: 200
+        timeout: 20
+        headers:
+          "x-domainrobot-sessionid": "{{ autodns_session_id }}"
+    - name: logout autodns
+      uri:
+        url: "https://{{ dns_autodns_json_endpoint }}/v1/logout"
+        status_code: 200
+        timeout: 20
+        headers:
+          "x-domainrobot-sessionid": "{{ autodns_session_id }}"
+      ignore_errors: true
+    
+  run_once: true
+  delegate_to: "{{ groups['controller'][0] }}"

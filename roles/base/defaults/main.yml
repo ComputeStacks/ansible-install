@@ -43,3 +43,22 @@ cs_admin_email: root@localhost
 cs_admin_password: changeme
 
 etcd_initial_cluster_state: ""
+
+##
+# CS DNS
+
+# AutoDNS
+dns_autodns_json_endpoint: "api.autodns.com"
+dns_autodns_endpoint: "{{ hostvars[groups['controller'][0]].autodns_endpoint | default('gateway.autodns.com') }}"
+dns_autodns_primaryns: "{{ hostvars[groups['controller'][0]].autodns_master_ns | default('a.ns14.net') }}"
+dns_autodns_context: "{{ hostvars[groups['controller'][0]].autodns_context | default('4') }}"
+dns_autodns_username: "{{ hostvars[groups['controller'][0]].autodns_username | default('') }}"
+dns_autodns_password: "{{ hostvars[groups['controller'][0]].autodns_password | default('') }}"
+
+dns_allowed_drivers:
+  - autodns
+  - powerdns
+
+dns_driver: "{{ (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) }}"
+
+dns_valid_driver: "{{ dns_driver in dns_allowed_drivers }}"

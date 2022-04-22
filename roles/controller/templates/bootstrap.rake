@@ -12,6 +12,8 @@
 {% endmacro -%}
 task bootstrap: :environment do
 
+  dns_config = {}
+  {% if dns_driver == 'powerdns' -%}
   nslist = []
   masters = []
   {% if pdns_skip_provisioning -%}
@@ -28,26 +30,40 @@ task bootstrap: :environment do
   {%- for host in groups['follower_nameservers'] -%}
   nslist << "{{ hostvars[host].pdns_name }}."
   {% endfor -%}
-  {%- endif -%}
-
-  pdns_driver = ProvisionDriver.create!(
-    endpoint: '{{ pdns_endpoint }}',
-    settings: {
-      config: {
-        zone_type: '{{ pdns_zone_type }}',
-        masters: masters,
-        nameservers: nslist,
-        server: 'localhost'
-      }
+  {% endif -%}
+  dns_config = {
+    config: {
+      zone_type: '{{ pdns_zone_type }}',
+      masters: masters,
+      nameservers: nslist,
+      server: 'localhost'
+    }
+  }
+  {%- elif dns_driver == 'autodns' -%}
+  dns_config = {
+    config: {
+      soa_email: '{{ autodns_soa_email }}',
+      nameservers: %W({{ autodns_nameservers | join(' ') }}),
+      master_ns: '{{ autodns_master_ns }}'
     },
-    module_name: 'Pdns',
-    username: 'admin',
-    api_key: Secret.encrypt!("{{ pdns_web_key }}"), # WebServer PW
-    api_secret: Secret.encrypt!("{{ pdns_api_key }}") # API-Key
+    dns: true,
+    auth_type: "master"
+  }
+  {% endif %}
+  
+  {% if dns_valid_driver -%}
+  pdns_driver = ProvisionDriver.create!(
+    endpoint: '{{ cs_dns_module_endpoint }}',
+    settings: dns_config,
+    module_name: '{{ cs_dns_module_name }}',
+    username: '{{ cs_dns_module_user }}',
+    api_key: Secret.encrypt!("{{ cs_dns_module_api }}"),
+    api_secret: Secret.encrypt!("{{ cs_dns_module_secret }}")
   )
   
   dns_type = ProductModule.create!(name: 'dns', primary: pdns_driver)
   pdns_driver.product_modules << dns_type
+  {% endif %}
 
   location = Location.find_by(name: "{{ region_name }}")
   location = Location.create!(name: "{{ region_name }}") if location.nil?
@@ -197,11 +213,16 @@ floating_ip = "{{ floating_ip }}"
 
   unless Dns::Zone.where(name: "{{ cs_app_zone }}").exists?
     begin
+      {% if dns_valid_driver -%}
       Dns::Zone.create!(
         name: "{{ cs_app_zone }}", 
         provider_ref: "{{ cs_app_zone }}.",
         provision_driver: pdns_driver
       )
+      {% else -%}
+      Dns::Zone.create!(name: "{{ cs_app_zone }}")
+      {% endif %}
+      
     rescue => e
       ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
     end

@@ -1,5 +1,20 @@
 ---
-- include_tasks: debian/install.yml
+- name: add haproxy key
+  ansible.builtin.apt_key:
+    url: "{{ haproxy_deb_key }}"
+    state: present
+
+- name: add haproxy repo
+  ansible.builtin.apt_repository:
+    repo: "{{ haproxy_deb_repo }}"
+    state: present
+    filename: haproxy
+
+- name: install packages
+  apt:
+    name: "haproxy=2.4.*"
+    state: present
+    update_cache: yes
 
 - name: create certificate directory
   file:

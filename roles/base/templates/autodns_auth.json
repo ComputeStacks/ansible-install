@@ -1,0 +1,5 @@
+{
+  "context": "{{ dns_autodns_context }}",
+  "user": "{{ dns_autodns_username }}",
+  "password": "{{ dns_autodns_password }}"
+}

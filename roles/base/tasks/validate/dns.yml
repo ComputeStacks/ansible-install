@@ -1,5 +1,15 @@
 ---
-- include_tasks: validate/dns/autodns.yml
+- block:
+    - debug:
+        var: dns_allowed_drivers
+    - fail:
+        msg: "Invalid DNS Driver"
+  run_once: true
+  delegate_to: hostvars[groups['controller'][0]]
+  when: not dns_valid_driver
+
+- include_tasks: validate/dns/autodns.yml  
   when: (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) == 'autodns'
+
 - include_tasks: validate/dns/powerdns.yml
   when: (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) == 'powerdns'

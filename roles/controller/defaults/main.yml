@@ -124,22 +124,25 @@ registry_ssh_port: "{{ hostvars[groups['registry'][0]].ssh_port }}"
 ##
 # DNS
 
-# Valid DNS Driver options are:
-# - autodns
-# - powerdns
+dns_allowed_drivers:
+  - autodns
+  - powerdns
+
 dns_driver: powerdns
 
+dns_valid_driver: "{{ dns_driver in dns_allowed_drivers }}"
+
 # AutoDNS
-autodns_endpoint: "gateway.autodns.com" # https://{{ endpoint }}
+autodns_endpoint: "gateway.autodns.com" # https://{{ endpoint }} <-- should not be changed.
 autodns_username: ""
 autodns_password: ""
-autodns_context: 0
+autodns_context: "4"
 autodns_nameservers:
-  - ns1.auto-dns.com
-  - ns2.auto-dns.com
-  - ns3.autodns.nl
-  - ns4.autodns.nl
-autodns_master_ns: ns1.auto-dns.com
+  - a.ns14.net
+  - b.ns14.net
+  - c.ns14.net
+  - d.ns14.net
+autodns_master_ns: a.ns14.net
 autodns_ns_ttl: 86400
 autodns_soa_email: 'dns@example.org'
 autodns_soa_level: 2
@@ -163,3 +166,12 @@ pdns_nslist: []
 #  - "ns2.example.com"
 pdns_masters: [] # Leave empty for Native replication
 #  - "ns1.example.com" # In most situations this will be the first, primary, nameserver.
+
+
+##
+# CS DNS
+cs_dns_module_endpoint: "{% if dns_driver == 'powerdns' %}{{ pdns_endpoint }}{% elif dns_driver == 'autodns' %}https://{{ autodns_endpoint }}{% endif %}"
+cs_dns_module_name: "{% if dns_driver == 'powerdns' %}Pdns{% elif dns_driver == 'autodns' %}AutoDNS{% endif %}"
+cs_dns_module_user: "{% if dns_driver == 'powerdns' %}admin{% elif dns_driver == 'autodns' %}{{ autodns_username }}{% endif %}"
+cs_dns_module_api: "{% if dns_driver == 'powerdns' %}{{ pdns_web_key }}{% elif dns_driver == 'autodns' %}{{ autodns_password }}{% endif %}"
+cs_dns_module_secret: "{% if dns_driver == 'powerdns' %}{{ pdns_api_key }}{% elif dns_driver == 'autodns' %}{{ autodns_context }}{% endif %}"
