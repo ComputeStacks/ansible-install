@@ -3,6 +3,7 @@
   apt:
     name:
       - pacemaker
+      - pacemaker-cli-utils
       - haveged
       - pcs
       - corosync
