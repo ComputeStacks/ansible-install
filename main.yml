@@ -57,6 +57,14 @@
   any_errors_fatal: true
 
 - hosts:
+    - all
+  tags: ['never', 'addnode']
+  roles:
+    - iptables
+    - ssh_transfer
+  any_errors_fatal: true
+
+- hosts:
     - nodes
   serial: 1 # only provision 1 node at a time when adding nodes
   tags: ['never', 'addnode']
@@ -100,7 +108,7 @@
 
 - hosts:
     - all
-  tags: ['never', 'bootstrap', 'addnode']
+  tags: ['never', 'bootstrap']
   roles:
     - iptables
     - ssh_transfer
