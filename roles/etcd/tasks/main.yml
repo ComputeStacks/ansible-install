@@ -11,55 +11,13 @@
       - etcd-client
     state: latest
 
-- name: stop etcd
-  systemd:
-    name: etcd
-    state: stopped
-    
-- name: wipe out existing etcd db
-  file:
-    path: "{{ etcd_member_dir }}"
-    state: absent
-
-- name: Write etcd config file (new)
-  template:
-    src: etcd.conf.j2
-    dest: "{{ etcd_conf }}"
-  when: "etcd_initial_cluster_state == 'new'"
-
-- name: Write etcd config file (existing)
-  template:
-    src: etcd-existing.conf.j2
-    dest: "{{ etcd_conf }}"
-  when: "etcd_initial_cluster_state == 'existing'"
-
-- name: Check if certs exist
-  stat:
-    path: "{{ etcd_cert_file }}"
-  register: cert_configured
-
-- include_tasks: vault-certs.yml  
-  when: cert_configured.stat.exists == False
-
-- name: start & enable etcd
-  systemd:
-    name: etcd
-    state: started
-    enabled: yes
-    daemon_reload: yes
-
-##
-# Joining
 - block:
-    - name: determine if node already exists
-      shell: "ETCDCTL_ENDPOINT=\"https://{{ hostvars[groups['nodes'][0]].etcd_listen_ip }}:2379\" {{ etcd_command_base }} member list | grep {{ etcd_listen_ip }} | wc -l"
-      register: existing_member
-      vars:
-        ansible_ssh_pipelining: no
-      delegate_to: "{{ groups['nodes'][0] }}"
-    - debug:
-        var: existing_member.stdout
-    - include_tasks: join_existing.yml  
-      when: "existing_member.stdout == '0'" 
-  when: "etcd_initial_cluster_state == 'existing'"
-
+    - name: Check if etcd is provisioned
+      shell: "ETCDCTL_ENDPOINT=\"https://{{ etcd_listen_ip }}:2379\" {{ etcd_check_alive_cmd }}"
+      register: etcd_provisioned      
+      ignore_errors: true
+      no_log: True
+    - include_tasks: provision.yml
+      when: etcd_provisioned.rc > 0
+  vars:
+    ansible_ssh_pipelining: no

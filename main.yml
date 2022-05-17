@@ -38,6 +38,7 @@
 
 - hosts:
     - controller
+  tags: ['never', 'bootstrap']
   roles:
     - controller_postgres
     - controller_redis
@@ -56,6 +57,8 @@
     - backup
   any_errors_fatal: true
 
+# Only for addnode because new clusters wont be ready at this point,
+# and without this for addnode, it will fail.
 - hosts:
     - all
   tags: ['never', 'addnode']
@@ -66,14 +69,8 @@
 
 - hosts:
     - nodes
-  serial: 1 # only provision 1 node at a time when adding nodes
-  tags: ['never', 'addnode']
-  roles:
-    - etcd
-  any_errors_fatal: true
-- hosts:
-    - nodes
-  tags: ['never', 'bootstrap']
+  serial: 1 # Important that we bring up each etcd node 1 at a time.
+  tags: ['never', 'bootstrap', 'addnode']
   roles:
     - etcd
   any_errors_fatal: true
@@ -149,18 +146,10 @@
       ignore_errors: true
       no_log: True
 
-# Reboot only new nodes
 - hosts:
     - nodes
   tags: ['never', 'addnode']
   tasks:
-    - block:
-        - debug:
-            msg: "Installation complete, new nodes are now rebooting."
-        - name: reboot
-          reboot:
-            msg: "Ansible rebooting to finalize setup"
-            reboot_timeout: 1
-          ignore_errors: true
-          no_log: True
-      when: etcd_initial_cluster_state == 'existing'
+    - debug:
+        msg: "Installation complete, please manually reboot the new nodes before deploying containers."
+      run_once: true

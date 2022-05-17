@@ -17,6 +17,4 @@
     - include_tasks: install_container.yml
       when: 
         - not vault_container.exists
-        - vault_configured.stat.exists
-
-  tags: ['never', 'bootstrap']
+        - vault_configured.stat.exists  

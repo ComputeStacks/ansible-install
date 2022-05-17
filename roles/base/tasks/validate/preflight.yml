@@ -73,19 +73,4 @@
       fail:
         msg: Missing cs_admin_password
       when: "cs_admin_password == '' or cs_admin_password == 'changeme'"
-
-- name: Validate etcd_initial_cluster_state
-  fail:
-    msg: "etcd_initial_cluster_state must be either new or existing"
-  when:
-    - "'nodes' in group_names"
-    - "etcd_initial_cluster_state != 'new'"
-    - "etcd_initial_cluster_state != 'existing'"
-
-- name: Validate etcd master
-  fail:
-    msg: "First node must have etcd_initial_cluster_state set to new"
-  when:
-    - "inventory_hostname == groups['nodes'][0]"
-    - "etcd_initial_cluster_state != 'new'"
   

@@ -15,10 +15,7 @@
   block:
     - name: cat key
       shell: "cat {{ consul_host_config_dir }}/config.json | jq '.encrypt'"
-      register: consul_key_read
-      run_once: true
-      vars:
-        ansible_ssh_pipelining: no
+      register: consul_key_read      
     - name: set key fact
       set_fact:
         consul_raw_key: "{{ consul_key_read.stdout }}"

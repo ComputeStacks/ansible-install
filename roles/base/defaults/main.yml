@@ -42,8 +42,6 @@ acme_cf_zone: "" # Zone ID (Optional)
 cs_admin_email: root@localhost
 cs_admin_password: changeme
 
-etcd_initial_cluster_state: ""
-
 ##
 # CS DNS
 

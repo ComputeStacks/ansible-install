@@ -7,4 +7,3 @@
 
     - import_tasks: install.yml
       when: redis_configured.stat.exists == False
-  tags: ['never', 'bootstrap']

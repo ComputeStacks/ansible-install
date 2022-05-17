@@ -79,7 +79,7 @@ We recommend performing this step prior to running this ansible package.
 ## Running
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
+ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
 ```
 
 The last step in this script will reboot servers to finalize configuration.
@@ -90,37 +90,18 @@ The last step in this script will reboot servers to finalize configuration.
 After running and allowing the servers to reboot, you can perform some basic validation by running: 
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags "validate"
+ansible-playbook -u root -i inventory.yml main.yml --tags validate
 ```
 
 ## Adding nodes to an existing availability zone
-To add nodes to existing Availability Zone, simply add the new nodes to the same inventory file you used to deploy the initial cluster and change `etcd_initial_cluster_state` for each _NEW_ node from `new` to `existing`. Existing nodes _MUST_ remain at `new`.
+To add nodes to existing Availability Zone, simply add the new nodes to the same inventory file you used to deploy the initial cluster.
 
 Please note that you will need to ensure the number of nodes you're deploying will keep the etcd cluster in quorum. As per the etcd documentation, this should be `(n/2)+1` nodes. So 3, 5, 7, or 9 nodes per availability zone.
-
-If you're moving from a single-node to a cluster, you _may_ need to change the `peer url` of the existing standalone etcd server.
-
-<details>
-<summary>Set the etcd peer URL</summary>
-<p>
-Login to the existing node and set the correct peer url.
-<br><br>
-<em>Note: If your peer url is already configured as defined below, you may skip this process.</em>
-<ol>
-<li>Find your memberID by running: <code>etcdctl member list | cut -d, -f1</code></li>
-<li>
-Update the peer url to match the client url, but with port <code>2380</code>
-<ul><li><code>etcdctl member update 4370888ee4d9c217 --peer-urls="https://192.168.217.4:2380"</code>. <em>Note the <code>https</code>!</em></li></ul>
-</li>
-</ol>
-</p>
-</details>
-<br>
 
 **Now you may run the ansible package with:**
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags "addnode"
+ansible-playbook -u root -i inventory.yml main.yml --tags addnode
 ```
 
 ## Add Region / Availability Zone
@@ -133,7 +114,7 @@ To add a new region or availability zone, make a copy of your previous `inventor
 Re-run the bootstrap command:
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags "bootstrap"
+ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
 ```
 
 
