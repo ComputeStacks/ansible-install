@@ -13,9 +13,9 @@ iptables -A INPUT -p all -s 172.18.0.2/16 -j ACCEPT
 
 {% if install_cs_support_key %}
 # ComptueStacks Support
-iptables -A INPUT -p all -s 192.155.86.87 -j ACCEPT
+iptables -A INPUT -p all -s 135.148.13.168 -j ACCEPT
 {% if enable_ipv6 %}
-ip6tables -A INPUT -p all -s 2600:3c01::f03c:92ff:feaa:fc7e -j ACCEPT
+ip6tables -A INPUT -p all -s 2604:2dc0:100:4bdb::4 -j ACCEPT
 {% endif %}
 {% endif %}
 
