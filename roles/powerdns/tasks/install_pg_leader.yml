@@ -4,6 +4,7 @@
     path: "{{ pdns_postgresql_conf }}"
     regexp: "listen_address"
     line: "listen_addresses = 'localhost,{{ postgres_ip }}'"
+  notify: Restart Postgres
 
 - name: Add followers to leader pg
   postgresql_pg_hba:
@@ -13,9 +14,6 @@
     databases: replication
     method: trust
     source: "{{ hostvars[groups['follower_nameservers'][0]].postgres_ip }}"
+  notify: Restart Postgres
 
-- name: restart postgresql
-  systemd:
-    name: postgresql
-    state: restarted
-    enabled: yes
+- meta: flush_handlers

@@ -1,2 +1,6 @@
 ---
-# handlers file for powerdns
+- name: Restart Postgres
+  systemd:
+    name: postgresql
+    state: restarted
+    enabled: yes

@@ -17,6 +17,3 @@
       - python3-psycopg2
     state: present
     update_cache: yes
-
-- include_tasks: install_postgres_leader.yml
-  when: "'primary_nameserver' in group_names"
