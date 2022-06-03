@@ -1,14 +1,4 @@
 ---
-- name: remove existing packages
-  apt:
-    name: 
-      - docker
-      - docker-engine
-      - docker.io
-      - containerd
-      - runc
-    state: absent
-
 - name: add docker key
   ansible.builtin.apt_key:
     url: "{{ docker_deb_key }}"
