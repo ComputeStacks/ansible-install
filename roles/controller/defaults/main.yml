@@ -155,7 +155,7 @@ pdns_credentials_db_file: "{{ pdns_credentials_dir }}/.powerdns.db.secret"
 
 pdns_zone_type: Native # or Master
 
-pdns_endpoint: "http://{{ hostvars[groups['primary_nameserver'][0]].pdns_name }}:8081/api/v1/servers"
+pdns_endpoint: "{% if dns_driver == 'powerdns' %}http://{{ hostvars[groups['primary_nameserver'][0]].pdns_name }}:8081/api/v1/servers{% endif %}"
 
 # Manual Provisioning
 pdns_skip_provisioning: false
