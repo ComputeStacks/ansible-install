@@ -1,6 +1,8 @@
 ---
 enable_debug: false
 
+agent_service_fsfilelimit: "infinity"
+
 ##
 # vars from inventory
 cs_portal_domain: ""
@@ -35,3 +37,5 @@ nfs_host_path: "/var/nfsshare/volume_backups"
 backup_nfs_ssh_user: "root"
 backup_nfs_ssh_port: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].ssh_port }}{% else %}22{% endif %}"
 backup_nfs_ssh_keyfile: "/root/.ssh/id_ed25519" # path to private key on the node
+backup_nfs_opts: ",async,noatime,rsize=32768,wsize=32768"
+backup_nfs_create_path: true

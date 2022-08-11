@@ -83,7 +83,27 @@
     - docker
     - cadvisor
     - haproxy
+  any_errors_fatal: true
+
+- hosts:
+    - nodes
+  serial: 1 # When growing cluster, we need to add consul one at a time.
+  tags: ['never', 'addnode']
+  roles:
     - consul
+  any_errors_fatal: true
+
+- hosts:
+    - nodes
+  tags: ['never', 'bootstrap']
+  roles:
+    - consul
+  any_errors_fatal: true
+
+- hosts:
+    - nodes
+  tags: ['never', 'bootstrap', 'addnode']
+  roles:
     - node_docker
     - fluentd
     - node
