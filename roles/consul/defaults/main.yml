@@ -20,5 +20,3 @@ computestacks_consul_config_dir: "/etc/computestacks/certs/consul"
 computestacks_consul_ssl_crt: "{{ computestacks_consul_config_dir }}/client.crt"
 computestacks_consul_ssl_ca: "{{ computestacks_consul_config_dir }}/ca.crt"
 computestacks_consul_ssl_key: "{{ computestacks_consul_config_dir }}/client.key"
-
-consul_service_fsfilelimit: "infinity"

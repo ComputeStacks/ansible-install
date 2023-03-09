@@ -1,4 +1,14 @@
 ---
+- name: Load signing key
+  copy:
+    src: A8C477EE.asc
+    dest: /root/.A8C477EE.asc
+
+- name: Install gpg key
+  shell: gpg --import /root/.A8C477EE.asc
+  vars:
+    ansible_ssh_pipelining: no
+
 - name: ensure config directory exists
   file:
     path: "{{ agent_config_path }}"

@@ -7,11 +7,11 @@
 - name: redis
   fail:
     msg: redis is not running
-  when: 
+  when:
     - ansible_facts.services['redis-server.service']['state'] != 'running'
 
 - name: postgres
   fail:
     msg: postgresql is not running
   when:
-    - ansible_facts.services['postgresql@13-main.service']['state'] != 'running'
+    - ansible_facts.services['postgresql']['state'] != 'running'

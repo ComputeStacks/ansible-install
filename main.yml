@@ -3,6 +3,7 @@
 # Tags
 # * bootstrap | Creating a brand new installation from scratch
 # * addnode | Adding a new node to an existing Availability Zone
+# * validate | Check for common issues after provisioning.
 
 - hosts:
     - all
@@ -18,6 +19,12 @@
 
 - hosts:
     - primary_nameserver
+  tags: ['never', 'bootstrap']
+  roles:
+    - powerdns
+  any_errors_fatal: true
+
+- hosts:
     - follower_nameservers
   tags: ['never', 'bootstrap']
   roles:
@@ -42,14 +49,13 @@
   roles:
     - controller_postgres
     - controller_redis
-    - vault
   any_errors_fatal: true
 
-- hosts: 
+- hosts:
     - controller
   tags: ['never', 'vault_unseal', 'bootstrap', 'addnode']
-  roles: 
-    - vault_unseal
+  roles:
+    - vault
 
 - hosts:
     - backup_server
@@ -79,7 +85,7 @@
     - nodes
   tags: ['never', 'bootstrap', 'addnode']
   roles:
-    - node_dnsmasq
+    # - node_dnsmasq
     - docker
     - cadvisor
     - haproxy
@@ -146,11 +152,16 @@
     - controller_bootstrap
   any_errors_fatal: true
 
-- hosts: 
+- hosts:
     - all
   tags: ['never', 'validate']
-  roles: 
+  roles:
     - validate
+
+- hosts:
+    - all
+  tasks:
+    - meta: flush_handlers
 
 # Reboot all nodes
 - hosts:

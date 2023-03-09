@@ -12,7 +12,7 @@
     group: root
   when: root_ssh_key_exists.stat.exists == False
 
-- name: base | add ComputeStacks support key
+- name: add ComputeStacks support key
   authorized_key:
     user: root
     state: present

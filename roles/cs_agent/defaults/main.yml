@@ -1,8 +1,6 @@
 ---
 enable_debug: false
 
-agent_service_fsfilelimit: "infinity"
-
 ##
 # vars from inventory
 cs_portal_domain: ""
@@ -13,8 +11,8 @@ consul_token: "" # placeholder
 ##
 # Agent Configuration
 docker_api_version: "1.41"
-agent_image: "cmptstks/borg:stable"
-agent_download_url: "https://f.cscdn.cc/file/cstackscdn/packages/cs-agent/cs-agent-1.2.5.tar.gz"
+agent_image: "ghcr.io/computestacks/cs-docker-borg:latest"
+agent_download_url: "https://f.cscdn.cc/file/cstackscdn/packages/cs-agent/cs-agent-amd64.tar.gz"
 
 # Paths
 agent_config_path: /etc/computestacks

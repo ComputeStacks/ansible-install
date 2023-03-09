@@ -66,13 +66,16 @@
     regexp: "^alias vault='docker exec -it vault-bootstrap vault'$"
     state: present
     insertafter: EOF
-    create: true
+    create: true  
 
 - name: Initialise Vault operator
   shell: "docker exec -it vault-bootstrap vault operator init -key-shares=5 -key-threshold=3 -format json"
-  register: vault_init_results
+  register: vault_init_results  
+  retries: 3
+  delay: 5
+  until: vault_init_results.rc == 0
   vars:
-      ansible_ssh_pipelining: no
+    ansible_ssh_pipelining: no
 
 - name: Parse output of vault init
   set_fact:
@@ -107,13 +110,10 @@
     command: server
     restart_policy: unless-stopped
 
-- name: Unseal vault with unseal keys
-  shell: |
-    docker exec -it vault-bootstrap vault operator unseal {{ item.1 }}
-  with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
-  vars:
-      ansible_ssh_pipelining: no
-
-- include_tasks: ssl_docker.yml
-- include_tasks: ssl_consul.yml
-- include_tasks: ssl_etcd.yml
+- name: Wait for vault to start
+  command: "{{ vault_command }} status"
+  register: vault_status_check_results  
+  retries: 3
+  delay: 5
+  until: vault_status_check_results.rc == 0 or vault_status_check_results.rc == 2 # 0 = on and unsealed, 2 = on and sealed : both OK.
+  failed_when: vault_status_check_results.rc == 1 or vault_status_check_results.rc > 2 # 1 = off, greater than 2 is an error we can't live with.

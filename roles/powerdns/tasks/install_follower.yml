@@ -1,27 +1,37 @@
 ---
-- name: stop follower postgres
-  systemd:
-    name: postgresql
-    state: stopped
+- name: check if db configured
+  postgresql_ping:
+    db: pdns
+    login_host: 127.0.0.1
+    login_user: pdns
+    login_password: "{{ pdns_db_pass }}"
+  register: pdns_psql_follower_db_configured
 
-- name: write pdns conf
-  template:
-    src: pdns-follower.conf.j2
-    dest: /etc/powerdns/pdns.conf
+- block:
+    - name: stop follower postgres
+      systemd:
+        name: postgresql
+        state: stopped
 
-- name: wipe out follower postgres db
-  file:
-    name: "{{ pdns_postgresql_data_dir }}/main/"
-    state: absent
+    - name: write pdns conf
+      template:
+        src: pdns-follower.conf.j2
+        dest: /etc/powerdns/pdns.conf
 
-- name: sync db postgres leader 
-  shell: "pg_basebackup -h {{ pdns_leader_ip }} -U repuser --checkpoint=fast -D {{ pdns_postgresql_data_dir }}/main/ -R --slot=ns2 -C"
+    - name: wipe out follower postgres db
+      file:
+        name: "{{ pdns_postgresql_data_dir }}/main/"
+        state: absent
 
-- name: fix permissions
-  shell: "chown -R postgres: {{ pdns_postgresql_data_dir }}/main"
+    - name: sync db postgres leader 
+      shell: "pg_basebackup -h {{ pdns_leader_ip }} -U {{ pdns_replication_user }} --checkpoint=fast -D {{ pdns_postgresql_data_dir }}/main/ -R --slot=ns2 -C"
 
-- name: start follower postgres
-  systemd:
-    name: postgresql
-    state: started
-    enabled: true
+    - name: fix permissions
+      shell: "chown -R postgres: {{ pdns_postgresql_data_dir }}/main"
+
+    - name: start follower postgres
+      systemd:
+        name: postgresql
+        state: started
+        enabled: true
+  when: not pdns_psql_follower_db_configured.is_available

@@ -9,6 +9,8 @@ pdns_dns_address: "0.0.0.0, ::"
 pdns_web_address: "0.0.0.0"
 pdns_web_allow: "0.0.0.0/0"
 
+pdns_replication_user: repuser
+
 pdns_credentials_dir: "/root/.credentials"
 pdns_credentials_api_file: "{{ pdns_credentials_dir }}/.powerdns.api.secret"
 pdns_credentials_web_file: "{{ pdns_credentials_dir }}/.powerdns.web.secret"
@@ -24,7 +26,7 @@ enable_dnsupdate: true
 # Postgres
 pdns_postgresql_repo: "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main"
 pdns_postgresql_repo_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-pdns_postgresql_version: 13
+pdns_postgresql_version: 15
 pdns_postgresql_data_dir: "/var/lib/postgresql/{{ pdns_postgresql_version }}"
 pdns_postgresql_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/postgresql.conf"
 pdns_postgresql_hba_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/pg_hba.conf"

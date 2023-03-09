@@ -29,6 +29,13 @@
     state: restarted
   when: consul_container.exists
 
+- name: Wait for consul to boot
+  command: "docker exec consul consul version"
+  register: is_consul_online
+  retries: 3
+  delay: 3
+  failed_when: is_consul_online.rc > 0
+
 - name: check if token exists
   stat:
     path: "/root/.consul.secret"

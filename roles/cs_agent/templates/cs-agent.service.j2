@@ -13,7 +13,7 @@ Group=root
 ExecStart=/usr/local/bin/cs-agent
 KillMode=process
 Restart=on-failure
-LimitNOFILE={{ agent_service_fsfilelimit }}
+LimitNOFILE=infinity
 
 [Install]
 WantedBy=multi-user.target

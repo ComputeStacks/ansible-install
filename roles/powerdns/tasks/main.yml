@@ -1,7 +1,7 @@
 ---
 - include_tasks: install_postgres.yml
   when: (ansible_facts.services['postgresql.service'] is not defined) or
-        (ansible_facts.services['postgresql.service']['status'] == "disabled")
+        (ansible_facts.services['postgresql.service']['status'] != "running")
 
 - include_tasks: install_pg_leader.yml
   when: "'primary_nameserver' in group_names"

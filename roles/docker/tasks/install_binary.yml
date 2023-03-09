@@ -10,11 +10,6 @@
     state: present
     filename: docker
 
-- name: Unlock docker for update
-  command: apt-mark unhold docker-ce docker-ce-cli
-  args:
-    warn: false
-
 - name: install packages
   apt:
     name: 
@@ -23,16 +18,23 @@
       - "containerd.io"
     state: latest
     update_cache: yes
+  when: "'nodes' not in group_names"
 
-##
-# use apt-mark to hold packages
-# remove hold with: `apt-mark unhold`
-# show holds with: `apt-mark showhold`
-- name: Lock docker version
-  command: apt-mark hold docker-ce docker-ce-cli
-  args:
-    warn: false
-  when: lock_docker_version
+- block:
+    - name: Unlock docker for update
+      ansible.builtin.command: apt-mark unhold docker-ce docker-ce-cli
+    - name: install packages (nodes)
+      apt:
+        name: 
+          - "docker-ce=5:20.10.23~3-0~debian-bullseye"
+          - "docker-ce-cli=5:20.10.23~3-0~debian-bullseye"
+          - "containerd.io"
+        state: present
+        update_cache: yes
+    - name: Lock docker version
+      ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli
+      when: lock_docker_version
+  when: "'nodes' in group_names"
 
 - name: Ensure docker is running
   systemd:

@@ -1,5 +1,5 @@
 ---
-- name: fluentd | pull latest image
+- name: pull latest image
   community.general.docker_image:
     name: "{{ fluentd_image_name }}"
     tag: "{{ fluentd_image_tag }}"
@@ -13,7 +13,7 @@
 - include_tasks: install.yml
   when: fluentd_config_exists.stat.exists == False
 
-- name: fluentd | restart
+- name: restart
   systemd:
     name: fluentd
     state: restarted

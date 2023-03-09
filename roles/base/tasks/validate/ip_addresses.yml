@@ -1,0 +1,104 @@
+---
+- debug:
+    msg: "Ensure all specified ip addresses exist on the servers."
+- name: Ensure backup addresses exist
+  block:
+    - fail:
+        msg: "node_ip {{ node_ip }} is blank"
+      when: node_ip == ''
+    - fail:
+        msg: "controller_ip {{ controller_ip }} is blank"
+      when: controller_ip == ''
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} is blank"
+      when: metrics_ip_address == ''
+    - fail:
+        msg: "node_ip {{ node_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(node_ip)
+    - fail:
+        msg: "controller_ip {{ controller_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(controller_ip)
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(metrics_ip_address)
+  when: "'backup_server' in group_names"
+
+- name: Ensure controller addresses exist
+  block:
+    - fail:
+        msg: "node_ip {{ node_ip }} is blank"
+      when: node_ip == ''
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} is blank"
+      when: metrics_ip_address == ''
+    - fail:
+        msg: "node_ip {{ node_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(node_ip)
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(metrics_ip_address)
+  when: "'controller' in group_names"
+
+- name: Ensure primary_nameserver addresses exist
+  block:
+    - fail:
+        msg: "postgres_ip {{ postgres_ip }} is blank"
+      when: postgres_ip == ''
+    - fail:
+        msg: "postgres_ip {{ postgres_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(postgres_ip)
+  when: "'primary_nameserver' in group_names"
+
+- name: Ensure follower_nameservers addresses exist
+  block:
+    - fail:
+        msg: "postgres_ip {{ postgres_ip }} is blank"
+      when: postgres_ip == ''
+    - fail:
+        msg: "postgres_ip {{ postgres_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(postgres_ip)
+  when: "'follower_nameservers' in group_names"
+
+- name: Ensure metrics addresses exist
+  block:
+    - fail:
+        msg: "controller_endpoint {{ controller_endpoint }} is blank"
+      when: controller_endpoint == ''
+    - fail:
+        msg: "node_endpoint {{ node_endpoint }} is blank"
+      when: node_endpoint == ''
+    - fail:
+        msg: "controller_endpoint {{ controller_endpoint }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(controller_endpoint)
+    - fail:
+        msg: "node_endpoint {{ node_endpoint }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(node_endpoint)
+  when: "'metrics' in group_names"
+
+- name: Ensure node addresses exist
+  block:
+    - fail:
+        msg: "backup_ip {{ backup_ip }} is blank"
+      when: backup_ip == ''
+    - fail:
+        msg: "consul_listen_ip {{ consul_listen_ip }} is blank"
+      when: consul_listen_ip == ''
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} is blank"
+      when: metrics_ip_address == ''
+    - fail:
+        msg: "etcd_listen_ip {{ etcd_listen_ip }} is blank"
+      when: etcd_listen_ip == ''
+    - fail:
+        msg: "backup_ip {{ backup_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(backup_ip)
+    - fail:
+        msg: "consul_listen_ip {{ consul_listen_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(consul_listen_ip)
+    - fail:
+        msg: "metrics_ip_address {{ metrics_ip_address }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(metrics_ip_address)
+    - fail:
+        msg: "etcd_listen_ip {{ etcd_listen_ip }} does not exist"
+      when: not ansible_facts['all_ipv4_addresses'] is contains(etcd_listen_ip)
+  when: "'nodes' in group_names"

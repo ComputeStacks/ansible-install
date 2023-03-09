@@ -1,3 +1,4 @@
+.editorconfig
 inventory.yml
 inventory.*.yml
 inventory/

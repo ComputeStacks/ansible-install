@@ -1,38 +1,21 @@
 ---
-- include_tasks: validate/preflight.yml
-- include_tasks: debian/packages.yml
-- include_tasks: validate/postcheck.yml
-- include_tasks: debian/setup.yml
+- import_tasks: validate/ip_addresses.yml
+- import_tasks: validate/preflight.yml
+- import_tasks: debian/packages.yml
+- import_tasks: validate/postcheck.yml
+- import_tasks: debian/setup.yml
 
 - name: install tmux.conf
   get_url:
     url: "{{ tmux_url }}"
     dest: /root/.tmux.conf
 
-- name: Add Public DNS
-  lineinfile: path=/etc/resolv.conf create=yes line={{item}}
-  with_items:
-    - "nameserver 1.1.1.1"
-    - "nameserver 8.8.8.8"
-    - "nameserver 1.0.0.1"
-    - "nameserver 8.8.4.4"
-  when: overwrite_resolvconf
-
 - name: Set Motd
   template:
     src: motd.j2
     dest: /etc/motd
 
-- name: Install docker console script
-  copy:
-    src: docker_console.sh
-    dest: /etc/profile.d/
-    owner: root
-    group: root
-
-- include_tasks: sshd.yml
-
-- include_tasks: computestacks.yml
+- import_tasks: sshd.yml
 
 - name: setup chronyd
   service:
@@ -40,4 +23,5 @@
     state: started
     enabled: yes
 
-- include_tasks: validate/dns.yml
+- import_tasks: validate/dns.yml
+

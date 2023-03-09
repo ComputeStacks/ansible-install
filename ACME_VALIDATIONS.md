@@ -26,7 +26,7 @@ acme_aws_secret: ""
 ## Cloudflare
 ```yaml
 acme_challenge_method: "cloudflare"
-acme_cf_token: "" # API Token
+acme_cf_token: "" # API Token with write permission on the zone
 acme_cf_account: "" # Account ID
 acme_cf_zone: "" # Zone ID (Optional)
 ```

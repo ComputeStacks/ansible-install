@@ -9,6 +9,10 @@
   delegate_to: "{{ groups['controller'][0] }}"
 
 - name: unseal with keys
-  shell: |
-    docker exec -i vault-bootstrap vault operator unseal {{ item.stdout }}
+  command: |
+    {{ vault_command }} operator unseal {{ item.stdout }}
   with_items: "{{unseal_keys.results}}"
+  register: vault_unseal_results  
+  retries: 3
+  delay: 5
+  until: vault_unseal_results.rc == 0

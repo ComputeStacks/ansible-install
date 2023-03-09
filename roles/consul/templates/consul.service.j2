@@ -26,7 +26,7 @@ ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm consul 2>/dev/null'
 Restart=always
 RestartSec=30
 SyslogIdentifier=consul
-LimitNOFILE={{ consul_service_fsfilelimit }}
+LimitNOFILE=infinity
 
 [Install]
 WantedBy=multi-user.target

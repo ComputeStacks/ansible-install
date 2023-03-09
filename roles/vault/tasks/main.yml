@@ -1,20 +1,38 @@
 ---
-- block:
-    - name: Check if vault is configured
-      stat:
-        path: "{{ vault_storage_path }}/keys/unseal_key_0"
-      register: vault_configured
+- name: Check if vault is configured
+  stat:
+    path: "{{ vault_storage_path }}/keys/unseal_key_0"
+  register: vault_configured
 
-    - include_tasks: install.yml
-      when: vault_configured.stat.exists == False
+- include_tasks: install.yml
+  when: vault_configured.stat.exists == False
 
-    - name: ensure vault-bootstrap exists
-      community.general.docker_container_info:
-        name: vault-bootstrap
-      register: vault_container
+- name: ensure vault-bootstrap exists
+  community.general.docker_container_info:
+    name: vault-bootstrap
+  register: vault_container
 
-    # if we're configured, but it's missing, re-rerun the container
-    - include_tasks: install_container.yml
-      when: 
-        - not vault_container.exists
-        - vault_configured.stat.exists  
+# if we're configured, but it's missing, re-rerun the container
+- include_tasks: install_container.yml
+  when: 
+    - not vault_container.exists
+    - vault_configured.stat.exists  
+
+# Boot and ensure we're unsealed
+- name: Vault state
+  command: "{{ vault_command }} status"
+  register: vault_state
+  failed_when: vault_state.rc > 2
+
+- name: Start vault
+  shell: "docker start vault-bootstrap"
+  when: vault_state.rc == 1
+
+- name: Unseal Vault
+  include_tasks: unseal.yml
+  when: vault_state.rc > 0 # 1 == off, 2 == on but sealed.
+
+
+- include_tasks: initialize/ssl_docker.yml
+- include_tasks: initialize/ssl_consul.yml
+- include_tasks: initialize/ssl_etcd.yml

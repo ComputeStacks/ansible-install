@@ -1,10 +1,6 @@
 ---
 install_cs_support_key: true # Installs the ComputeStacks Support SSH Key
-overwrite_resolvconf: true
 config_directory: "/etc/computestacks"
-
-cs_diag_url: "https://gist.githubusercontent.com/kwatson/1022d337d2a775264586056819366d2d/raw/7361d2e58a0b1c6a3babc66afdbfdad0729775c0/cs-diag-without-google.sh"
-cs_diag_file: /usr/local/bin/cs-diagnostic
 
 region_name: "dev"
 availability_zone_name: "{{ region_name }}-a"
@@ -20,8 +16,6 @@ motd_info_controller:
   - "      IP:    ": "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
 
 tmux_url: "https://gist.githubusercontent.com/kwatson/45a298891981e2323eed3e118a3d5da7/raw/ff7eb5ba7afbccb11df6470290ab6f520c2a128d/.tmux.conf"
-
-has_old_kernel: "{{ ansible_kernel is version('5', '<') }}"
 
 ##
 # Cloud Platform Specifics
@@ -60,3 +54,8 @@ dns_allowed_drivers:
 dns_driver: "{{ (hostvars[groups['controller'][0]].dns_driver | default('powerdns')) }}"
 
 dns_valid_driver: "{{ dns_driver in dns_allowed_drivers }}"
+
+
+# Node:
+etcd_listen_ip: ""
+node_resolvers: []

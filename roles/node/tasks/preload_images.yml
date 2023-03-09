@@ -1,60 +1,24 @@
 ---
 - name: Pull image xtrabackup 8
   docker_image:
-    name: cmptstks/xtrabackup
+    name: ghcr.io/computestacks/cs-docker-xtrabackup
     tag: "2.4"
     source: pull
 
 - name: Pull image xtrabackup 2.4
   docker_image:
-    name: cmptstks/xtrabackup
+    name: ghcr.io/computestacks/cs-docker-xtrabackup
     tag: "8.0"
-    source: pull
-
-- name: Pull image mariadb-backup 10.1
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.1"
-    source: pull
-
-- name: Pull image mariadb-backup 10.2
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.2"
-    source: pull
-
-- name: Pull image mariadb-backup 10.3
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.3"
-    source: pull
-
-- name: Pull image mariadb-backup 10.4
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.4"
-    source: pull
-
-- name: Pull image mariadb-backup 10.5
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.5"
-    source: pull
-
-- name: Pull image mariadb-backup 10.6
-  docker_image:
-    name: cmptstks/mariadb-backup
-    tag: "10.6"
     source: pull
 
 - name: Pull image borg
   docker_image:
-    name: cmptstks/borg
-    tag: stable
+    name: ghcr.io/computestacks/cs-docker-borg
+    tag: latest
     source: pull
 
 - name: Pull image ssh
   docker_image:
-    name: cmptstks/ssh
+    name: ghcr.io/computestacks/cs-docker-bastion
     tag: v2
     source: pull

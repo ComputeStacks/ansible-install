@@ -1,20 +1,24 @@
 # Install ComputeStacks
 
-Before proceeding, be sure to review our [architecture overview](https://docs.computestacks.com/admin_guide/getting_started/architecture_overview/), and our [minimum requirements](https://docs.computestacks.com/admin_guide/getting_started/onprem-demo/). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
+Before proceeding, be sure to review our [architecture overview](https://computestacks.notion.site/Architecture-Overview-63ad0f8b371a41c7b89770f315191648), and our [minimum requirements](https://computestacks.notion.site/Installation-Plan-d40223528e254733a7bf08925059c711#cb50536966fc46cb8980ed71535e4cb7). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
 
-## Prerequisites
+## Local Machine Prerequisites
 
-1. Ensure your local machine:
-    * Has ansible installed and configured, with the following plugins installed:
+* make _(installed by default on all linux & mac systems)_
+* [ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html)
 
-        ```bash
-        ansible-galaxy install -r requirements.yml
-        ```
+Once ansible is installed, run:
 
+```bash
+make roles
+```
+
+
+> Please first check and see if [terraform]((https://github.com/ComputeStacks?q=terraform&type=&language=)) scripts exist for your platform. This is will greatly aid in building your inventory file and ensuring a more successful installation process.
 
 ### Inventory File
 
-If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=) to create your cluster, then you should already have a skeleton `inventory.yml` file that you can place in this directory. Otherwise, `cp inventory.yml.sample inventory.yml`.
+If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=) **_(RECOMMENDED)_** to create your cluster, then you should already have a skeleton `inventory.yml` file that you can place in this directory. Otherwise, `cp inventory.yml.sample inventory.yml`.
 
 Ensure you fill out all the variables and ensure everything is correct. To see all available settings, check each [role](roles/) and look at their `defaults/main.yml` file.
 
@@ -22,7 +26,9 @@ Ensure you fill out all the variables and ensure everything is correct. To see a
 
 Various parts of this ansible package will require the domains defined in your `inventory.yml` file to be correctly setup. Please configure those domains and ensure the changes have been propagated before proceeding.
 
-Example DNS Settings:
+<details>
+<summary>Example DNS Settings</summary>
+<p>
 
 ```
 a.dev.cmptstks.net. IN A %{floating_ip}
@@ -32,32 +38,50 @@ portal.dev.cmptstks.net. IN A %{controller ip address}
 cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
 ```
 
+</p>
+</details>
+
 ### Requirements for each server
-
-_**Note:** If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=), then the following steps would have already been performed for you._
-
-#### Server Hostnames
+#### Server Hostnames (Skip if you used Terraform)
 
 Ensure all hostnames are configured properly on each node.
 Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
 
-Examples: node101, node102, node103
+<details>
+<summary>Example using node101, node102, node103</summary>
+<p>
 
 ```bash
 hostname node101 && echo "node101" > /etc/hostname && echo "127.0.0.1 node101" >> /etc/hosts
 ```
 
-The reason these are critical are two fold:
-
-a) When metrics are stored for containers or nodes, the hostname is added as a label. This is how ComputeStacks is able to filter metrics for the correct container/node.
-b) Backup jobs are assigned to the node by their hostname. If there is a mismatch in the controller, then jobs will not run.
+</p>
+</details>
 
 
-#### Install the following packages
+#### Install the following packages (Skip if you used Terraform)
+
+<details>
+<summary>Required packages when NOT using our terraform provisioners</summary>
+<p>
 
 ```bash
-apt update && apt -y install openssl ca-certificates linux-headers-amd64 python3 python3-pip python3-openssl python3-apt python3-setuptools python3-wheel && pip3 install ansible
+apt-get update
+apt-get -y install openssl \
+                   ca-certificates \
+                   linux-headers-amd64 \
+                   python3 \
+                   python3-pip \
+                   python3-openssl \
+                   python3-apt \
+                   python3-setuptools \
+                   python3-wheel
 ```
+
+</p>
+</details>
+
+
 
 #### Network MTU Settings
 
@@ -67,7 +91,7 @@ If you're using a setting other than the default `1500`, please add the followin
 container_network_mtu: 1400 # Set the desired MTU for containers to use
 ```
 
-#### IPv6 for Container Nodes
+#### IPv6 for Container Nodes (Skip if you used Terraform)
 
 Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer on a separate virtual machine, or by configuring the controller to proxy ipv6 traffic.
 
@@ -76,10 +100,12 @@ For the time being, our installer will disable ipv6 directly on the node. Howeve
 We recommend performing this step prior to running this ansible package.
 
 ***
-## Running
+## Running the installer
+
+### Bootstrap A New Cluster
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
+make bootstrap
 ```
 
 The last step in this script will reboot servers to finalize configuration.
@@ -87,10 +113,10 @@ The last step in this script will reboot servers to finalize configuration.
 
 ## Post-Installation
 
-After running and allowing the servers to reboot, you can perform some basic validation by running: 
+After running and allowing the servers to reboot, you can perform some basic validation by running:
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags validate
+make validate
 ```
 
 ## Adding nodes to an existing availability zone
@@ -101,7 +127,7 @@ Please note that you will need to ensure the number of nodes you're deploying wi
 **Now you may run the ansible package with:**
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags addnode
+make add-node
 ```
 
 ## Add Region / Availability Zone
@@ -114,7 +140,7 @@ To add a new region or availability zone, make a copy of your previous `inventor
 Re-run the bootstrap command:
 
 ```bash
-ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
+make bootstrap
 ```
 
 
@@ -155,7 +181,7 @@ This will ensure you have the most recent version of ansible.
 </p>
 </details>
 
-## Enable Swap Limit
+### Enable Swap Limit
 
 In order to allow swap limitations set on containers, you need to perform the following on each node:
 

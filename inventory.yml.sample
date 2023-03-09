@@ -1,25 +1,25 @@
 ---
 all:
   vars:
+    # Path to YOUR ssh key. Used by ansible to connect to servers
+    ansible_ssh_private_key_file: ~/.ssh/id_rsa
+
     # Installs the ComputeStacks Support SSH Key, and adds our support ip to the firewall.
     install_cs_support_key: true
-    
+
     region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     availability_zone_name: "{{ region_name }}-a"
-    
-    overwrite_resolvconf: false # if the provider does not have internal resolvers, change to `true`.
-    ansible_python_interpreter: /usr/bin/python3
 
     backups_key: "changme!" # Example: `openssl rand -base64 32`
 
     # Set to false for LetsEncrypt
     use_zerossl: true
-    
+
     ##
     # Bug Reporting
     #
     # 1) Uncomment and leave blank to disable bug reporting completely.
-    # 2) Leave commented out to report bugs to ComputeStacks. 
+    # 2) Leave commented out to report bugs to ComputeStacks.
     # 3) Uncomment and set to your own Sentry DSN.
     # sentry_dsn: ""
 
@@ -63,9 +63,12 @@ all:
     #
     # floating_ip_interface: ""
 
+    # Optionally use a docker registry mirror - MUST be https.
+    # docker_registry_mirror: https://my-registry-cache
+
     ##
     # CS Controller Settings
-    
+
     cs_app_url: a.dev.cmptstks.net
     cs_app_zone: cmptstks.net # The zone file for the app url
     cs_currency: "USD" # Default currency. Can add more later in web admin.
@@ -84,8 +87,8 @@ all:
     #
     # acme_challenge_method: 'http'
     #
-    # To use DNS validation, see `ACME_VALIDATIONS.md`. 
-    
+    # To use DNS validation, see `ACME_VALIDATIONS.md`.
+
     ##
     # Additional Management Ips
     # Add any additional IP Addresses that you want to have full access
@@ -97,13 +100,6 @@ all:
     #   - "192.168.10.33"
     # extra_allowed_ipv6_addresses:
     #   - "2600:3c01::f03c:92ff:feaa:fc7e"
-    
-    ##
-    # Restrict SSH to only allowed IPs and services created here?
-    #
-    # You may also allow individual servers by adding this to specific servers below.
-    # 
-    # default_allow_ssh: false # Default is true!
   children:
     backup_server:
       hosts:
@@ -160,19 +156,22 @@ all:
           enable_ipv6: true
           ssh_port: 22
     primary_nameserver:
+      # Even if you're not using powerdns, you MUST still include the empty `hosts:` section
       hosts:
         192.168.173.20: # Comment out this if you have an existing cluster
-          pdns_name: "ns1.example.com"  
+          pdns_name: "ns1.example.com"
           enable_ipv6: true
           ssh_port: 22
 
-          # The ip used for internal postgres replication. 
+          # The ip used for internal postgres replication.
           # This may often times be separate than the primary public ip
           postgres_ip: 192.168.173.20
     follower_nameservers:
-        hosts: # Note that we only support 1 follower!
+        # Even if you're not using powerdns, you MUST still include the empty `hosts:` section
+        # We only support 1 follower
+        hosts:
           192.168.173.21: # Comment out this if you have an existing cluster
             pdns_name: "ns2.example.com"
             enable_ipv6: true
-            ssh_port: 22      
+            ssh_port: 22
             postgres_ip: 192.168.173.21

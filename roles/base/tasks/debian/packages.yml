@@ -27,6 +27,7 @@
       - mosh
       - socat
       - python3-openssl
+      - python3-pip
       - python3-docker
       - git
       - linux-headers-amd64

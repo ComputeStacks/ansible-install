@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 #
 # ComputeStacks management script
 #
@@ -102,7 +102,7 @@ console()
 container()
 {
   if [ "$(docker ps -q -f name=portal)" ]; then
-    docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal ash
+    docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bash
   else
     docker run -it --rm --name portal \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
@@ -128,7 +128,7 @@ container()
         -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
         --log-driver=journald \
-        $CS_REG ash
+        $CS_REG bash
   fi
 }
 
@@ -265,6 +265,7 @@ where COMMAND is one of:
   database-backup   Create a database backup (postgres)
   help              Usage Help
   logs              Controller Logs
+  tail-logs         Follow controller logs
   run               Run ComputeStacks
   upgrade           Pull the latest version and run any database migrations
   test              Test connectivity between controller and nodes

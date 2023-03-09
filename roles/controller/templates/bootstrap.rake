@@ -50,7 +50,7 @@ task bootstrap: :environment do
     auth_type: "master"
   }
   {% endif %}
-  
+
   {% if dns_valid_driver -%}
   pdns_driver = ProvisionDriver.create!(
     endpoint: '{{ cs_dns_module_endpoint }}',
@@ -60,7 +60,7 @@ task bootstrap: :environment do
     api_key: Secret.encrypt!("{{ cs_dns_module_api }}"),
     api_secret: Secret.encrypt!("{{ cs_dns_module_secret }}")
   )
-  
+
   dns_type = ProductModule.create!(name: 'dns', primary: pdns_driver)
   pdns_driver.product_modules << dns_type
   {% endif %}
@@ -69,11 +69,11 @@ task bootstrap: :environment do
   location = Location.create!(name: "{{ region_name }}") if location.nil?
   region = Region.find_by name: "{{ availability_zone_name }}", location: location
   region = Region.create!(
-    name: "{{ availability_zone_name }}", 
+    name: "{{ availability_zone_name }}",
     location: location,
-    pid_limit: 150,
-    ulimit_nofile_soft: 1024,
-    ulimit_nofile_hard: 1024,
+    pid_limit: 300,
+    ulimit_nofile_soft: 2500,
+    ulimit_nofile_hard: 3000,
     consul_token: "{{ consul_token }}"
   ) if region.nil?
   if region.nil?
@@ -117,7 +117,7 @@ task bootstrap: :environment do
     username: "{{ loki_username }}",
     password: "{{ loki_password }}"
   ) if lc.nil?
-  
+
 
   if mc.nil? || lc.nil?
     raise "Missing Log or Metric Client"
@@ -126,7 +126,7 @@ task bootstrap: :environment do
   region.update metric_client: mc,
                 log_client: lc,
                 loki_endpoint: "{{ loki_node_endpoint }}"
-  
+
 
   puts "Creating Nodes..."
 
@@ -138,7 +138,7 @@ task bootstrap: :environment do
     primary_ip: '{{ hostvars[host].consul_listen_ip }}',
     public_ip: '{{ hostvars[host].ansible_default_ipv4.address }}',
     region: region,
-    active: true,    
+    active: true,
     ssh_port: {{ hostvars[host].ssh_port | int }},
     block_write_bps: 0,
     block_read_bps: 0,
@@ -193,7 +193,7 @@ task bootstrap: :environment do
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
 {% else %}
 floating_ip = "{{ floating_ip }}"
-{% endif %} 
+{% endif %}
 {{ '' }}
   lb = LoadBalancer.find_by public_ip: floating_ip
   if lb.nil?
@@ -215,14 +215,14 @@ floating_ip = "{{ floating_ip }}"
     begin
       {% if dns_valid_driver -%}
       Dns::Zone.create!(
-        name: "{{ cs_app_zone }}", 
+        name: "{{ cs_app_zone }}",
         provider_ref: "{{ cs_app_zone }}.",
         provision_driver: pdns_driver
       )
       {% else -%}
       Dns::Zone.create!(name: "{{ cs_app_zone }}")
       {% endif %}
-      
+
     rescue => e
       ExceptionAlertService.new(e, 'fb85bd8aefed7b69').perform
     end

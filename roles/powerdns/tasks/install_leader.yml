@@ -4,35 +4,35 @@
     src: pdns.conf.j2
     dest: /etc/powerdns/pdns.conf
 
-- name: ensure postgresql is running
+- name: start postgresql
   systemd:
     name: postgresql
     state: started
     enabled: yes
 
+- name: ensure postgresql is running
+  postgresql_ping:
+    db: postgres
+  become_user: postgres
+  become: true
+  become_method: su
+  register: pdns_psql_db_up
+  retries: 3
+  delay: 5
+  failed_when: not pdns_psql_db_up.is_available
+
 - name: check if db configured
   postgresql_ping:
     db: pdns
-    login_host: localhost
+    login_host: 127.0.0.1
     login_user: pdns
     login_password: "{{ pdns_db_pass }}"
-  register: pdns_psql_db_up
+  register: pdns_psql_db_configured
 
 - block:
-    - name: create psql pdns db
-      postgresql_db:
-        name: pdns
-        encoding: UTF-8
-        template: template0
-        state: present
-      become_user: postgres
-      become: true
-      become_method: su
-
     - name: create psql pdns role
       postgresql_user:
         name: pdns
-        db: pdns
         role_attr_flags: "superuser,login"
         password: "{{ pdns_db_pass }}"
         state: present
@@ -40,9 +40,20 @@
       become_user: postgres
       become_method: su
 
+    - name: create psql pdns db
+      postgresql_db:
+        name: pdns
+        owner: pdns
+        encoding: UTF-8
+        template: template0
+        state: present
+      become_user: postgres
+      become: true
+      become_method: su
+
     - name: create psql replication user
       postgresql_user:
-        name: repuser
+        name: "{{ pdns_replication_user }}"
         role_attr_flags: "replication"
         state: present
       become: true
@@ -57,4 +68,13 @@
       become: true
       become_user: postgres
       become_method: su
-  when: not pdns_psql_db_up.is_available
+
+    - name: Verify powerdns leader database configured
+      postgresql_ping:
+        db: pdns
+        login_host: 127.0.0.1
+        login_user: pdns
+        login_password: "{{ pdns_db_pass }}"
+      register: pdns_psql_db_verification
+      failed_when: not pdns_psql_db_verification.is_available
+  when: not pdns_psql_db_configured.is_available

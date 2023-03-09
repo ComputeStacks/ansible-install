@@ -73,4 +73,3 @@
       fail:
         msg: Missing cs_admin_password
       when: "cs_admin_password == '' or cs_admin_password == 'changeme'"
-  

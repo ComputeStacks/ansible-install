@@ -10,8 +10,6 @@
 - name: Verify integrity
   shell: |
     cd /usr/local/src && gpg --verify cs-agent.sig cs-agent
-  args:
-    warn: false
 
 - name: Install agent binary
   copy:

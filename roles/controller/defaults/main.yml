@@ -3,7 +3,7 @@
 # Bug Reporting
 #
 # 1) Comment out and set to blank will disable bug reporting completely.
-# 2) Leave as below to enable bug reporting to ComputeStacks. 
+# 2) Leave as below to enable bug reporting to ComputeStacks.
 # 3) Set to your own Sentry DSN to report bugs to your own installation of Sentry.
 sentry_dsn: "https://dfcc28e876f549d887c1ff443775e107@sentry.cmptstks.com/2"
 
@@ -26,10 +26,7 @@ controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{
 
 ##
 # Controller Image
-# docker_registry: ghcr.io
-controller_version: "7.1"
-controller_image: cmptstks/controller
-controller_image_path: "{{ controller_image }}:v{{ controller_version }}"
+controller_image_path: "ghcr.io/computestacks/controller:8"
 
 ##
 # Directory Structure & Paths
@@ -55,7 +52,6 @@ cs_app_id: "default"
 
 ##
 # App Configuration
-cs_version: "{{ controller_version }}"
 cs_locale: "en"
 cs_currency: "USD"
 
@@ -100,9 +96,9 @@ passenger_min_instances: 15
 
 ##
 # Branding
-branding_css_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/application.css"
-branding_css_map_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/application.css.map"
-branding_login_img_url: "https://storage.googleapis.com/cstacks/provision_assets/branding/logo-login.png"
+branding_css_url: "https://f.cscdn.cc/file/cstackscdn/cloud-portal/branding/application.css"
+branding_css_map_url: "https://f.cscdn.cc/file/cstackscdn/cloud-portal/branding/application.css.map"
+branding_login_img_url: "https://f.cscdn.cc/file/cstackscdn/cloud-portal/branding/logo-login.png"
 
 ##
 # Postgres
@@ -173,5 +169,5 @@ pdns_masters: [] # Leave empty for Native replication
 cs_dns_module_endpoint: "{% if dns_driver == 'powerdns' %}{{ pdns_endpoint }}{% elif dns_driver == 'autodns' %}https://{{ autodns_endpoint }}{% endif %}"
 cs_dns_module_name: "{% if dns_driver == 'powerdns' %}Pdns{% elif dns_driver == 'autodns' %}AutoDNS{% endif %}"
 cs_dns_module_user: "{% if dns_driver == 'powerdns' %}admin{% elif dns_driver == 'autodns' %}{{ autodns_username }}{% endif %}"
-cs_dns_module_api: "{% if dns_driver == 'powerdns' %}{{ pdns_web_key }}{% elif dns_driver == 'autodns' %}{{ autodns_password }}{% endif %}"
-cs_dns_module_secret: "{% if dns_driver == 'powerdns' %}{{ pdns_api_key }}{% elif dns_driver == 'autodns' %}{{ autodns_context }}{% endif %}"
+cs_dns_module_api: "{% if dns_driver == 'powerdns' %}{{ pdns_web_key }}{% elif dns_driver == 'autodns' %}{{ autodns_context }}{% endif %}"
+cs_dns_module_secret: "{% if dns_driver == 'powerdns' %}{{ pdns_api_key }}{% elif dns_driver == 'autodns' %}{{ autodns_password }}{% endif %}"

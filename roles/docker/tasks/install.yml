@@ -1,6 +1,13 @@
 ---
 - import_tasks: install_binary.yml
 
+- name: Install docker console script
+  copy:
+    src: docker_console.sh
+    dest: /etc/profile.d/
+    owner: root
+    group: root
+
 - name: Ensure docker startup directory exists
   file:
     path: "/etc/systemd/system/docker.service.d"
