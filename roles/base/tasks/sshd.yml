@@ -1,16 +1,12 @@
 ---
-- name: check if root ssh key exists
-  stat:
-    path: /root/.ssh/id_ed25519
-  register: root_ssh_key_exists
-
 - name: generate root key
   openssh_keypair:
     path: /root/.ssh/id_ed25519
     type: ed25519
     owner: root
     group: root
-  when: root_ssh_key_exists.stat.exists == False
+    state: present
+    regenerate: never
 
 - name: add ComputeStacks support key
   authorized_key:

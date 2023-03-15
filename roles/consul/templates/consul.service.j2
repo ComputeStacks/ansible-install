@@ -12,6 +12,7 @@ ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm consul 2>/dev/null'
 ExecStart=/usr/bin/env docker run --rm --name consul \
       --log-driver=none \
       --network=host \
+      --label com.computestacks.role=system \
       -v consul-data:/consul/data \
       -e CONSUL_HTTP_SSL=true \
       -e CONSUL_CACERT=/consul/config/ssl/ca.crt \

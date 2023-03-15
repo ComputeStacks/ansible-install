@@ -2,6 +2,7 @@
 
 {% if container_network_mtu != 1500 %}
 docker run --net=host --privileged --name=calico-node -d --restart=always \
+  --label com.computestacks.role=system \
   -e ETCD_ENDPOINTS=https://{{ etcd_listen_ip }}:2379 \
   -e CALICO_LIBNETWORK_VETH_MTU={{ container_network_mtu }} \
   -e CALICO_LIBNETWORK_LABEL_ENDPOINTS=true \
@@ -26,6 +27,7 @@ docker run --net=host --privileged --name=calico-node -d --restart=always \
   {{ calico_node_image }}
 {% else %}
 docker run --net=host --privileged --name=calico-node -d --restart=always \
+  --label com.computestacks.role=system \
   -e ETCD_ENDPOINTS=https://{{ etcd_listen_ip }}:2379 \
   -e CALICO_LIBNETWORK_LABEL_ENDPOINTS=true \
   -e CALICO_NETWORKING_BACKEND=bird \

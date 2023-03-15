@@ -13,6 +13,7 @@
         - "{{ groups['nodes'] }}"
     - name: reload exports
       command: 'exportfs -ra'
+  when: backup_remote_protocol == "nfs"
   tags: ['never', 'bootstrap', 'addnode']
 
 - import_tasks: "ssh_keys.yml"

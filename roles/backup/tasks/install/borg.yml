@@ -1,0 +1,31 @@
+---
+# Check this way to avoid overwriting a custom mirror
+- name: Check if some kind of backports repo is installed
+  command: "grep .*{{ backports_repo }} /etc/apt/sources.list"
+  register: backports_exists
+  failed_when: backports_exists.rc > 1
+
+- name: Add backports repo
+  apt_repository:
+    repo: http://deb.debian.org/debian {{ backports_repo }} main contrib non-free
+    state: present
+    update_cache: true
+  when: not backports_exists.rc == 0
+
+- name: Install borgbackup
+  apt:
+    name: borgbackup
+    state: present
+    default_release: bullseye-backports
+
+- name: create user for borg
+  user:
+    name: "{{ agent_ssh_user }}"
+
+- name: ensure borg remote path exists
+  file:
+    path: "{{ ssh_agent_host_path }}"
+    state: directory
+    mode: '0770'
+    owner: "{{ agent_ssh_user }}"
+    group: "{{ agent_ssh_group }}"

@@ -1,6 +1,11 @@
 ---
 enable_debug: false
 
+# How are we backing up the data?
+# * if no backup server exists in inventory, use local,
+# * otherwise the default is ssh.
+backup_filesystem_kind: "{% if groups['backup_server'] | length < 1 %}local{% else %}ssh{% endif %}" # local, nfs, or ssh
+
 ##
 # vars from inventory
 cs_portal_domain: ""
@@ -11,7 +16,7 @@ consul_token: "" # placeholder
 ##
 # Agent Configuration
 docker_api_version: "1.41"
-agent_image: "ghcr.io/computestacks/cs-docker-borg:latest"
+agent_image: "ghcr.io/computestacks/cs-docker-borg:1.4"
 agent_download_url: "https://f.cscdn.cc/file/cstackscdn/packages/cs-agent/cs-agent-amd64.tar.gz"
 
 # Paths
@@ -26,14 +31,30 @@ backups_check_freq: "*/2 * * * *"
 backups_prune_freq: "15 1 * * *"
 backups_key: "changme!"
 
-# Backup NFS
-backup_uses_nfs: "{{ groups['backup_server'] is defined and (groups['backup_server']|length>0) | lower }}"
-backup_nfs_host: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].node_ip }}{% else %}127.0.0.1{% endif %}"
+# IF you change this, set it in the global vars section of your inventory.
+# it is also used by other roles, and if the value is different, your backups will not work.
+backup_remote_protocol: "ssh" # local,nfs,ssh
+
+##
+# SSH
+agent_ssh_enabled: "{{ backup_remote_protocol == 'ssh' }}"
+agent_ssh_user: cstacks
+agent_ssh_host: "{% if backup_remote_protocol == 'ssh' %}{{ hostvars[groups['backup_server'][0]].node_ip }}{% else %}127.0.0.1{% endif %}"
+agent_ssh_port: 22
+
+# Path on the backup server -- will be created by backup role if not exist.
+# MUST be an absolute path AND start with a '/', AND NOT have a trailing `/`.
+ssh_agent_host_path: "/mnt"
+
+##
+# Backup via NFS
+backup_uses_nfs: "{{ backup_remote_protocol == 'nfs' }}"
+backup_nfs_host: "{% if backup_remote_protocol == 'nfs' %}{{ hostvars[groups['backup_server'][0]].node_ip }}{% else %}127.0.0.1{% endif %}"
 nfs_host_path: "/var/nfsshare/volume_backups"
 
-# Backup NFS SSH Settings
+# NFS SSH Settings
 backup_nfs_ssh_user: "root"
-backup_nfs_ssh_port: "{% if backup_uses_nfs == 'true' %}{{ hostvars[groups['backup_server'][0]].ssh_port }}{% else %}22{% endif %}"
+backup_nfs_ssh_port: "{% if backup_remote_protocol == 'nfs' %}{{ hostvars[groups['backup_server'][0]].ssh_port }}{% else %}22{% endif %}"
 backup_nfs_ssh_keyfile: "/root/.ssh/id_ed25519" # path to private key on the node
 backup_nfs_opts: ",async,noatime,rsize=32768,wsize=32768"
 backup_nfs_create_path: true

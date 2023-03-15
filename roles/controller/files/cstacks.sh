@@ -14,6 +14,7 @@ bootstrap-app()
     exit 1
   fi
   docker run -it --rm --name portal \
+          --label com.computestacks.role=system \
           -v $CS_CERT_PATH/docker:/root/.docker:Z \
           -v $CS_CERT_PATH/consul:/root/.consul:Z \
           -v $CS_RAKE_PATH/bootstrap.rake:/usr/src/app/lib/tasks/bootstrap.rake:Z \
@@ -44,6 +45,7 @@ bootstrap-db()
   fi
   docker pull $CS_REG
   docker run -it --rm --name portal \
+        --label com.computestacks.role=system \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -e APP_ID=$CS_APP_ID \
@@ -72,6 +74,7 @@ console()
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bundle exec rails c
   else
     docker run -it --rm --name portal \
+        --label com.computestacks.role=system \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -105,6 +108,7 @@ container()
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bash
   else
     docker run -it --rm --name portal \
+        --label com.computestacks.role=system \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -153,6 +157,7 @@ upgrade()
 
   echo "Running migrations..."
   docker run -it --rm --name portal \
+          --label com.computestacks.role=system \
           -v $CS_CERT_PATH/docker:/root/.docker:Z \
           -v $CS_CERT_PATH/consul:/root/.consul:Z \
           -e APP_ID=$CS_APP_ID \
@@ -180,6 +185,7 @@ run()
     docker stop portal && docker rm portal
   fi
   docker run -d --name portal \
+        --label com.computestacks.role=system \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
@@ -215,6 +221,7 @@ test()
     docker exec -e COLUMNS="`tput cols`" -e LINES="`tput lines`" -it portal bundle exec rake test_connection:all
   else
     docker run -it --rm --name portal \
+        --label com.computestacks.role=system \
         -v $CS_CERT_PATH/docker:/root/.docker:Z \
         -v $CS_CERT_PATH/consul:/root/.consul:Z \
         -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \

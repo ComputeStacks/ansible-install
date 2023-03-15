@@ -12,6 +12,7 @@ ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm alertmanager 2>/dev/nul
 ExecStart=/usr/bin/env docker run --rm --name alertmanager \
       --log-driver=none \
       --network=ops \
+      --label com.computestacks.role=system \
       -v alertmanager-data:/alertmanager \
       -v /etc/prometheus:/etc/alertmanager:z \
       {{ alertmanager_full_image }}

@@ -12,6 +12,7 @@ ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm prometheus 2>/dev/null'
 ExecStart=/usr/bin/env docker run --rm --name prometheus \
       --log-driver=none \
       --network=ops \
+      --label com.computestacks.role=system \
       -v prometheus-data:/prometheus \
       -v /etc/prometheus:/etc/prometheus:z \
       -p 127.0.0.1:9090:9090 \

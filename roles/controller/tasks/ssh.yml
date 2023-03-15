@@ -1,9 +1,4 @@
 ---
-- name: check if ssh key exists
-  stat:
-    path: "{{ ssh_keys_directory }}/id_ed25519"
-  register: ssh_key_exists
-  
 - name: Generate ComputeStacks SSH Key
   openssh_keypair:
     path: "{{ ssh_keys_directory }}/id_ed25519"
@@ -11,4 +6,5 @@
     type: ed25519
     owner: root
     group: root
-  when: ssh_key_exists.stat.exists == False
+    state: present
+    regenerate: never

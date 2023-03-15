@@ -1,0 +1,23 @@
+---
+- name: ensure config directory exists
+  file:
+    path: "{{ agent_config_path }}/.ssh"
+    state: directory
+    mode: '0740'
+
+- name: generate ssh fs keys
+  openssh_keypair:
+    path: /etc/computestacks/.ssh/id_ed25519
+    type: ed25519
+    owner: root
+    group: root
+    state: present
+    regenerate: never
+  register: backup_agent_key
+
+- name: add ssh keys to backup server
+  ansible.posix.authorized_key:
+    user: "{{ agent_ssh_user }}"
+    key: "{{ backup_agent_key.public_key }}"
+    state: present
+  delegate_to: "{{ groups['backup_server'][0] }}"

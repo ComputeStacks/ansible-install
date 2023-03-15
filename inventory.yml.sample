@@ -10,6 +10,9 @@ all:
     region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     availability_zone_name: "{{ region_name }}-a"
 
+    ##
+    # Backups
+    # backup_remote_protocol: "ssh" # Default is SSH. Optionally 'nfs', or 'local' if no backup server exists.
     backups_key: "changme!" # Example: `openssl rand -base64 32`
 
     # Set to false for LetsEncrypt

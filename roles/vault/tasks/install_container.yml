@@ -6,6 +6,8 @@
     image: vault:latest
     container_default_behavior: compatibility
     recreate: yes
+    labels:
+      "com.computestacks.role": system
     volumes:
       - "{{ vault_storage_path }}/file:/vault/file:Z"
       - "{{ vault_storage_path }}/logs:/vault/logs:Z"

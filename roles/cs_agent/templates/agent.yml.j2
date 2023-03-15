@@ -13,17 +13,23 @@ backups:
   borg:
     compress: "zstd,3"
     image: "{{ agent_image }}"
-    nfs: {{ backup_uses_nfs }}
+    ssh:
+      enabled: {{ agent_ssh_enabled | lower }}
+      user: "{{ agent_ssh_user }}"
+      host: "{{ agent_ssh_host }}"
+      port: {{ agent_ssh_port }}
+      host_path: "{{ ssh_agent_host_path }}"
+      keyfile: "/etc/computestacks/.ssh/id_ed25519"
+    nfs: {{ backup_uses_nfs | lower }}
     nfs_host: {{ backup_nfs_host }}
     nfs_host_path: "{{ nfs_host_path }}"
     nfs_opts: "{{ backup_nfs_opts }}" # Ensure you include the `,`! `rw,nfsvers=4` is already included
-    nfs_create_path: {{ backup_nfs_create_path }} # Create paths on backup server prior to mounting volume.
+    nfs_create_path: {{ backup_nfs_create_path | lower }} # Create paths on backup server prior to mounting volume.
     nfs_ssh:
       user: "{{ backup_nfs_ssh_user }}" # SSH key used to connect to NFS server
       port: "{{ backup_nfs_ssh_port }}"
       keyfile: "{{ backup_nfs_ssh_keyfile }}" # SSH key used to connect to NFS server
-    fs:
-      user: nobody
-      group: nogroup
+      fs_user: nobody
+      fs_group: nogroup
 docker:
   version: "{{ docker_api_version }}"

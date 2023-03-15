@@ -13,6 +13,7 @@ ExecStart=/usr/bin/env docker run --rm --name nginx \
       --log-driver=none \
       --privileged \
       --network=host \
+      --label com.computestacks.role=system \
       -v /etc/nginx/nginx.conf:/etc/nginx/nginx.conf:z \
       -v {{ nginx_acme_path }}:{{ nginx_acme_path }}:z \
       -v /etc/nginx/dhparam:/etc/nginx/dhparam:z \

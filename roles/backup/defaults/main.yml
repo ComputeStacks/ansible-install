@@ -1,4 +1,8 @@
 ---
+backports_repo: bullseye-backports
+
+backup_remote_protocol: "ssh" # nfs,ssh
+
 backup_path: "/var/nfsshare/volume_backups"
 
 config_directory: "/etc/computestacks"
@@ -7,3 +11,9 @@ iptables_script: "{{ config_directory }}/iptables"
 nfs_fs_user: "nobody"
 nfs_fs_group: "nogroup"
 
+##
+# SSH
+agent_ssh_user: cstacks
+agent_ssh_group: "{{ agent_ssh_user }}"
+# MUST be an absolute path AND start with a '/', AND NOT have a trailing `/`.
+ssh_agent_host_path: "/mnt"

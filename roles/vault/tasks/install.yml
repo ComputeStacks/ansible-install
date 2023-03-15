@@ -66,11 +66,11 @@
     regexp: "^alias vault='docker exec -it vault-bootstrap vault'$"
     state: present
     insertafter: EOF
-    create: true  
+    create: true
 
 - name: Initialise Vault operator
   shell: "docker exec -it vault-bootstrap vault operator init -key-shares=5 -key-threshold=3 -format json"
-  register: vault_init_results  
+  register: vault_init_results
   retries: 3
   delay: 5
   until: vault_init_results.rc == 0
@@ -98,6 +98,8 @@
     image: vault:latest
     container_default_behavior: compatibility
     recreate: yes
+    labels:
+      "com.computestacks.role": system
     volumes:
       - "{{ vault_storage_path }}/file:/vault/file:Z"
       - "{{ vault_storage_path }}/logs:/vault/logs:Z"
@@ -112,7 +114,7 @@
 
 - name: Wait for vault to start
   command: "{{ vault_command }} status"
-  register: vault_status_check_results  
+  register: vault_status_check_results
   retries: 3
   delay: 5
   until: vault_status_check_results.rc == 0 or vault_status_check_results.rc == 2 # 0 = on and unsealed, 2 = on and sealed : both OK.

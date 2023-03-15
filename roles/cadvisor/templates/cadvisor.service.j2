@@ -13,6 +13,7 @@ ExecStart=/usr/bin/env docker run --rm --name cadvisor \
       --log-driver=none \
       --network=host \
       --privileged \
+      --label com.computestacks.role=system \
       -v /:/rootfs:ro \
       -v /var/run:/var/run:ro \
       -v /sys:/sys:ro \

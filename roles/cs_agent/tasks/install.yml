@@ -15,6 +15,7 @@
     state: directory
     mode: '0740'
 
+- import_tasks: setup_ssh_fs.yml
 - import_tasks: install_binary.yml
 - import_tasks: ssl_consul.yml
 - import_tasks: ssl_docker.yml
@@ -34,7 +35,7 @@
   template:
     src: agent.yml.j2
     dest: "{{ agent_config_path }}/agent.yml"
-    mode: '0440'
+    mode: '0640'
 
 - name: systemd conf file
   template:

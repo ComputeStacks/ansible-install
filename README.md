@@ -1,4 +1,4 @@
-# Install ComputeStacks
+# Ansible playbooks to install a complete ComputeStacks installation
 
 Before proceeding, be sure to review our [architecture overview](https://computestacks.notion.site/Architecture-Overview-63ad0f8b371a41c7b89770f315191648), and our [minimum requirements](https://computestacks.notion.site/Installation-Plan-d40223528e254733a7bf08925059c711#cb50536966fc46cb8980ed71535e4cb7). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
 

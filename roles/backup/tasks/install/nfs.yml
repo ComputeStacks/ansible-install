@@ -1,0 +1,19 @@
+---
+- name: Ensure nfs server is installed
+  apt:
+    name: nfs-kernel-server
+    state: present
+
+- name: setup nfsshare
+  file:
+    path: "{{ backup_path }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ nfs_fs_user }}"
+    group: "{{ nfs_fs_group }}"
+
+- name: restart services
+  service:
+    name: nfs-kernel-server
+    enabled: yes
+    state: started

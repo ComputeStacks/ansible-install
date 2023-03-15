@@ -14,7 +14,7 @@
 - name: Pull image borg
   docker_image:
     name: ghcr.io/computestacks/cs-docker-borg
-    tag: latest
+    tag: "1.4"
     source: pull
 
 - name: Pull image ssh
