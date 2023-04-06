@@ -8,11 +8,6 @@
     msg: consul is not running
   when: ansible_facts.services['consul.service']['state'] != 'running'
 
-- name: dnsmasq
-  fail:
-    msg: dnsmasq is not running
-  when: ansible_facts.services['dnsmasq.service']['state'] != 'running'
-
 - name: etcd
   fail:
     msg: etcd is not running

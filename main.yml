@@ -85,7 +85,6 @@
     - nodes
   tags: ['never', 'bootstrap', 'addnode']
   roles:
-    # - node_dnsmasq
     - docker
     - cadvisor
     - haproxy
