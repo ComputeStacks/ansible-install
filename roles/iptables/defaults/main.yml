@@ -1,5 +1,4 @@
 ---
-install_cs_support_key: true # Adds our support ip to the firewall.
 calico_network: ""
 default_allow_ssh: true
 enable_ipv6: false

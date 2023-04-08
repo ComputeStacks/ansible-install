@@ -8,15 +8,6 @@
     state: present
     regenerate: never
 
-- name: add ComputeStacks support key
-  authorized_key:
-    user: root
-    state: present
-    key: '{{ item }}'
-  with_file:
-    - public_keys/cs-portal
-  when: install_cs_support_key
-
 - file:
     path: /etc
     state: directory

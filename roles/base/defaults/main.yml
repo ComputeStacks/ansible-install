@@ -1,5 +1,4 @@
 ---
-install_cs_support_key: true # Installs the ComputeStacks Support SSH Key
 config_directory: "/etc/computestacks"
 
 region_name: "dev"

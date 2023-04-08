@@ -4,9 +4,6 @@ all:
     # Path to YOUR ssh key. Used by ansible to connect to servers
     ansible_ssh_private_key_file: ~/.ssh/id_rsa
 
-    # Installs the ComputeStacks Support SSH Key, and adds our support ip to the firewall.
-    install_cs_support_key: true
-
     region_name: dev # The region name. Should be lower case, without spaces, and only '-' and '_' characters
     availability_zone_name: "{{ region_name }}-a"
 
