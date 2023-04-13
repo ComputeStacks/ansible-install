@@ -7,7 +7,7 @@
 
 - name: Add backports repo
   apt_repository:
-    repo: http://deb.debian.org/debian {{ backports_repo }} main contrib non-free
+    repo: deb http://deb.debian.org/debian {{ backports_repo }} main contrib non-free
     state: present
     update_cache: true
   when: not backports_exists.rc == 0
