@@ -35,3 +35,6 @@
     name: "{{ prometheus_username }}"
     password: "{{ prometheus_password }}"
   when: "'metrics' in group_names"
+
+- include_tasks: cloudflare.yml
+  when: enable_cloudflare_real_ip

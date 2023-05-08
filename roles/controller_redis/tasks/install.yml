@@ -1,13 +1,23 @@
 ---
-- name: install
-  package:
-    name: redis-server
-    state: present
+- name: Install redis apt key
+  shell: "curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg"
 
-- name: install config
-  copy:
-    src: redis-debian.conf
-    dest: /etc/redis/redis.conf
+- name: Add apt repo
+  shell: echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb bullseye main" | tee /etc/apt/sources.list.d/redis.list
+
+- name: install redis
+  package:
+    name:
+      - redis
+      - redis-server
+    state: present
+    update_cache: yes
+
+- name: disable redis snapshots
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^save ""'
+    line: 'save ""'
 
 - name: start
   service:

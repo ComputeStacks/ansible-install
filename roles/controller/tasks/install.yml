@@ -1,4 +1,4 @@
----  
+---
 - name: setup directories
   file:
     path: "{{ item }}"
@@ -20,6 +20,13 @@
   stat:
     path: "{{ cs_environmental_file }}"
   register: app_initialized
-  
+
 - include_tasks: configuration.yml
   when: app_initialized.stat.exists == False
+
+- name: Install cloudflare recover ips
+  copy:
+    src: cloudflare_ips.sh
+    dest: /etc/cron.daily/cloudflare_ips
+    mode: 0740
+  when: enable_cloudflare_real_ip

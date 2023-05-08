@@ -91,8 +91,8 @@ queue_le: 2
 queue_system: 15
 queue_deployment: 20
 
-passenger_pool_size: 15
-passenger_min_instances: 15
+rails_max_threads: 15
+rails_min_threads: 15
 
 ##
 # Branding
@@ -171,3 +171,6 @@ cs_dns_module_name: "{% if dns_driver == 'powerdns' %}Pdns{% elif dns_driver == 
 cs_dns_module_user: "{% if dns_driver == 'powerdns' %}admin{% elif dns_driver == 'autodns' %}{{ autodns_username }}{% endif %}"
 cs_dns_module_api: "{% if dns_driver == 'powerdns' %}{{ pdns_web_key }}{% elif dns_driver == 'autodns' %}{{ autodns_context }}{% endif %}"
 cs_dns_module_secret: "{% if dns_driver == 'powerdns' %}{{ pdns_api_key }}{% elif dns_driver == 'autodns' %}{{ autodns_password }}{% endif %}"
+
+
+enable_cloudflare_real_ip: true

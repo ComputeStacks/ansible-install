@@ -112,3 +112,4 @@ acme_pdns_ttl: 60
 acme_cert_vultr_issue_cmd: "{{ acme_cert_issue_base_cmd }} --dns dns_vultr"
 acme_vultr_key: ""
 
+enable_cloudflare_real_ip: true

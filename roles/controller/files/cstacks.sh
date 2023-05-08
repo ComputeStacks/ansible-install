@@ -91,8 +91,8 @@ console()
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
-        -e PASSENGER_MIN_INSTANCES=$PASSENGER_MIN_INSTANCES \
-        -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
+        -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
+        -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \
@@ -125,8 +125,8 @@ container()
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
-        -e PASSENGER_MIN_INSTANCES=$PASSENGER_MIN_INSTANCES \
-        -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
+        -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
+        -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \
@@ -202,8 +202,8 @@ run()
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
-        -e PASSENGER_MIN_INSTANCES=$PASSENGER_MIN_INSTANCES \
-        -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
+        -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
+        -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e QUEUE_SYSTEM=$QUEUE_SYSTEM \
         -e QUEUE_DEPLOYMENTS=$QUEUE_DEPLOYMENTS \
         -e QUEUE_LE=$QUEUE_LE \
@@ -238,8 +238,8 @@ test()
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
         -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
-        -e PASSENGER_MIN_INSTANCES=$PASSENGER_MIN_INSTANCES \
-        -e PASSENGER_MAX_POOL_SIZE=$PASSENGER_MAX_POOL_SIZE \
+        -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
+        -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \

@@ -1,0 +1,9 @@
+---
+- name: check if cloudflare script exists
+  stat:
+    path: /etc/cron.daily/cloudflare_ips
+  register: cf_real_ip_exists
+
+- name: Install cloudflare IPs locally
+  command: /etc/cron.daily/cloudflare_ips
+  when: cf_real_ip_exists.stat.exists == True

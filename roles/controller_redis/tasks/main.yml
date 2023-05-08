@@ -2,7 +2,7 @@
 - block:
     - name: controller_redis | configured?
       stat:
-        path: /etc/redis.conf
+        path: /etc/redis/redis.conf
       register: redis_configured
 
     - import_tasks: install.yml

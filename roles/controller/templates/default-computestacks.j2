@@ -14,8 +14,8 @@ DATABASE_URL=postgresql://{{ postgres_user }}:{{ postgres_cs_password }}@{{ post
 REDIS_HOST={{ redis_host }}
 CS_REG={{ controller_image_path }}
 
-PASSENGER_MAX_POOL_SIZE={{ passenger_pool_size }}
-PASSENGER_MIN_INSTANCES={{ passenger_min_instances }}
+RAILS_MAX_THREADS={{ rails_max_threads }}
+RAILS_MIN_THREADS={{ rails_min_threads }}
 
 QUEUE_SYSTEM={{ queue_system | int }}
 QUEUE_DEPLOYMENTS={{ queue_deployment | int }}
