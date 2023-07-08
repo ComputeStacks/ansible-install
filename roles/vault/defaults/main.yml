@@ -4,5 +4,5 @@ docker_certs_path: "{{ certificates_path }}/docker"
 consul_certs_path: "{{ certificates_path }}/consul"
 
 vault_command: "docker exec vault-bootstrap vault"
-vault_image: "vault:latest"
+vault_image: "hashicorp/vault:latest"
 vault_storage_path: /etc/computestacks/.vault-bootstrap

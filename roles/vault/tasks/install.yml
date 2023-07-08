@@ -95,7 +95,7 @@
 - name: Run vault container
   docker_container:
     name: vault-bootstrap
-    image: vault:latest
+    image: "{{ vault_image }}"
     container_default_behavior: compatibility
     recreate: yes
     labels:

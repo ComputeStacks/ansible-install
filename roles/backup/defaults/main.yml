@@ -1,6 +1,4 @@
 ---
-backports_repo: bullseye-backports
-
 backup_remote_protocol: "ssh" # nfs,ssh
 
 backup_path: "/var/nfsshare/volume_backups"

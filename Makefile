@@ -11,9 +11,6 @@ roles: ## Install ansible dependencies
 bootstrap: ## Bootstrap a new cluster, including add new availability zones.
 	@time ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
 
-add-node: ## Add a node to an existing availability zone
-	@time ansible-playbook -u root -i inventory.yml main.yml --tags addnode
-
 validate: ## Run validation checks on an installation to check for common issues
 	@time ansible-playbook -u root -i inventory.yml main.yml --tags validate
 

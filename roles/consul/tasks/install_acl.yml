@@ -18,3 +18,15 @@
     mode: 0600
     owner: root
     group: root
+
+# curl -X PUT -H "X-Consul-Token: $CONSUL_HTTP_TOKEN" -H "Content-Type: application/json" --data "{\"Token\": \"$CONSUL_HTTP_TOKEN\"}" http://localhost:8500/v1/agent/token/default
+- name: set default consul token
+  uri:
+    url: "http://{{ consul_listen_ip }}:8500/v1/agent/token/default"
+    method: PUT
+    body_format: json
+    headers:
+      Content-Type: application/json
+      X-Consul-Token: "{{ consul_token }}"
+    body:
+      Token: "{{ consul_token }}"

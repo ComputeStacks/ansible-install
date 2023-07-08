@@ -87,9 +87,6 @@
         msg: "metrics_ip_address {{ metrics_ip_address }} is blank"
       when: metrics_ip_address == ''
     - fail:
-        msg: "etcd_listen_ip {{ etcd_listen_ip }} is blank"
-      when: etcd_listen_ip == ''
-    - fail:
         msg: "backup_ip {{ backup_ip }} does not exist"
       when: not ansible_facts['all_ipv4_addresses'] is contains(backup_ip)
     - fail:
@@ -98,7 +95,4 @@
     - fail:
         msg: "metrics_ip_address {{ metrics_ip_address }} does not exist"
       when: not ansible_facts['all_ipv4_addresses'] is contains(metrics_ip_address)
-    - fail:
-        msg: "etcd_listen_ip {{ etcd_listen_ip }} does not exist"
-      when: not ansible_facts['all_ipv4_addresses'] is contains(etcd_listen_ip)
   when: "'nodes' in group_names"

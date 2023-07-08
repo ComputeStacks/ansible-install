@@ -2,12 +2,11 @@
 ##
 # Tags
 # * bootstrap | Creating a brand new installation from scratch
-# * addnode | Adding a new node to an existing Availability Zone
 # * validate | Check for common issues after provisioning.
 
 - hosts:
     - all
-  tags: ['never', 'bootstrap', 'addnode']
+  tags: ['never', 'bootstrap']
   tasks:
     - name: Load service state
       service_facts:
@@ -53,7 +52,7 @@
 
 - hosts:
     - controller
-  tags: ['never', 'vault_unseal', 'bootstrap', 'addnode']
+  tags: ['never', 'vault_unseal', 'bootstrap']
   roles:
     - vault
 
@@ -62,40 +61,13 @@
   roles:
     - backup
   any_errors_fatal: true
-
-# Only for addnode because new clusters wont be ready at this point,
-# and without this for addnode, it will fail.
-- hosts:
-    - all
-  tags: ['never', 'addnode']
-  roles:
-    - iptables
-    - ssh_transfer
-  any_errors_fatal: true
-
 - hosts:
     - nodes
-  serial: 1 # Important that we bring up each etcd node 1 at a time.
-  tags: ['never', 'bootstrap', 'addnode']
-  roles:
-    - etcd
-  any_errors_fatal: true
-
-- hosts:
-    - nodes
-  tags: ['never', 'bootstrap', 'addnode']
+  tags: ['never', 'bootstrap']
   roles:
     - docker
     - cadvisor
     - haproxy
-  any_errors_fatal: true
-
-- hosts:
-    - nodes
-  serial: 1 # When growing cluster, we need to add consul one at a time.
-  tags: ['never', 'addnode']
-  roles:
-    - consul
   any_errors_fatal: true
 
 - hosts:
@@ -107,19 +79,12 @@
 
 - hosts:
     - nodes
-  tags: ['never', 'bootstrap', 'addnode']
+  tags: ['never', 'bootstrap']
   roles:
     - node_docker
     - fluentd
     - node
     - cs_agent
-    - node_corosync
-  any_errors_fatal: true
-
-- hosts:
-    - nodes
-  roles:
-    - node_calico
   any_errors_fatal: true
 
 - hosts:
@@ -146,7 +111,7 @@
 
 - hosts:
     - controller
-  tags: ['never', 'bootstrap', 'addnode']
+  tags: ['never', 'bootstrap']
   roles:
     - controller_bootstrap
   any_errors_fatal: true
@@ -161,25 +126,3 @@
     - all
   tasks:
     - meta: flush_handlers
-
-# Reboot all nodes
-- hosts:
-    - nodes
-  tags: ['never', 'bootstrap']
-  tasks:
-    - debug:
-        msg: "Server is now rebooting. Installation Complete!"
-    - name: reboot
-      reboot:
-        msg: "Ansible rebooting to finalize setup"
-        reboot_timeout: 1
-      ignore_errors: true
-      no_log: True
-
-- hosts:
-    - nodes
-  tags: ['never', 'addnode']
-  tasks:
-    - debug:
-        msg: "Installation complete, please manually reboot the new nodes before deploying containers."
-      run_once: true

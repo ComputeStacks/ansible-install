@@ -35,33 +35,8 @@ all:
     ##
     # Container Network
 
-    # We recommend not going larger than a `/21`. If you need more, you can create additional networks later.
-    calico_network: 10.100.0.0/21
-
-    # some unique identifier. should not include spaces, capitals, or special characters.
-    calico_network_name: "net100"
-
-    # required when private network performs source/dest filtering
-    calico_network_ipip: false
-
-    ##
-    # Floating IP
-
-    # Configures corosync & pacemaker for automated failover.
-    enable_floating_ip: false
-
-    # Even if enable_floating_ip is false, set this to the public IP of your availability zone.
-    # for single-node environments, this can be just the public ip of the node.
-    floating_ip: 0.0.0.0
-    floating_ip_netmask: 32
-
-    # it's important that all nodes have same interface name.
-    # if you mix eth/ens format, automatic failover will not work.
-    # If, however, floating IP is in the same network as the primary ip
-    # on that interface, you may leave the interface field blank and it should
-    # correctly pick the correct interface.
-    #
-    # floating_ip_interface: ""
+    # We recommend not going smaller than a `/21`.
+    container_network: 10.100.0.0/21
 
     # Optionally use a docker registry mirror - MUST be https.
     # docker_registry_mirror: https://my-registry-cache
@@ -108,14 +83,12 @@ all:
           controller_ip: 192.168.173.11 # backup ip used by controller
           metrics_ip_address: 192.168.173.11 # The ip used by prom to connect for stats.
           ssh_port: 22
-          enable_ipv6: true
     controller:
       hosts:
         192.168.173.9:
           postgres_cs_password: "" # pwgen -s 32 1
           node_ip: 192.168.173.9 # The ip used to connect to nodes. (used by docker_iptables)
           metrics_ip_address: 192.168.173.9 # The ip used by prom to connect for stats.
-          enable_ipv6: true
           ssh_port: 22
           ##
           # Example with pre-existing powerdns cluster
@@ -135,32 +108,25 @@ all:
           prometheus_password: "" # pwgen -s 32 1
           controller_endpoint: 127.0.0.1 # The ip/hostname used by the controller to connect
           node_endpoint: 192.168.173.9 # The ip/hostname used by nodes to connect
-          enable_ipv6: true
           ssh_port: 22
     nodes:
-      hosts:
+      hosts: # Only 1 allowed
         192.168.173.10:
           backup_ip: 192.168.173.10 # node ip used by backup server
           consul_bootstrap: true # set false on all other nodes.
           consul_listen_ip: 192.168.173.10 # used by both controller and agent.
           metrics_ip_address: 192.168.173.10 # The ip used by prom to connect for stats.
-          etcd_listen_ip: 192.168.173.10 # shared with corosync
           ssh_port: 22
-
-          # Currently not supported on container nodes. Contact us for info on how to bring ipv6 to your cluster.
-          enable_ipv6: false
     registry:
       hosts:
         192.168.173.9:
           controller_ip: 127.0.0.1 # IP Addresses used by controller to connect to registry
-          enable_ipv6: true
           ssh_port: 22
     primary_nameserver:
       # Even if you're not using powerdns, you MUST still include the empty `hosts:` section
       hosts:
         192.168.173.20: # Comment out this if you have an existing cluster
           pdns_name: "ns1.example.com"
-          enable_ipv6: true
           ssh_port: 22
 
           # The ip used for internal postgres replication.
@@ -172,6 +138,5 @@ all:
         hosts:
           192.168.173.21: # Comment out this if you have an existing cluster
             pdns_name: "ns2.example.com"
-            enable_ipv6: true
             ssh_port: 22
             postgres_ip: 192.168.173.21

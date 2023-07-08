@@ -2,10 +2,11 @@
 postgres_user: computestacks
 postgres_cs_password: "ch4ng3m3" # pwgen -s 32 1
 
-psql_deb_repo_url: "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main"
+psql_version: 15
+psql_deb_repo_url: "http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main"
 psql_deb_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+psql_deb_key_path: "/etc/apt/keyrings/postgres.asc"
 
-psql_version: "15"
 
 psql_initdb_cmd: "/usr/lib/postgresql/{{ psql_version }}/bin/initdb"
 psql_data_path: "/etc/postgresql/{{ psql_version }}/main"

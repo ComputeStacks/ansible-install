@@ -8,11 +8,6 @@
     msg: consul is not running
   when: ansible_facts.services['consul.service']['state'] != 'running'
 
-- name: etcd
-  fail:
-    msg: etcd is not running
-  when: ansible_facts.services['etcd.service']['state'] != 'running'
-
 - name: cs-agent
   fail:
     msg: ComputeStacks Backup Agent is not running

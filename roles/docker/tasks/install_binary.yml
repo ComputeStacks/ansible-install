@@ -1,40 +1,27 @@
 ---
-- name: add docker key
-  ansible.builtin.apt_key:
-    url: "{{ docker_deb_key }}"
-    state: present
-
-- name: add docker repo
-  ansible.builtin.apt_repository:
-    repo: "{{ docker_deb_repo }}"
-    state: present
-    filename: docker
+- block:
+    - name: install docker key
+      ansible.builtin.get_url:
+        url: "{{ docker_deb_key }}"
+        dest: "{{ docker_deb_key_path }}"
+    - name: add docker repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by={{ docker_deb_key_path }} arch=amd64] {{ docker_deb_repo_url }}"
+        state: present
 
 - name: install packages
   apt:
-    name: 
+    name:
       - "docker-ce"
       - "docker-ce-cli"
       - "containerd.io"
     state: latest
     update_cache: yes
-  when: "'nodes' not in group_names"
 
-- block:
-    - name: Unlock docker for update
-      ansible.builtin.command: apt-mark unhold docker-ce docker-ce-cli
-    - name: install packages (nodes)
-      apt:
-        name: 
-          - "docker-ce=5:20.10.23~3-0~debian-bullseye"
-          - "docker-ce-cli=5:20.10.23~3-0~debian-bullseye"
-          - "containerd.io"
-        state: present
-        update_cache: yes
-    - name: Lock docker version
-      ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli
-      when: lock_docker_version
-  when: "'nodes' in group_names"
+# `apt-get upgrade` on these will cause all containers to restart.
+- name: Lock docker version
+  ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli containerd.io
+  when: lock_docker_version
 
 - name: Ensure docker is running
   systemd:

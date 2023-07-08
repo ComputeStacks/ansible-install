@@ -4,12 +4,6 @@
   {%- if not loop.last -%},{%- endif -%}
 {%- endfor -%}
 {% endmacro -%}
-{% macro lb_internal_cluster() -%}
-  {% for host in groups['nodes'] -%}
-    "{{ hostvars[host].etcd_listen_ip }}"
-  {%- if not loop.last -%},{%- endif -%}
-{%- endfor -%}
-{% endmacro -%}
 task bootstrap: :environment do
 
   dns_config = {}
@@ -150,19 +144,14 @@ task bootstrap: :environment do
   {%- endfor -%}
   {{ '' }}
   puts "Configuring Network..."
-  network = Network.find_by(cidr: '{{ calico_network }}')
-  if network
-    network.regions << region unless network.regions.include?(region)
-  else
-    network = Network.create!(
-      cidr: '{{ calico_network }}',
-      is_public: false,
-      is_ipv4: true,
+  unless region.networks.where(subnet: '{{ container_network }}').exists?
+    region.networks.create!(
+      subnet: '{{ container_network }}',
+      is_shared: true,
       active: true,
-      name: '{{ calico_network_name | lower }}',
+      name: '{{ container_network_name | lower }}',
       label: '{{ availability_zone_name }} Network'
     )
-    network.regions << region
   end
 
   puts "Creating default admin account"
@@ -189,11 +178,7 @@ task bootstrap: :environment do
     user.save
   end
 {{ '' }}
-{% if floating_ip == '0.0.0.0' %}
 floating_ip = "{{ hostvars[groups['nodes'][0]].ansible_default_ipv4.address|default(ansible_all_ipv4_addresses[0]) }}"
-{% else %}
-floating_ip = "{{ floating_ip }}"
-{% endif %}
 {{ '' }}
   lb = LoadBalancer.find_by public_ip: floating_ip
   if lb.nil?
@@ -202,13 +187,13 @@ floating_ip = "{{ floating_ip }}"
       region: region,
       domain: "{{ cs_app_url }}",
       ext_ip: [ {{ lb_cluster() }} ],
-      internal_ip: [ {{ lb_internal_cluster() }} ],
+      internal_ip: [ {{ lb_cluster() }} ],
       public_ip: floating_ip,
       shared_certificate: "{{ lb_shared_cert }}",
-      direct_connect: {% if calico_network_ipip %}false{% else %}true{% endif %}
+      direct_connect: false
     )
   else
-    lb.update ext_ip: [ {{ lb_cluster() }} ], internal_ip: [ {{ lb_internal_cluster() }} ]
+    lb.update ext_ip: [ {{ lb_cluster() }} ], internal_ip: [ {{ lb_cluster() }} ]
   end
 
   unless Dns::Zone.where(name: "{{ cs_app_zone }}").exists?

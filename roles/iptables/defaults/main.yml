@@ -1,7 +1,6 @@
 ---
-calico_network: ""
+container_network: ""
 default_allow_ssh: true
-enable_ipv6: false
 # Any additional IPs to add to the allow list
 # You can enter either single IPv4 addresses, or ranges like: 192.168.10.0/24.
 # Example:

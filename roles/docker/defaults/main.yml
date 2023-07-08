@@ -1,8 +1,9 @@
 ---
-enable_ipv6: true
 lock_docker_version: true
 docker_ipv6_local_net: "2001:db8:1::/64"
 
+docker_deb_repo_url: "https://download.docker.com/linux/debian bookworm stable"
 docker_deb_key: "https://download.docker.com/linux/debian/gpg"
-docker_deb_repo: "deb [arch=amd64] https://download.docker.com/linux/debian bullseye stable"
+docker_deb_key_path: "/etc/apt/keyrings/docker.asc"
+
 docker_registry_mirror: ""

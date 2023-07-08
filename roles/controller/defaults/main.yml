@@ -19,14 +19,13 @@ lb_name: "{{ availability_zone_name }}-lb"
 
 controller_use_lets_encrypt: true
 ssh_port: 22
-enable_ipv6: true
 
-controller_haproxy_http_listen: "{% if enable_ipv6 %}:::80 v4v6{% else %}:80{% endif %}"
-controller_haproxy_https_listen: "{% if enable_ipv6 %}:::443 v4v6{% else %}:443{% endif %}"
+controller_haproxy_http_listen: ":::80 v4v6"
+controller_haproxy_https_listen: ":::443 v4v6"
 
 ##
 # Controller Image
-controller_image_path: "ghcr.io/computestacks/controller:8"
+controller_image_path: "ghcr.io/computestacks/controller:9"
 
 ##
 # Directory Structure & Paths
@@ -70,10 +69,8 @@ cs_metrics_domain: "" # We create a domain so we can grab a LetsEncrypt cert for
 acme_staging: false
 
 # Networks
-floating_ip: "10.10.100.10"
-calico_network_name: "dev01"
-calico_network: 10.100.0.0/21
-calico_network_ipip: false
+container_network_name: "dev01"
+container_network: 10.100.0.0/21
 
 # Prometheus
 prometheus_username: "promuser"

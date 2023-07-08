@@ -31,7 +31,7 @@ Various parts of this ansible package will require the domains defined in your `
 <p>
 
 ```
-a.dev.cmptstks.net. IN A %{floating_ip}
+a.dev.cmptstks.net. IN A %{PUBLIC IP OF NODE}
 metrics.dev.cmptstks.net. IN A %{PUBLIC IP OF METRICS SERVER}
 *.a.dev.cmptstks.net. IN CNAME a.dev.cmptstks.net.
 portal.dev.cmptstks.net. IN A %{controller ip address}
@@ -82,23 +82,6 @@ apt-get -y install openssl \
 </details>
 
 
-
-#### Network MTU Settings
-
-If you're using a setting other than the default `1500`, please add the following to the main `vars:` section of your `inventory.yml` file:
-
-```yaml
-container_network_mtu: 1400 # Set the desired MTU for containers to use
-```
-
-#### IPv6 for Container Nodes (Skip if you used Terraform)
-
-Due to an ongoing issue with the container network platform we use, IPv6 is currently not supported on our container nodes. We're able to bring ipv6 connectivity by either using a dedicated load balancer on a separate virtual machine, or by configuring the controller to proxy ipv6 traffic.
-
-For the time being, our installer will disable ipv6 directly on the node. However, we recommend also cleaning out the `/etc/sysconfig/network-scripts/ifcfg-*` files to remove any ipv6 specific settings, and setting `IPV6INIT=no`.
-
-We recommend performing this step prior to running this ansible package.
-
 ***
 ## Running the installer
 
@@ -117,17 +100,6 @@ After running and allowing the servers to reboot, you can perform some basic val
 
 ```bash
 make validate
-```
-
-## Adding nodes to an existing availability zone
-To add nodes to existing Availability Zone, simply add the new nodes to the same inventory file you used to deploy the initial cluster.
-
-Please note that you will need to ensure the number of nodes you're deploying will keep the etcd cluster in quorum. As per the etcd documentation, this should be `(n/2)+1` nodes. So 3, 5, 7, or 9 nodes per availability zone.
-
-**Now you may run the ansible package with:**
-
-```bash
-make add-node
 ```
 
 ## Add Region / Availability Zone

@@ -1,5 +1,17 @@
 # Changelog
 
+## July 6, 2023
+
+**Significant Change: ComputeStacks has deprecated support for multi-node availability zones. This playbook now only installs a single node per-az.**
+
+* Debian 12 Bookworm
+* Added linux bridge networks for containers
+* Removed calico
+* Removed etcd
+* Removed corosync and pacemaker
+* Haproxy v2.8 is now used
+* Full support for ipv6
+
 ## May 8, 2023
 
 * Redis will now use the redis apt repo.

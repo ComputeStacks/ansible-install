@@ -1,13 +1,20 @@
 ---
-- name: import key
-  apt_key:
-    url: https://repo.powerdns.com/FD380FBB-pub.asc
-    state: present
-- name: add repo
-  apt_repository:
-    repo: "deb [arch=amd64] http://repo.powerdns.com/debian bullseye-auth-46 main"
-    state: present
-    filename: powerdns
+- name: disable systemd-resolved
+  systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: false
+
+- block:
+    - name: install key
+      ansible.builtin.get_url:
+        url: "{{ pdns_repo_key }}"
+        dest: "{{ pdns_repo_key_path }}"
+    - name: add repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by={{ pdns_repo_key_path }} arch=amd64] {{ pdns_repo }}"
+        state: present
+
 - name: pin package
   copy:
     src: package-pin
@@ -44,7 +51,7 @@
 
 - import_tasks: install_leader.yml
   when: "'primary_nameserver' in group_names"
-  
+
 - import_tasks: install_follower.yml
   when: "'follower_nameservers' in group_names"
 

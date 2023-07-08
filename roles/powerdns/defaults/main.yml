@@ -11,6 +11,10 @@ pdns_web_allow: "0.0.0.0/0"
 
 pdns_replication_user: repuser
 
+pdns_repo_key: https://repo.powerdns.com/FD380FBB-pub.asc
+pdns_repo_key_path: "/etc/apt/keyrings/auth-48-pub.asc"
+pdns_repo: "http://repo.powerdns.com/debian bookworm-auth-48 main"
+
 pdns_credentials_dir: "/root/.credentials"
 pdns_credentials_api_file: "{{ pdns_credentials_dir }}/.powerdns.api.secret"
 pdns_credentials_web_file: "{{ pdns_credentials_dir }}/.powerdns.web.secret"
@@ -24,9 +28,11 @@ pdns_leader_ip: "{{ hostvars[groups['primary_nameserver'][0]].postgres_ip }}"
 enable_dnsupdate: true
 
 # Postgres
-pdns_postgresql_repo: "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main"
-pdns_postgresql_repo_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
 pdns_postgresql_version: 15
+pdns_postgresql_repo: "http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main"
+pdns_postgresql_repo_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+pdns_postgresql_repo_key_path: "/etc/apt/keyrings/postgres.asc"
+
 pdns_postgresql_data_dir: "/var/lib/postgresql/{{ pdns_postgresql_version }}"
 pdns_postgresql_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/postgresql.conf"
 pdns_postgresql_hba_conf: "/etc/postgresql/{{ pdns_postgresql_version }}/main/pg_hba.conf"

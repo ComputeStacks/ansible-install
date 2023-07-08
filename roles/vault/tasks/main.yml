@@ -14,9 +14,9 @@
 
 # if we're configured, but it's missing, re-rerun the container
 - include_tasks: install_container.yml
-  when: 
+  when:
     - not vault_container.exists
-    - vault_configured.stat.exists  
+    - vault_configured.stat.exists
 
 # Boot and ensure we're unsealed
 - name: Vault state
@@ -35,4 +35,3 @@
 
 - include_tasks: initialize/ssl_docker.yml
 - include_tasks: initialize/ssl_consul.yml
-- include_tasks: initialize/ssl_etcd.yml

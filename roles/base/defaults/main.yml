@@ -4,7 +4,7 @@ config_directory: "/etc/computestacks"
 region_name: "dev"
 availability_zone_name: "{{ region_name }}-a"
 
-motd_info:
+motd_info_nodes:
   - "    HOST:    ": "{{ hostvars[inventory_hostname].ansible_hostname }}"
   - "      IP:    ": "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
   - "  REGION:    ": "{{ region_name }}"
@@ -13,6 +13,11 @@ motd_info:
 motd_info_controller:
   - "    HOST:    ": "{{ hostvars[inventory_hostname].ansible_hostname }}"
   - "      IP:    ": "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
+
+motd_info:
+  - "    HOST:    ": "{{ hostvars[inventory_hostname].ansible_hostname }}"
+  - "      IP:    ": "{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}"
+  - "  REGION:    ": "{{ region_name }}"
 
 tmux_url: "https://gist.githubusercontent.com/kwatson/45a298891981e2323eed3e118a3d5da7/raw/ff7eb5ba7afbccb11df6470290ab6f520c2a128d/.tmux.conf"
 
@@ -56,5 +61,4 @@ dns_valid_driver: "{{ dns_driver in dns_allowed_drivers }}"
 
 
 # Node:
-etcd_listen_ip: ""
 node_resolvers: []

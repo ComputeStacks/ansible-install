@@ -9,10 +9,15 @@
     msg: "'cs_registry_domain' is not defined"
   when: cs_registry_domain == ""
 
-- name: Ensure Floating IP exists
+- name: Ensure at least 1 node
   fail:
-    msg: "'floating_ip' is not defined"
-  when: floating_ip == ""
+    msg: "no nodes found!"
+  when: groups['nodes'] | length < 1
+
+- name: Ensure only 1 node
+  fail:
+    msg: "only 1 node per availability zone is allowed"
+  when: groups['nodes'] | length > 1
 
 - name: Ensure region name defined
   fail:
@@ -31,15 +36,15 @@
 
 - name: Ensure correct linux variant
   fail:
-    msg: "Invalid OS distribution. Only Debian 11 are supported."
+    msg: "Invalid OS distribution. Only Debian 12 is supported."
   when:
     - ansible_distribution != 'Debian'
 
 - name: Ensure supported linux version
   fail:
-    msg: "Invalid Debian version. Only version 11 is supported"
-  when: 
-    - ansible_facts['distribution_major_version']|int == "11"
+    msg: "Invalid Debian version. Only version 12 is supported"
+  when:
+    - ansible_facts['distribution_major_version']|int == "12"
     - ansible_distribution == 'Debian'
 
 - name: Ensure DigitalOcean token exists

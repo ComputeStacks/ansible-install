@@ -3,7 +3,6 @@
 - import_tasks: validate/preflight.yml
 - import_tasks: debian/packages.yml
 - import_tasks: validate/postcheck.yml
-- import_tasks: debian/setup.yml
 
 - name: install tmux.conf
   get_url:

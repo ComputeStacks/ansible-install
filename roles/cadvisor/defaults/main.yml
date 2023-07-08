@@ -1,4 +1,4 @@
 ---
 cadvisor_image: "gcr.io/cadvisor/cadvisor"
-cadvisor_image_tag: "v0.43.0"
+cadvisor_image_tag: "v0.47.2"
 cadvisor_full_image: "{{ cadvisor_image }}:{{ cadvisor_image_tag }}"

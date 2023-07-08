@@ -1,5 +1,4 @@
 ---
-enable_ipv6: true
 nginx_image: "nginx"
 nginx_image_tag: "stable"
 nginx_full_image: "{{ nginx_image}}:{{ nginx_image_tag }}"

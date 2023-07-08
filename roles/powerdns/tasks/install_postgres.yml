@@ -1,15 +1,14 @@
 ---
-- name: add pg key
-  apt_key:
-    url: "{{ pdns_postgresql_repo_key }}"
-    state: present
+- block:
+    - name: install postgres key
+      ansible.builtin.get_url:
+        url: "{{ pdns_postgresql_repo_key }}"
+        dest: "{{ pdns_postgresql_repo_key_path }}"
+    - name: add postgres repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by={{ pdns_postgresql_repo_key_path }} arch=amd64] {{ pdns_postgresql_repo }}"
+        state: present
 
-- name: add pg repo
-  apt_repository:
-    repo: "{{ pdns_postgresql_repo }}"
-    state: present
-    filename: postgresql
-  
 - name: install pg packages
   apt:
     name:
