@@ -4,6 +4,7 @@
     name: systemd-resolved
     state: stopped
     enabled: false
+  when: ansible_facts.services['systemd-resolved.service'] is defined
 
 - block:
     - name: install key

@@ -118,6 +118,8 @@ iptables -A INPUT -p all -s {{ ip }} -j ACCEPT
 {% if 'primary_nameserver' in group_names or 'follower_nameservers' in group_names %}
 iptables -A INPUT -p tcp --dport 53 -j ACCEPT
 iptables -A INPUT -p udp --dport 53 -j ACCEPT
+ip6tables -I INPUT -p tcp --dport 53 -j ACCEPT
+ip6tables -I INPUT -p udp --dport 53 -j ACCEPT
 iptables -A INPUT -p all -s {{ hostvars[groups['controller'][0]].metrics_ip_address }} -j ACCEPT
 {% for host in groups['primary_nameserver'] %}
 {% if hostvars[host].postgres_ip != postgres_ip %}

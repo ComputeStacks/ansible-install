@@ -1,4 +1,4 @@
-.PHONY: help
+.PHONY: help roles
 
 help: ## Help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -16,3 +16,4 @@ validate: ## Run validation checks on an installation to check for common issues
 
 vault-unseal: ## Unseal vault on the controller
 	@time ansible-playbook -u root -i inventory.yml main.yml --tags vault_unseal
+
