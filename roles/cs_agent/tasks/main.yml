@@ -1,14 +1,3 @@
 ---
 - include_tasks: install.yml
   when: ansible_facts.services['cs-agent.service'] is not defined
-
-- name: install agent update script
-  copy:
-    src: update-agent.sh
-    dest: /usr/local/bin/update-agent
-    mode: '0700'
-    owner: root
-    group: root
-
-- include_tasks: install_binary.yml
-  when: ansible_facts.services['cs-agent.service'] is defined

@@ -16,11 +16,14 @@ consul_token: "" # placeholder
 ##
 # Agent Configuration
 docker_api_version: "1.41"
-agent_image: "ghcr.io/computestacks/cs-docker-borg:1.4"
+agent_backup_image: "ghcr.io/computestacks/cs-docker-borg:1.4"
+agent_image: "ghcr.io/computestacks/backup-agent"
+agent_image_tag: "1.5"
 agent_download_url: "https://f.cscdn.cc/file/cstackscdn/packages/cs-agent/cs-agent-amd64.tar.gz"
 
 # Paths
 agent_config_path: /etc/computestacks
+agent_config_file_path: "{{ agent_config_path }}/agent.yml"
 agent_certs_dir: "{{ agent_config_path }}/certs"
 agent_docker_certs_dir: "{{ agent_certs_dir }}/docker"
 agent_consul_certs_dir: "{{ agent_certs_dir }}/consul"

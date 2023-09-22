@@ -1,5 +1,27 @@
 ---
-- import_tasks: install_binary.yml
+- block:
+    - name: install docker key
+      ansible.builtin.get_url:
+        url: "{{ docker_deb_key }}"
+        dest: "{{ docker_deb_key_path }}"
+    - name: add docker repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by={{ docker_deb_key_path }} arch=amd64] {{ docker_deb_repo_url }}"
+        state: present
+
+- name: install packages
+  apt:
+    name:
+      - "docker-ce"
+      - "docker-ce-cli"
+      - "containerd.io"
+    state: latest
+    update_cache: yes
+
+# `apt-get upgrade` on these will cause all containers to restart.
+- name: Lock docker version
+  ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli containerd.io
+  when: lock_docker_version
 
 - name: Install docker console script
   copy:
@@ -18,8 +40,27 @@
     src: startup.conf
     dest: /etc/systemd/system/docker.service.d/startup.conf
 
-- name: restart docker
+- name: reload daemon
   systemd:
-    name: docker
-    state: restarted
     daemon_reload: yes
+
+# 2023-09: Docker is currently failing to start due to iptable/nftable issues.
+#          A reboot seems to resolve this issue.
+- name: Reboot the server
+  shell: "sleep 5 && reboot"
+  async: 1
+  poll: 0
+
+- name: Wait for reboot before proceeding
+  wait_for_connection:
+    connect_timeout: 10
+    sleep: 5
+    delay: 5
+    timeout: 300
+
+- name: Wait for docker to start after booting
+  service_facts:
+  register: docker_result
+  until: docker_result.ansible_facts.services['docker.service'].state == 'running'
+  retries: 10
+  delay: 5

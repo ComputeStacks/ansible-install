@@ -14,7 +14,7 @@ ExecStart=/usr/bin/env docker run --rm --name loki-logs \
       --network=ops \
       --label com.computestacks.role=system \
       -v loki-data:/loki \
-      -v /etc/loki/loki-config.yml:/etc/loki/local-config.yaml:z \
+      -v /etc/loki/loki-config.yml:/etc/loki/local-config.yaml \
       -p 127.0.0.1:3100:3100 \
       {{ loki_full_image }}
 

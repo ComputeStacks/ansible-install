@@ -1,14 +1,4 @@
 ---
-- name: Load signing key
-  copy:
-    src: A8C477EE.asc
-    dest: /root/.A8C477EE.asc
-
-- name: Install gpg key
-  shell: gpg --import /root/.A8C477EE.asc
-  vars:
-    ansible_ssh_pipelining: no
-
 - name: ensure config directory exists
   file:
     path: "{{ agent_config_path }}"
@@ -18,7 +8,6 @@
 - import_tasks: setup_ssh_fs.yml
   when: backup_remote_protocol == 'ssh'
 
-- import_tasks: install_binary.yml
 - import_tasks: ssl_consul.yml
 - import_tasks: ssl_docker.yml
 
@@ -36,8 +25,14 @@
 - name: Install agent config
   template:
     src: agent.yml.j2
-    dest: "{{ agent_config_path }}/agent.yml"
+    dest: "{{ agent_config_file_path }}"
     mode: '0640'
+
+- name: pull image
+  community.general.docker_image:
+    name: "{{ agent_image }}"
+    tag: "{{ agent_image_tag }}"
+    source: pull
 
 - name: systemd conf file
   template:

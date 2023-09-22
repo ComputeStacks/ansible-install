@@ -14,7 +14,7 @@ ExecStart=/usr/bin/env docker run --rm --name alertmanager \
       --network=ops \
       --label com.computestacks.role=system \
       -v alertmanager-data:/alertmanager \
-      -v /etc/prometheus:/etc/alertmanager:z \
+      -v /etc/prometheus:/etc/alertmanager \
       {{ alertmanager_full_image }}
 
 ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill alertmanager 2>/dev/null'

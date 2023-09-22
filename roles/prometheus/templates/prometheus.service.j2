@@ -14,7 +14,7 @@ ExecStart=/usr/bin/env docker run --rm --name prometheus \
       --network=ops \
       --label com.computestacks.role=system \
       -v prometheus-data:/prometheus \
-      -v /etc/prometheus:/etc/prometheus:z \
+      -v /etc/prometheus:/etc/prometheus \
       -p 127.0.0.1:9090:9090 \
       {{ prometheus_full_image }}
 

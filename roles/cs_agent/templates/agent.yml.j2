@@ -1,4 +1,6 @@
 ---
+host:
+  iptables-cmd: iptables
 computestacks:
   host: "https://{{ cs_portal_domain }}"
 consul:
@@ -12,7 +14,7 @@ backups:
   key: "{{ backups_key }}"
   borg:
     compress: "zstd,3"
-    image: "{{ agent_image }}"
+    image: "{{ agent_backup_image }}"
     ssh:
       enabled: {{ agent_ssh_enabled | lower }}
       user: "{{ agent_ssh_user }}"

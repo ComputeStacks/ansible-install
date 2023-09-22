@@ -48,8 +48,8 @@
     container_default_behavior: compatibility
     pull: yes
     volumes:
-      - "{{ vault_storage_path }}/file:/vault/file:Z"
-      - "{{ vault_storage_path }}/logs:/vault/logs:Z"
+      - "{{ vault_storage_path }}/file:/vault/file"
+      - "{{ vault_storage_path }}/logs:/vault/logs"
     env:
       VAULT_ADDR: "http://127.0.0.1:8200"
       VAULT_LOCAL_CONFIG: '{"backend": {"file": {"path": "/vault/file"}}, "default_lease_ttl": "168h", "max_lease_ttl": "87600h", "listener": {"tcp": {"address": "127.0.0.1:8200", "tls_disable": "true"}}}'
@@ -101,9 +101,9 @@
     labels:
       "com.computestacks.role": system
     volumes:
-      - "{{ vault_storage_path }}/file:/vault/file:Z"
-      - "{{ vault_storage_path }}/logs:/vault/logs:Z"
-      - "{{ vault_storage_path }}/keys/rootkey:/root/.vault-token:Z"
+      - "{{ vault_storage_path }}/file:/vault/file"
+      - "{{ vault_storage_path }}/logs:/vault/logs"
+      - "{{ vault_storage_path }}/keys/rootkey:/root/.vault-token"
     env:
       VAULT_ADDR: "http://127.0.0.1:8200"
       VAULT_LOCAL_CONFIG: '{"backend": {"file": {"path": "/vault/file"}}, "default_lease_ttl": "168h", "max_lease_ttl": "87600h", "listener": {"tcp": {"address": "127.0.0.1:8200", "tls_disable": "true"}}}'

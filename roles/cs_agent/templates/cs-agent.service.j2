@@ -1,19 +1,31 @@
 [Unit]
 Description="ComputeStacks Agent"
-Documentation=https://computestacks.com
 Requires=docker.service
 After=docker.service
 Requires=consul.service
 After=consul.service
-ConditionFileNotEmpty={{ agent_config_path }}/agent.yml
+ConditionFileNotEmpty={{ agent_config_file_path }}
 
 [Service]
-User=root
-Group=root
-ExecStart=/usr/local/bin/cs-agent
-KillMode=process
-Restart=on-failure
-LimitNOFILE=infinity
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker stop cs-agent 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm cs-agent 2>/dev/null'
+
+ExecStart=/usr/bin/env docker run --init --rm --name cs-agent \
+      --log-driver=none \
+      --network=host \
+      --cap-add=NET_ADMIN \
+      --label com.computestacks.role=system \
+      -v {{ agent_config_path }}:/etc/computestacks:ro \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      {{ agent_image }}:{{ agent_image_tag }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker stop cs-agent 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm cs-agent 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=cs-agent
 
 [Install]
 WantedBy=multi-user.target
+WantedBy=docker.service

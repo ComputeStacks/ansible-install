@@ -15,9 +15,9 @@ bootstrap-app()
   fi
   docker run -it --rm --name portal \
           --label com.computestacks.role=system \
-          -v $CS_CERT_PATH/docker:/root/.docker:Z \
-          -v $CS_CERT_PATH/consul:/root/.consul:Z \
-          -v $CS_RAKE_PATH/bootstrap.rake:/usr/src/app/lib/tasks/bootstrap.rake:Z \
+          -v $CS_CERT_PATH/docker:/root/.docker \
+          -v $CS_CERT_PATH/consul:/root/.consul \
+          -v $CS_RAKE_PATH/bootstrap.rake:/usr/src/app/lib/tasks/bootstrap.rake \
           -e APP_ID=$CS_APP_ID \
           -e CURRENCY=$CS_CURRENCY \
           -e LOCALE=$CS_LOCALE \
@@ -46,8 +46,8 @@ bootstrap-db()
   docker pull $CS_REG
   docker run -it --rm --name portal \
         --label com.computestacks.role=system \
-        -v $CS_CERT_PATH/docker:/root/.docker:Z \
-        -v $CS_CERT_PATH/consul:/root/.consul:Z \
+        -v $CS_CERT_PATH/docker:/root/.docker \
+        -v $CS_CERT_PATH/consul:/root/.consul \
         -e APP_ID=$CS_APP_ID \
         -e CURRENCY=$CS_CURRENCY \
         -e LOCALE=$CS_LOCALE \
@@ -75,10 +75,10 @@ console()
   else
     docker run -it --rm --name portal \
         --label com.computestacks.role=system \
-        -v $CS_CERT_PATH/docker:/root/.docker:Z \
-        -v $CS_CERT_PATH/consul:/root/.consul:Z \
-        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
-        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh:Z \
+        -v $CS_CERT_PATH/docker:/root/.docker \
+        -v $CS_CERT_PATH/consul:/root/.consul \
+        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom \
+        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh \
         -e APP_ID=$CS_APP_ID \
         -e CURRENCY=$CS_CURRENCY \
         -e LOCALE=$CS_LOCALE \
@@ -109,10 +109,10 @@ container()
   else
     docker run -it --rm --name portal \
         --label com.computestacks.role=system \
-        -v $CS_CERT_PATH/docker:/root/.docker:Z \
-        -v $CS_CERT_PATH/consul:/root/.consul:Z \
-        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
-        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh:Z \
+        -v $CS_CERT_PATH/docker:/root/.docker \
+        -v $CS_CERT_PATH/consul:/root/.consul \
+        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom \
+        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh \
         -e APP_ID=$CS_APP_ID \
         -e CURRENCY=$CS_CURRENCY \
         -e LOCALE=$CS_LOCALE \
@@ -158,8 +158,8 @@ upgrade()
   echo "Running migrations..."
   docker run -it --rm --name portal \
           --label com.computestacks.role=system \
-          -v $CS_CERT_PATH/docker:/root/.docker:Z \
-          -v $CS_CERT_PATH/consul:/root/.consul:Z \
+          -v $CS_CERT_PATH/docker:/root/.docker \
+          -v $CS_CERT_PATH/consul:/root/.consul \
           -e APP_ID=$CS_APP_ID \
           -e CURRENCY=$CS_CURRENCY \
           -e LOCALE=$CS_LOCALE \
@@ -186,10 +186,10 @@ run()
   fi
   docker run -d --name portal \
         --label com.computestacks.role=system \
-        -v $CS_CERT_PATH/docker:/root/.docker:Z \
-        -v $CS_CERT_PATH/consul:/root/.consul:Z \
-        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
-        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh:Z \
+        -v $CS_CERT_PATH/docker:/root/.docker \
+        -v $CS_CERT_PATH/consul:/root/.consul \
+        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom \
+        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh \
         -e APP_ID=$CS_APP_ID \
         -e CURRENCY=$CS_CURRENCY \
         -e LOCALE=$CS_LOCALE \
@@ -222,10 +222,10 @@ test()
   else
     docker run -it --rm --name portal \
         --label com.computestacks.role=system \
-        -v $CS_CERT_PATH/docker:/root/.docker:Z \
-        -v $CS_CERT_PATH/consul:/root/.consul:Z \
-        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom:Z \
-        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh:Z \
+        -v $CS_CERT_PATH/docker:/root/.docker \
+        -v $CS_CERT_PATH/consul:/root/.consul \
+        -v $CS_BRANDING_PATH:/usr/src/app/public/assets/custom \
+        -v $CS_SSH_KEYS_PATH:/usr/src/app/lib/ssh \
         -e APP_ID=$CS_APP_ID \
         -e CURRENCY=$CS_CURRENCY \
         -e LOCALE=$CS_LOCALE \
