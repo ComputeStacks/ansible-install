@@ -6,7 +6,7 @@ enable_debug: false
 consul_listen_ip: 127.0.0.1
 consul_bootstrap: true
 consul_image: "hashicorp/consul"
-consul_image_tag: "1.16"
+consul_image_tag: "1.17"
 consul_full_image: "{{ consul_image }}:{{ consul_image_tag }}"
 consul_raw_key: ""
 
