@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #
 # ComputeStacks management script
 #
@@ -29,7 +29,7 @@ bootstrap-app()
           -e RAILS_ENV=production \
           -e RACK_ENV=production \
           -e DOCKER_CERT_PATH=/root/.docker \
-          -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+          -e CS_SSH_KEY=lib/ssh/id_ed25519 \
           -e CS_BOOTSTRAP=true \
           -e SENTRY_DSN=$SENTRY_DSN \
           --net=host \
@@ -59,7 +59,7 @@ bootstrap-db()
         -e RAILS_ENV=production \
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
-        -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_SSH_KEY=lib/ssh/id_ed25519 \
         -e CS_BOOTSTRAP=true \
         -e SENTRY_DSN=$SENTRY_DSN \
         --net=host \
@@ -90,12 +90,14 @@ console()
         -e RAILS_ENV=production \
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
-        -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_SSH_KEY=lib/ssh/id_ed25519 \
         -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
         -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \
+        -e MALLOC_CONF=$MALLOC_CONF \
+        -e RUBY_YJIT_ENABLE=$RUBY_YJIT_ENABLE \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rails c
@@ -124,12 +126,14 @@ container()
         -e RAILS_ENV=production \
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
-        -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_SSH_KEY=lib/ssh/id_ed25519 \
         -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
         -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \
+        -e MALLOC_CONF=$MALLOC_CONF \
+        -e RUBY_YJIT_ENABLE=$RUBY_YJIT_ENABLE \
         --net=host \
         --log-driver=journald \
         $CS_REG bash
@@ -171,8 +175,10 @@ upgrade()
           -e RAILS_ENV=production \
           -e RACK_ENV=production \
           -e DOCKER_CERT_PATH=/root/.docker \
-          -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+          -e CS_SSH_KEY=lib/ssh/id_ed25519 \
           -e SENTRY_DSN=$SENTRY_DSN \
+          -e MALLOC_CONF=$MALLOC_CONF \
+          -e RUBY_YJIT_ENABLE=$RUBY_YJIT_ENABLE \
           --net=host \
           --log-driver=journald \
           $CS_REG bundle exec rails db:migrate
@@ -201,13 +207,15 @@ run()
         -e RAILS_ENV=production \
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
-        -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_SSH_KEY=lib/ssh/id_ed25519 \
         -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
         -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e QUEUE_SYSTEM=$QUEUE_SYSTEM \
         -e QUEUE_DEPLOYMENTS=$QUEUE_DEPLOYMENTS \
         -e QUEUE_LE=$QUEUE_LE \
         -e SENTRY_DSN=$SENTRY_DSN \
+        -e MALLOC_CONF=$MALLOC_CONF \
+        -e RUBY_YJIT_ENABLE=$RUBY_YJIT_ENABLE \
         --net=host \
         --restart=unless-stopped \
         --log-driver=journald \
@@ -237,12 +245,14 @@ test()
         -e RAILS_ENV=production \
         -e RACK_ENV=production \
         -e DOCKER_CERT_PATH=/root/.docker \
-        -e CS_SSH_KEY=/usr/src/app/lib/ssh/id_ed25519 \
+        -e CS_SSH_KEY=lib/ssh/id_ed25519 \
         -e RAILS_MIN_THREADS=$RAILS_MIN_THREADS \
         -e RAILS_MAX_THREADS=$RAILS_MAX_THREADS \
         -e COLUMNS="`tput cols`" \
         -e LINES="`tput lines`" \
         -e SENTRY_DSN=$SENTRY_DSN \
+        -e MALLOC_CONF=$MALLOC_CONF \
+        -e RUBY_YJIT_ENABLE=$RUBY_YJIT_ENABLE \
         --net=host \
         --log-driver=journald \
         $CS_REG bundle exec rake test_connection:all
