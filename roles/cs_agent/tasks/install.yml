@@ -6,7 +6,6 @@
     mode: '0740'
 
 - import_tasks: setup_ssh_fs.yml
-  when: backup_remote_protocol == 'ssh'
 
 - import_tasks: ssl_consul.yml
 - import_tasks: ssl_docker.yml

@@ -37,6 +37,7 @@
       - gnupg-agent
       - software-properties-common
       - man
+      - tmux
     state: latest
 
 - name: install nfs client tools
