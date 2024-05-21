@@ -43,7 +43,7 @@
   delegate_to: "{{ groups['nodes'][0] }}"
 
 - name: generate token
-  import_tasks: install_acl.yml  
+  import_tasks: install_acl.yml
   delegate_to: "{{ groups['nodes'][0] }}"
   run_once: true
   when: consul_token_file.stat.exists == False

@@ -24,7 +24,7 @@
   "domain": "consul",
   "enable_local_script_checks": false,
   "enable_script_checks": false,
-  "encrypt": "JtbsztIrgSH5b63OArc0Px1KOF+kGSvhOVZfS2tqz0A=",
+  "encrypt": "{{ consul_raw_key }}",
   "key_file": "/consul/config/ssl/server.key",
   "log_level": "INFO",
   "node_name": "{{ ansible_hostname }}",

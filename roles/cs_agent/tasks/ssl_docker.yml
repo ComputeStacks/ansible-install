@@ -7,7 +7,7 @@
 
 - name: Generate docker client certificate
   shell: |
-    docker exec -it vault-bootstrap vault write -format json pki/consul/issue/client \
+    docker exec -it vault-bootstrap vault write -format json pki/docker/issue/client \
                                                 common_name={{ hostvars[inventory_hostname].ansible_hostname }} \
                                                 ttl=43800h
   register: vault_docker_client_results

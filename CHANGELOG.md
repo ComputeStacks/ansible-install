@@ -1,10 +1,20 @@
 # Changelog
 
+## May 21, 2024
+
+* Various bug fixes.
+* Update repositories and versions.
+* Our node agent now runs in a container.
+
+***
+
 ## Sept 21, 2023
 
 * Docker installation on debian 12 seems to have issues with iptables/nftables. To resolve this, the docker role will now reboot after docker is installed, and then wait for the server to come back online before proceeding with the rest of the installation.
 * Node agent now runs within a container
 * Remove remnants of our CentOS days (selinux labels).
+
+***
 
 ## July 6, 2023
 
@@ -18,19 +28,27 @@
 * Haproxy v2.8 is now used
 * Full support for ipv6
 
+***
+
 ## May 8, 2023
 
 * Redis will now use the redis apt repo.
 * Add script to ensure real IP is recovered on the controller when using Cloudflare.
 * Various updates for v8.1.
 
+***
+
 ## Apr 8, 2023
 
 * Remove option to add ComputeStacks Support access. Can be manually added later.
 
+***
+
 ## Apr 6, 2023
 
 * Remove dnsmasq. No longer necessary.
+
+***
 
 ## Mar 14, 2023
 
