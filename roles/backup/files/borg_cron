@@ -1,0 +1,3 @@
+PATH=/usr/local/bin:/bin
+
+15 5 * * * root /usr/local/bin/cs-borg_compact

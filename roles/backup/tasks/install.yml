@@ -1,4 +1,9 @@
 ---
+- name: Install borgbackup
+  get_url:
+    url: "{{ borg_install_source }}"
+    dest: "/usr/local/bin/borg"
+    mode: '0754'
 
 - include_tasks: "install/borg.yml"
   when: backup_remote_protocol == "ssh"

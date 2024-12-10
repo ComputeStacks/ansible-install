@@ -68,7 +68,8 @@ task bootstrap: :environment do
     pid_limit: 300,
     ulimit_nofile_soft: 2500,
     ulimit_nofile_hard: 3000,
-    consul_token: "{{ consul_token }}"
+    consul_token: "{{ consul_token }}",
+    acme_server: "{{ node_ip }}:3000"
   ) if region.nil?
   if region.nil?
     puts "Error, region not available."
@@ -91,9 +92,6 @@ task bootstrap: :environment do
   Setting.find_by(name: 'registry_node')&.update value: "{{ registry_server_ip }}"
   puts "...SSH Port"
   Setting.find_by(name: 'registry_ssh_port')&.update value: "{{ registry_ssh_port }}"
-
-  puts "LetsEncrypt..."
-  Setting.find_by(name: 'le_validation_server')&.update value: "{{ node_ip }}:3000"
 
   puts "Creating Metric Client"
   mc = MetricClient.find_by(endpoint: "{{ prometheus_endpoint }}")

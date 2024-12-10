@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+mkdir -p /var/log/borg
+
+echo "{\"time\": $(date '+%s.%N'), \"message\": \"$(date '+%Y%m%d-%H:%M:%S') STARTING BORG COMPACT\"}" >> /var/log/borg/compact.log
+
+find {{ backup_path }} -maxdepth 1 -type d \( ! -name {{ backup_folder }} \) \( ! -name lost+found \) -exec bash -c "borg compact --verbose --log-json '{}'/backup &>> /var/log/borg/compact.log && chown -R nobody:nogroup '{}'" \;
+
+echo "{\"time\": $(date '+%s.%N'), \"message\": \"$(date '+%Y%m%d-%H:%M:%S') END BORG COMPACT\"}" >> /var/log/borg/compact.log

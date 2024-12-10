@@ -13,7 +13,7 @@
     dest: /usr/local/bin/cs-recover_iptables
     owner: root
     group: root
-    mode: '0655'
+    mode: '0754'
   notify: activate rules
   when: existing_iptables.stat.exists == False
 

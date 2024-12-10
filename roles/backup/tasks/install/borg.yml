@@ -1,9 +1,4 @@
 ---
-- name: Install borgbackup
-  apt:
-    name: borgbackup
-    state: present
-
 - name: create user for borg
   user:
     name: "{{ agent_ssh_user }}"
