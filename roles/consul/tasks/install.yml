@@ -37,7 +37,7 @@
       run_once: true
     - name: set key fact
       set_fact:
-        consul_raw_key: "{{ consul_key_read.container.Output }}"
+        consul_raw_key: "{{ consul_key_read.container.Output | trim }}"
     - name: remove consul keygen
       community.general.docker_container:
         name: "consul-keygen"

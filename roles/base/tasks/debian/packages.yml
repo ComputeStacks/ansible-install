@@ -24,7 +24,6 @@
       - iptables
       - jq
       - whois
-      - mosh
       - socat
       - python3-openssl
       - python3-pip

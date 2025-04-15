@@ -18,7 +18,7 @@ consul_token: "" # placeholder
 docker_api_version: "1.41"
 agent_backup_image: "ghcr.io/computestacks/cs-docker-borg:1.4"
 agent_image: "ghcr.io/computestacks/backup-agent"
-agent_image_tag: "1.5"
+agent_image_tag: "1.6"
 agent_download_url: "https://f.cscdn.cc/file/cstackscdn/packages/cs-agent/cs-agent-amd64.tar.gz"
 
 # Paths
