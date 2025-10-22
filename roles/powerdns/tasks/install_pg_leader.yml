@@ -13,7 +13,7 @@
     users: "{{ pdns_replication_user }}"
     databases: replication
     method: trust
-    source: "{{ hostvars[groups['follower_nameservers'][0]].postgres_ip }}"
+    source: "{{ hostvars[groups['follower_nameservers'][0]].postgres_ip }}/32"
   notify: Restart Postgres
 
 - meta: flush_handlers

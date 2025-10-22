@@ -16,6 +16,6 @@
       - "pdns-server"
       - "pdns-backend-pgsql"
     state: latest
-  when: 
+  when:
     - ansible_facts.services['postgresql.service'] is defined
     - ansible_facts.services['postgresql.service']['status'] == "enabled"
