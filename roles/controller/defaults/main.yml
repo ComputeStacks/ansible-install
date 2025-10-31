@@ -90,6 +90,7 @@ queue_deployment: 20
 
 rails_max_threads: 15
 rails_min_threads: 15
+puma_workers: 2
 
 ##
 # Branding
@@ -102,7 +103,7 @@ branding_login_img_url: "https://f.cscdn.cc/file/cstackscdn/cloud-portal/brandin
 postgres_user: computestacks
 postgres_cs_password: "ch4ng3m3"
 postgres_host: 127.0.0.1
-postgres_pool: 30
+postgres_pool: 40
 
 ##
 # Redis

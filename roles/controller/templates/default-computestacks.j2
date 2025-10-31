@@ -16,6 +16,7 @@ CS_REG={{ controller_image_path }}
 
 RAILS_MAX_THREADS={{ rails_max_threads }}
 RAILS_MIN_THREADS={{ rails_min_threads }}
+WEB_CONCURRENCY={{ puma_workers }}
 
 MALLOC_CONF=dirty_decay_ms:1000,narenas:2,background_thread:true,stats_print:false
 RUBY_YJIT_ENABLE=1
