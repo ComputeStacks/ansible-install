@@ -6,7 +6,7 @@
 
 - hosts:
     - all
-  tags: ['never', 'bootstrap']
+  tags: ['never', 'bootstrap', 'nameserver']
   tasks:
     - name: Load service state
       service_facts:
@@ -18,14 +18,14 @@
 
 - hosts:
     - primary_nameserver
-  tags: ['never', 'bootstrap']
+  tags: ['never', 'nameserver']
   roles:
     - powerdns
   any_errors_fatal: true
 
 - hosts:
     - follower_nameservers
-  tags: ['never', 'bootstrap']
+  tags: ['never', 'nameserver']
   roles:
     - powerdns
   any_errors_fatal: true
@@ -101,6 +101,7 @@
     - ssh_transfer
   any_errors_fatal: true
 
+# tags are handled within the roles
 - hosts:
     - metrics
   roles:

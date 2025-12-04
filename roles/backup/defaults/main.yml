@@ -16,9 +16,3 @@ agent_ssh_user: cstacks
 agent_ssh_group: "{{ agent_ssh_user }}"
 # MUST be an absolute path AND start with a '/', AND NOT have a trailing `/`.
 ssh_agent_host_path: "/mnt"
-
-##
-# Borg
-# source: https://github.com/borgbackup/borg/releases
-# use `ldd --version` to determine glib version.
-borg_install_source: "https://github.com/borgbackup/borg/releases/download/1.4.0/borg-linux-glibc236"

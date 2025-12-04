@@ -1,18 +1,9 @@
 ---
-- block:
-    - name: install postgres key
-      ansible.builtin.get_url:
-        url: "{{ pdns_postgresql_repo_key }}"
-        dest: "{{ pdns_postgresql_repo_key_path }}"
-    - name: add postgres repo
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by={{ pdns_postgresql_repo_key_path }} arch=amd64] {{ pdns_postgresql_repo }}"
-        state: present
-
 - name: install pg packages
   apt:
     name:
       - "postgresql-{{ pdns_postgresql_version }}"
+      - "postgresql-client-{{ pdns_postgresql_version }}"
       - python3-psycopg2
     state: present
     update_cache: yes

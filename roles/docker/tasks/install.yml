@@ -14,13 +14,14 @@
     name:
       - "docker-ce"
       - "docker-ce-cli"
+      - "docker-ce-rootless-extras"
       - "containerd.io"
     state: latest
     update_cache: yes
 
 # `apt-get upgrade` on these will cause all containers to restart.
 - name: Lock docker version
-  ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli containerd.io
+  ansible.builtin.command: apt-mark hold docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras
   when: lock_docker_version
 
 - name: Install docker console script

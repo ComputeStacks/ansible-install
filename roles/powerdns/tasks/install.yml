@@ -6,20 +6,6 @@
     enabled: false
   when: ansible_facts.services['systemd-resolved.service'] is defined
 
-- block:
-    - name: install key
-      ansible.builtin.get_url:
-        url: "{{ pdns_repo_key }}"
-        dest: "{{ pdns_repo_key_path }}"
-    - name: add repo
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by={{ pdns_repo_key_path }} arch=amd64] {{ pdns_repo }}"
-        state: present
-
-- name: pin package
-  copy:
-    src: package-pin
-    dest: /etc/apt/preferences.d/pdns
 - name: install package
   apt:
     name:
@@ -58,7 +44,7 @@
 
 - name: check that database is configured
   postgresql_ping:
-    db: pdns
+    login_db: pdns
     login_host: 127.0.0.1
     login_user: pdns
     login_password: "{{ pdns_db_pass }}"

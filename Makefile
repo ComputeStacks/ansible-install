@@ -6,14 +6,17 @@ help: ## Help
 .DEFAULT_GOAL := help
 
 roles: ## Install ansible dependencies
-	@ansible-galaxy install -r requirements.yml
+	@time --format="took %E" ansible-galaxy install -r requirements.yml --force
 
 bootstrap: ## Bootstrap a new cluster, including add new availability zones.
-	@time ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
+	@time --format="took %E" ansible-playbook -u root -i inventory.yml main.yml --tags bootstrap
+
+nameservers: ## Runs the base package installation on ALL servers, but stops after nameservers are provisioned
+	@time --format="took %E" ansible-playbook -u root -i inventory.yml main.yml --tags nameserver
 
 validate: ## Run validation checks on an installation to check for common issues
-	@time ansible-playbook -u root -i inventory.yml main.yml --tags validate
+	@time --format="took %E" ansible-playbook -u root -i inventory.yml main.yml --tags validate
 
 vault-unseal: ## Unseal vault on the controller
-	@time ansible-playbook -u root -i inventory.yml main.yml --tags vault_unseal
+	@time --format="took %E" ansible-playbook -u root -i inventory.yml main.yml --tags vault_unseal
 

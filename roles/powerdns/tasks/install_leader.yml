@@ -12,7 +12,7 @@
 
 - name: ensure postgresql is running
   postgresql_ping:
-    db: postgres
+    login_db: postgres
   become_user: postgres
   become: true
   become_method: su
@@ -23,7 +23,7 @@
 
 - name: check if db configured
   postgresql_ping:
-    db: pdns
+    login_db: pdns
     login_host: 127.0.0.1
     login_user: pdns
     login_password: "{{ pdns_db_pass }}"
@@ -71,7 +71,7 @@
 
     - name: Verify powerdns leader database configured
       postgresql_ping:
-        db: pdns
+        login_db: pdns
         login_host: 127.0.0.1
         login_user: pdns
         login_password: "{{ pdns_db_pass }}"

@@ -34,7 +34,6 @@
       - sudo
       - apt-transport-https
       - gnupg-agent
-      - software-properties-common
       - man
       - tmux
     state: latest

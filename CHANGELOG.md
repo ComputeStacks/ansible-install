@@ -1,5 +1,15 @@
 # Changelog
 
+## December 3, 2025
+
+* Update cadvisor, node backup agent, and docker daemon.
+* Various updates and improvements to match current version of ComputeStacks.
+
+## November 25, 2025
+
+* Update for Debian 13
+* Separete nameserver provisioning process
+
 ## May 21, 2024
 
 * Various bug fixes.

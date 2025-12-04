@@ -1,14 +1,4 @@
 ---
-- block:
-    - name: install postgres key
-      ansible.builtin.get_url:
-        url: "{{ psql_deb_key }}"
-        dest: "{{ psql_deb_key_path }}"
-    - name: add postgres repo
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by={{ psql_deb_key_path }} arch=amd64] {{ psql_deb_repo_url }}"
-        state: present
-
 - name: install packages
   apt:
     name:

@@ -1,7 +1,7 @@
 ---
 - name: check if db configured
   postgresql_ping:
-    db: pdns
+    login_db: pdns
     login_host: 127.0.0.1
     login_user: pdns
     login_password: "{{ pdns_db_pass }}"

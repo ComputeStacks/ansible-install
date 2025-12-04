@@ -2,4 +2,5 @@
 inventory.yml
 inventory.*.yml
 inventory/
-
+.vscode
+tmp

@@ -85,6 +85,16 @@ apt-get -y install openssl \
 ***
 ## Running the installer
 
+### Pre-Bootstrap
+
+Ensure nameservers are configured prior to running the bootstrap process.
+
+```bash
+make nameservers
+```
+
+
+
 ### Bootstrap A New Cluster
 
 ```bash

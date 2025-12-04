@@ -1,3 +1,1 @@
 ---
-haproxy_deb_key: "https://haproxy.debian.net/bernat.debian.org.gpg"
-haproxy_deb_repo: "deb http://haproxy.debian.net bookworm-backports-2.8 main"

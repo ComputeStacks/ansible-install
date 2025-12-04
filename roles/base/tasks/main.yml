@@ -4,6 +4,15 @@
 - import_tasks: debian/packages.yml
 - import_tasks: validate/postcheck.yml
 
+- name: Ensure localhost is defined
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    search_string: 'localhost'
+    line: 127.0.0.1 localhost
+    owner: root
+    group: root
+    mode: '0644'
+
 - name: install tmux.conf
   get_url:
     url: "{{ tmux_url }}"

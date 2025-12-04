@@ -1,15 +1,8 @@
 ---
-- name: Install redis apt key
-  shell: "curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg"
-
-- name: Add apt repo
-  shell: echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb bookworm main" | tee /etc/apt/sources.list.d/redis.list
-
 - name: install redis
   package:
     name:
       - redis
-      - redis-server
     state: present
     update_cache: yes
 
