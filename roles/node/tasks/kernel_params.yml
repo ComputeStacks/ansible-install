@@ -115,11 +115,14 @@
     state: present
     reload: yes
 
-# Problem:
-#    root@cnode:~# systemctl stop cs-agent
-#    Failed to allocate directory watch: Too many open files
-#
-# Solution:
-#     cat /proc/sys/fs/inotify/max_user_watches
-#     sysctl fs.inotify.max_user_watches=2097152
-#     cat /proc/sys/fs/inotify/max_user_watches
+- name: Configure inotify limits for high container density
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-docker-inotify.conf
+    reload: true
+    state: present
+  loop:
+    - { name: fs.inotify.max_user_instances, value: "1024" }
+    - { name: fs.inotify.max_user_watches,   value: "1048576" }
+
