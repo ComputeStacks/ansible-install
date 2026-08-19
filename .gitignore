@@ -4,3 +4,4 @@ inventory.*.yml
 inventory/
 .vscode
 tmp
+workspace/
