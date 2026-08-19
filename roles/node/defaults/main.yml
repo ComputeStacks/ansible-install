@@ -1,2 +1,7 @@
 ---
 config_directory: "/etc/computestacks"
+
+# Conntrack sizing. Every published-port connection consumes a conntrack slot because
+# nodes run dockerd with --userland-proxy=false, so the kernel default is far too low.
+nf_conntrack_max: 1000000
+nf_conntrack_hashsize: 250000

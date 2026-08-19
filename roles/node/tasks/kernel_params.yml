@@ -6,10 +6,46 @@
     state: present
     reload: yes
 
-- name: Set nf_conntrack
-  sysctl:
+##
+# nf_conntrack and br_netfilter have to be loaded before systemd-sysctl runs. Their
+# sysctls do not exist until the module is loaded, so a boot-time write against
+# /etc/sysctl.conf fails silently and the tunable is left at the kernel default --
+# 262144 for nf_conntrack_max, which a node running hundreds of containers with
+# --userland-proxy=false will exhaust. systemd-sysctl.service is ordered
+# After=systemd-modules-load.service, so listing the modules here fixes the ordering.
+- name: Load netfilter modules on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/computestacks.conf
+    content: |
+      nf_conntrack
+      br_netfilter
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load netfilter modules now
+  ansible.builtin.command: modprobe -a nf_conntrack br_netfilter
+  changed_when: false
+
+##
+# hashsize is a module parameter rather than a sysctl, so it only applies at module
+# load time and needs a reboot (or module reload) to take effect. Sized to
+# nf_conntrack_max / 4, which matches the kernel's own default ratio -- leaving it at
+# the default 65536 buckets would hash a million entries into a table sized for a
+# quarter of that.
+- name: Size the conntrack hash table
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/nf_conntrack.conf
+    content: "options nf_conntrack hashsize={{ nf_conntrack_hashsize }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Set net.netfilter.nf_conntrack_max
+  ansible.builtin.sysctl:
     name: net.netfilter.nf_conntrack_max
-    value: "1000000"
+    value: "{{ nf_conntrack_max }}"
+    sysctl_file: /etc/sysctl.d/99-computestacks-conntrack.conf
     state: present
     reload: yes
 
