@@ -11,5 +11,4 @@ docker_certs_dir: "{{ docker_config_dir }}/certs"
 docker_ca_file: "{{ docker_certs_dir }}/ca.crt"
 docker_cert_file: "{{ docker_certs_dir }}/server.crt"
 docker_key_file: "{{ docker_certs_dir }}/server.key"
-docker_ipv6_local_net: "2001:db8:1::/64"
 docker_registry_mirror: "" # Optionally provide a docker image mirror
