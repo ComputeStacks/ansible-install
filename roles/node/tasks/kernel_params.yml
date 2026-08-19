@@ -151,6 +151,21 @@
     state: present
     reload: yes
 
+##
+# Raise the kernel's free-memory reserve. The auto-computed value is capped at 64MB
+# regardless of RAM, which is thin on a node with no swap and a large page cache -- an
+# allocation that cannot wait fails at the watermark rather than stalling in reclaim, which
+# shows up as dockerd failing an NFS volume mount with ENOMEM ("cannot allocate memory")
+# while mounts either side of it succeed. Own file rather than sysctl.conf so the value is
+# visible where it was set and can be removed by deleting one file.
+- name: Raise the kernel free-memory reserve
+  ansible.builtin.sysctl:
+    name: vm.min_free_kbytes
+    value: "{{ vm_min_free_kbytes }}"
+    sysctl_file: /etc/sysctl.d/99-computestacks-memory.conf
+    state: present
+    reload: true
+
 - name: Configure inotify limits for high container density
   ansible.builtin.sysctl:
     name: "{{ item.name }}"
