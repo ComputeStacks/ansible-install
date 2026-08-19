@@ -7,3 +7,13 @@ docker_deb_key: "https://download.docker.com/linux/debian/gpg"
 docker_deb_key_path: "/etc/apt/keyrings/docker.asc"
 
 docker_registry_mirror: ""
+
+# Keep containers running across a docker daemon restart. Docker only supports
+# this for patch release upgrades (YY.MM.x) -- a major daemon upgrade still
+# stops every container.
+docker_live_restore: true
+
+# Seconds the daemon waits for containers to exit on shutdown before SIGKILL.
+# Docker's default of 15 is too short for tenant databases to close cleanly on
+# a node running hundreds of containers.
+docker_shutdown_timeout: 120

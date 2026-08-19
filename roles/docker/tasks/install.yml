@@ -31,6 +31,21 @@
     owner: root
     group: root
 
+- name: Ensure docker config directory exists
+  file:
+    path: "/etc/docker"
+    state: directory
+
+# live-restore and shutdown-timeout live here rather than in the systemd
+# ExecStart flags on purpose: both are SIGHUP-reloadable from daemon.json, so
+# they can be changed on a running node with `systemctl reload docker` and no
+# container downtime. Docker hard-errors if an option is set in both places, so
+# neither may be added to startup.conf.
+- name: Configure Docker daemon
+  template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+
 - name: Ensure docker startup directory exists
   file:
     path: "/etc/systemd/system/docker.service.d"
