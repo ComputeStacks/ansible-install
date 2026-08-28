@@ -1,8 +1,0 @@
----
-- name: wildcard self-signed exists
-  stat:
-    path: "{{ data_directory }}/.ssl_wildcard/sharedcert.pem"
-  register: shared_wildcard_exists
-
-- include_tasks: ssl_wildcard.yml
-  when: shared_wildcard_exists.stat.exists == False

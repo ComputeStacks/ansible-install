@@ -1,9 +1,0 @@
----
-- block:
-    - name: controller_redis | configured?
-      stat:
-        path: /etc/redis/redis.conf
-      register: redis_configured
-
-    - import_tasks: install.yml
-      when: redis_configured.stat.exists == False

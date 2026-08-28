@@ -1,5 +1,0 @@
----
-- include_tasks: common/node_exporter.yml
-
-- debug:
-    msg: "Backup validation successful."

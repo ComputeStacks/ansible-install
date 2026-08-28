@@ -1,6 +1,0 @@
----
-- name: node_exporter
-  fail:
-    msg: node_exporter is not running
-  when:
-    - ansible_facts.services['prometheus-node-exporter.service']['state'] != 'running'

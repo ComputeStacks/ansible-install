@@ -1,5 +1,0 @@
-[Service]
-ExecStart=
-ExecStart={{ docker_bin }} -H unix:// -H tcp://0.0.0.0:2376{{ ' ' }}{{ ' ' }}{%- if docker_registry_mirror != '' -%}--registry-mirror={{ docker_registry_mirror }}{{ ' ' }}{%- endif -%}{{ ' ' }}--icc=false --userland-proxy=false --tlsverify --tlscacert={{ docker_ca_file }} --tlscert={{ docker_cert_file }} --tlskey={{ docker_key_file }}
-{{ '' }}
-TasksMax=infinity

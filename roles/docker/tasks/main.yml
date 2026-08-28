@@ -1,3 +1,0 @@
----
-- include_tasks: install.yml
-  when: ansible_facts.services['docker.service'] is not defined

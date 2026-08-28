@@ -1,9 +1,0 @@
----
-- name: install pg packages
-  apt:
-    name:
-      - "postgresql-{{ pdns_postgresql_version }}"
-      - "postgresql-client-{{ pdns_postgresql_version }}"
-      - python3-psycopg2
-    state: present
-    update_cache: yes

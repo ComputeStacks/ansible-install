@@ -1,4 +1,0 @@
----
-- include_tasks: kernel_params.yml
-
-- include_tasks: preload_images.yml
