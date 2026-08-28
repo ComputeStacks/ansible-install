@@ -1,0 +1,51 @@
+---
+# Every externally-sourced version, in one place. Nothing floats except the
+# controller minor tag, which is a deliberate rolling release channel.
+#
+# Items marked VERIFY must be confirmed by the owning wave before its DoD is
+# met (check the named source), then the marker removed.
+
+# Controller (rolling minor line — `cstacks upgrade` pulls latest patch)
+controller_image_repo: "ghcr.io/computestacks/controller"
+controller_image_tag: "9.7"
+# Optional enterprise repo override + pull credentials (vaulted):
+# controller_image_repo: "registry.example.com/computestacks/controller-enterprise"
+# controller_registry_username / controller_registry_password in secrets.yml
+
+# cs-agent — apt PACKAGE version, which is NOT the agent's self-reported
+# version (two version schemes; package 1.5.0 shipped agent 2.0.0).
+# VERIFY (wave D): read the current package version for agent v3.3.x from the
+# repo.computestacks.com index and pin it here.
+cs_agent_apt_version: "VERIFY"
+cs_agent_apt_repo: "https://repo.computestacks.com/public"
+cs_agent_apt_key_url: "https://repo.computestacks.com/public/computestacks.gpg.asc"
+
+# Borg — client (container image) and server (upstream release binary) MUST be
+# the same borg version; bump these two together, deliberately, never via
+# unattended upgrades. Verified 2026-08-28 against cs-docker-images/cs-docker-borg.
+borg_version: "1.4.4"
+borg_release_gpg_fingerprint: "6D5BEF9ADD2075805747B70F9F88FB52FAF7B393"
+borg_image: "ghcr.io/computestacks/cs-docker-borg:1.6"
+borg_binary_path: "/opt/computestacks/bin/borg"   # attach mode overrides to the existing server's path
+
+# Node image preloads (controller expects these present)
+bastion_image: "ghcr.io/computestacks/cs-docker-bastion:v2"
+xtrabackup24_image: "ghcr.io/computestacks/cs-docker-xtrabackup:2.4"
+xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
+
+# Metrics / logging stack (containers, exact tags). VERIFY (wave E): confirm
+# each is the latest stable of its line at implementation time and pin.
+prometheus_image: "prom/prometheus:v2.53.5"        # VERIFY
+alertmanager_image: "prom/alertmanager:v0.28.1"    # VERIFY
+loki_image: "grafana/loki:2.9.10"                  # fleet parity; controller queries Loki API v1
+fluentd_loki_image: "grafana/fluent-plugin-loki:2.9.10" # VERIFY tag exists; v1 floated `main`
+cadvisor_image: "ghcr.io/google/cadvisor:v0.54.0"  # VERIFY
+
+# Infra containers
+vault_image: "hashicorp/vault:1.20.4"              # VERIFY (wave B); v1 floated `latest`
+nginx_image: "nginx:1.28"                          # VERIFY (wave G/E)
+
+# Packages
+postgresql_version: 17
+# acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED
+acme_sh_version: "3.1.2"                           # VERIFY (wave G)

@@ -1,0 +1,64 @@
+---
+# Attach mode: provision a NEW region/az/node against an EXISTING v1-built
+# environment. Existing shared hosts carry `existing_env: true` in inventory
+# and receive ONLY the enumerated additive write set (docs/contracts.md
+# §Attach mode). Wave J implements; ordering mirrors site.yml's seed -> enroll
+# -> backfill contract.
+#
+# Prerequisites (documented in docs/attach-mode.md):
+# - Existing controller upgraded to the release carrying `rake bootstrap:apply`
+# - Required inventory inputs: backup_host_path, backup_borg_remote_path,
+#   backups_key (existing values), pdns keys if DNS seeding is needed
+# - Tailscale defaults OFF (existing hosts are not on a tailnet)
+
+- name: Preflight (new hosts full; existing hosts partial)
+  hosts: all
+  roles:
+    - preflight
+
+- name: Controller prep (gated — pg_dump, env append-only, v2 cstacks, portal restart)
+  hosts: controller
+  roles:
+    - role: controller
+      tasks_from: attach_prep
+
+- name: New node build
+  hosts: nodes
+  roles:
+    - common
+    - node_kernel
+    - haproxy
+    - node_observability
+    - firewall
+
+- name: Node docker + TLS from existing Vault
+  hosts: nodes
+  roles:
+    - geerlingguy.docker
+    - docker_config
+    - docker_tls      # unseal-if-sealed on existing controller, then issue
+
+- name: Existing shared hosts — additive writes only
+  hosts: metrics:backup:controller
+  roles:
+    - role: attach_fragments   # file_sd fragments, iptables appends, borg user/key
+
+- name: Seed new region (omittable-section manifest, DRY_RUN gated)
+  hosts: controller
+  roles:
+    - controller_seed
+
+- name: New node agent
+  hosts: nodes
+  roles:
+    - cs_agent
+
+- name: Post-enrollment (scoped to the new node)
+  hosts: controller
+  roles:
+    - controller_post_enroll
+
+- name: Validate new region
+  hosts: nodes:controller
+  roles:
+    - validate

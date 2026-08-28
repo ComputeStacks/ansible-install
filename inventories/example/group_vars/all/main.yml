@@ -1,0 +1,32 @@
+---
+# Environment-level settings (non-secret). Secrets live in secrets.yml (vault).
+
+# Portal / domains
+cs_portal_domain: portal.example.com
+cs_registry_domain: cr.example.com
+cs_metrics_domain: metrics.example.com
+cs_app_zone: usercontent.example.com     # tenant Dns::Zone
+cs_admin_email: admin@example.com
+
+locale: en
+currency: USD
+
+# DNS driver: powerdns | autodns | none
+dns_driver: powerdns
+
+# ACME (portal/registry/metrics certs)
+use_zerossl: true
+acme_account_email: admin@example.com
+# acme_dns_provider: <see docs/acme-providers.md>; default HTTP-01 webroot
+
+# Tailscale: enabled globally when tailscale_authkey is set in secrets.yml.
+# Opt out per host/group with `tailscale_enabled: false` (same-L2 regions).
+
+# Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
+
+# Attach mode (add-region.yml): set on EXISTING shared hosts in the inventory.
+# existing_env: true
+# Attach-mode required inputs describing the existing environment:
+# backup_host_path: /mnt
+# backup_borg_remote_path: /usr/bin/borg
+# (backups_key must be the existing environment's value, in secrets.yml)

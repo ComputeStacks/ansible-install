@@ -1,0 +1,104 @@
+---
+# Greenfield full converge. Play ORDER is a frozen contract (docs/contracts.md
+# §Play ordering) — enrollment and backfills depend on it:
+#   seed creates Node rows (mints agent tokens) -> nodes enroll -> backfills.
+# Wave J finalizes wiring; roles land per the wave plan.
+
+- name: Preflight validation
+  hosts: all
+  gather_facts: true
+  roles:
+    - preflight
+
+- name: Base system
+  hosts: all
+  roles:
+    - common          # packages, sshd, chrony, motd fragment, root keypair (controller)
+
+- name: Tailscale mesh
+  hosts: all
+  roles:
+    - role: tailscale
+      when: tailscale_authkey is defined and (tailscale_enabled | default(true))
+    - role: ubuntu_pro
+      when: ubuntu_pro_token is defined
+
+- name: Nameservers
+  hosts: nameservers
+  roles:
+    - powerdns
+
+- name: Docker hosts
+  hosts: controller:metrics:registry:nodes
+  roles:
+    - geerlingguy.docker
+    - docker_config   # daemon.json (live-restore), TLS drop-ins on nodes (certs from vault)
+
+- name: Controller infrastructure
+  hosts: controller
+  roles:
+    - vault           # init/unseal + pki/docker mount
+    - geerlingguy.postgresql
+    - geerlingguy.redis
+    - acme_web        # nginx TLS terminator + acme.sh
+    - controller      # cstacks CLI, env file, portal container, wildcard cert
+
+- name: Node docker TLS
+  hosts: nodes
+  roles:
+    - docker_tls      # vault-issued daemon certs (needs vault up)
+
+- name: Metrics host
+  hosts: metrics
+  roles:
+    - acme_web
+    - metrics         # prometheus + alertmanager + ops network (owner)
+    - loki
+
+- name: Registry host
+  hosts: registry
+  roles:
+    - acme_web
+    - registry
+
+- name: Backup server
+  hosts: backup
+  roles:
+    - backup_server
+
+- name: Node base stack
+  hosts: nodes
+  roles:
+    - node_kernel     # sysctls, modules, BBR, inotify, accept_ra
+    - haproxy         # apt + certs/errors dirs (config deployed by controller at runtime)
+    - node_observability  # cadvisor + fluentd containers, image preloads
+
+- name: Host firewalls
+  hosts: all
+  roles:
+    - firewall        # own nftables table; never flush ruleset
+
+- name: SSH trust
+  hosts: all
+  roles:
+    - ssh_trust       # controller keys -> nodes AND registry root authorized_keys
+
+- name: Seed controller
+  hosts: controller
+  roles:
+    - controller_seed # render manifest -> cstacks seed (bootstrap:apply)
+
+- name: Node agents (requires seeded Node rows)
+  hosts: nodes
+  roles:
+    - cs_agent        # apt install, agent.yml, enroll (rails-runner hash fetch), borg key
+
+- name: Post-enrollment controller tasks
+  hosts: controller
+  roles:
+    - controller_post_enroll  # datachannel + metadata backfills, test_connection
+
+- name: Validate
+  hosts: all
+  roles:
+    - validate

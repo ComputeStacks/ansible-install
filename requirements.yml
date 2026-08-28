@@ -1,0 +1,26 @@
+---
+# Pinned external dependencies. Bump deliberately; never float.
+# NOTE (wave owners): verify each pin still resolves with
+# `ansible-galaxy install -r requirements.yml` and adjust to the latest
+# release of the same major if a pin is unavailable.
+collections:
+  - name: community.general
+    version: "==10.7.0"
+  - name: community.crypto
+    version: "==2.26.1"
+  - name: community.docker
+    version: "==4.6.1"
+  - name: community.postgresql
+    version: "==3.14.1"
+  - name: ansible.posix
+    version: "==1.6.2"
+
+roles:
+  - name: geerlingguy.docker
+    version: "7.4.7"
+  - name: geerlingguy.postgresql
+    version: "4.0.0"
+  - name: geerlingguy.redis
+    version: "1.8.0"
+  - name: artis3n.tailscale
+    version: "v5.1.0"

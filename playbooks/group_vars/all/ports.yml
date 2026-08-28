@@ -1,0 +1,25 @@
+---
+# THE ports contract (frozen in Wave 0). Single source consumed by the
+# firewall role, prometheus scrape/file_sd templates, nginx vhosts, agent.yml,
+# and the controller manifest. Derived from the control-plane graph in
+# docs/control-plane.md — change both together or neither.
+cs_ports:
+  ssh: 22
+  docker_tls: 2376                # controller -> node dockerd (mTLS, vault-issued)
+  agent_http: 8500                # controller -> cs-agent admin API; containers -> metadata.internal
+  controller_https: 443           # portal (nginx TLS terminator)
+  controller_http: 80             # ACME HTTP-01 webroot redirects
+  controller_acme_backend: 3000   # node haproxy "acme" backend -> controller (region.acme_server)
+  metrics_prometheus: 3101        # controller MetricClient -> nginx vhost -> prometheus
+  metrics_loki: 3102              # controller LogClient + node fluentd -> nginx vhost -> loki
+  node_exporter: 9100             # metrics host -> every host
+  cadvisor: 8080                  # metrics host -> nodes
+  haproxy_stats: 81               # metrics host -> nodes; MUST equal load_balancer.stats_bind port
+  tenant_http: 80
+  tenant_https: 443
+  tenant_port_begin: 10000        # published container ports (nodes AND registry host)
+  tenant_port_end: 50000
+  dns: 53                         # tcp+udp, v4+v6, nameservers
+  pdns_api: 8081                  # controller -> primary nameserver
+  postgres: 5432                  # controller-local; ns follower -> primary replication
+  redis: 6379                     # loopback ONLY — never exposed, no auth path exists

@@ -1,0 +1,10 @@
+---
+# Auto-generates region_<name> and az_<name> groups from node host vars,
+# enabling e.g. `--limit region_exm001` with zero maintained nesting.
+plugin: ansible.builtin.constructed
+strict: false
+keyed_groups:
+  - prefix: region
+    key: region
+  - prefix: az
+    key: az
