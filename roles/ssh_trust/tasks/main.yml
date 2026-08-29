@@ -4,21 +4,30 @@
 # (docs/contracts.md control-plane rows #4 and #19). Additive
 # authorized_key entries only — never exclusive.
 
-- name: Stat the controller app pubkey (created later by Wave 3G's controller role)
+- name: Stat the controller app pubkey
   ansible.builtin.stat:
-    path: /etc/computestacks/.ssh/id_ed25519.pub
+    path: "{{ ssh_trust_app_pubkey_path }}"
   register: ssh_trust_app_pubkey_stat
   delegate_to: "{{ groups['controller'] | first }}"
   run_once: true
 
-- name: Warn when the controller app pubkey does not exist yet
-  ansible.builtin.debug:
-    msg: >-
-      /etc/computestacks/.ssh/id_ed25519.pub does not exist on the controller
-      yet (created by the controller role, Wave 3G). Only the controller's
-      root pubkey is being trusted this run — rerun ssh_trust once the app
-      key exists.
-  when: not ssh_trust_app_pubkey_stat.stat.exists
+# HARD fail, in both modes. Greenfield: site.yml runs the controller role
+# (which creates the key) before this play, so a missing key means the
+# controller converge did not do its job. Attach: a live v1 controller always
+# has one. Skipping the app key instead installs only the root key and every
+# controller-driven volume/haproxy/LB operation on this host fails later,
+# invisibly.
+- name: Assert the controller app pubkey exists
+  ansible.builtin.assert:
+    that:
+      - ssh_trust_app_pubkey_stat.stat.exists
+    fail_msg: >-
+      {{ ssh_trust_app_pubkey_path }} does not exist on
+      {{ groups['controller'] | first }}. The controller's application SSH
+      key is what drives volume management, haproxy certificate deploys and
+      LB reloads on this host. If the controller is a v1 install, flag it
+      `existing_env: true` in the inventory so ssh_trust looks in v1's
+      ssh_keys_directory; otherwise run the controller role first.
   run_once: true
 
 - name: Slurp the controller root pubkey
@@ -30,11 +39,10 @@
 
 - name: Slurp the controller app pubkey
   ansible.builtin.slurp:
-    src: /etc/computestacks/.ssh/id_ed25519.pub
+    src: "{{ ssh_trust_app_pubkey_path }}"
   register: ssh_trust_app_pubkey_raw
   delegate_to: "{{ groups['controller'] | first }}"
   run_once: true
-  when: ssh_trust_app_pubkey_stat.stat.exists
 
 - name: Trust the controller root key in root's authorized_keys
   ansible.posix.authorized_key:
@@ -48,9 +56,7 @@
     user: root
     state: present
     key: "{{ ssh_trust_app_pubkey_raw.content | b64decode }}"
-  when:
-    - "'nodes' in group_names or 'registry' in group_names"
-    - ssh_trust_app_pubkey_stat.stat.exists
+  when: "'nodes' in group_names or 'registry' in group_names"
 
 - name: Render the controller's /root/.ssh/config (greenfield only)
   ansible.builtin.template:

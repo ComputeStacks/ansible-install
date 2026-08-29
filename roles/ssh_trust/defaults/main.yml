@@ -1,0 +1,16 @@
+---
+# Path to the controller's APPLICATION ed25519 pubkey, ON THE CONTROLLER HOST.
+#
+# A v2 controller (roles/controller) keeps it under /etc/computestacks/.ssh/.
+# A v1 controller keeps it in v1's `ssh_keys_directory`
+# (v1 roles/controller/defaults/main.yml -> /var/lib/computestacks/sshkeys).
+#
+# Attach mode reaches an EXISTING v1 controller, so the path is selected from
+# the controller host's `existing_env` flag — not from the node this role
+# happens to be running against, and not from a play-level var. Getting this
+# wrong is silent: only the root key installs, and every controller-driven
+# volume/haproxy operation on the new node fails later, in production.
+ssh_trust_app_pubkey_path: >-
+  {{ '/var/lib/computestacks/sshkeys/id_ed25519.pub'
+     if (hostvars[groups['controller'] | first].existing_env | default(false) | bool)
+     else '/etc/computestacks/.ssh/id_ed25519.pub' }}
