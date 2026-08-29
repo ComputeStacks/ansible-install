@@ -1,0 +1,14 @@
+---
+- name: Restart cadvisor
+  ansible.builtin.systemd_service:
+    name: cadvisor
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: Restart fluentd
+  ansible.builtin.systemd_service:
+    name: fluentd
+    state: restarted
+    enabled: true
+    daemon_reload: true

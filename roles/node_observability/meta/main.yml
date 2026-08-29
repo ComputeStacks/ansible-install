@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: node_observability
+  author: ComputeStacks
+  description: >-
+    Node-side observability: the cadvisor and fluentd (loki output) system
+    containers under convergent systemd units, plus the container image
+    preloads the controller expects to find on a node.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

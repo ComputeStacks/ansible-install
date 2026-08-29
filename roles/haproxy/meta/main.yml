@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: haproxy
+  author: ComputeStacks
+  description: >-
+    Installs and holds distro haproxy on a node and pre-creates everything the
+    controller's runtime config push depends on (certs dir, error pages, DH
+    parameters). Never writes haproxy.cfg.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

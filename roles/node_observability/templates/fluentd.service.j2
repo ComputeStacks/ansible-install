@@ -1,0 +1,34 @@
+[Unit]
+# {{ ansible_managed }}
+Description=fluentd tenant log shipper (loki output)
+Documentation=https://github.com/grafana/loki/tree/main/clients/cmd/fluentd
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+# The image tag is baked into this unit on purpose: bumping fluentd_loki_image
+# in versions.yml re-renders the unit, which is what restarts the container.
+# Loki credentials come from an --env-file so they never appear in this
+# world-readable unit.
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_fluentd_container }} 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ node_observability_fluentd_container }} 2>/dev/null'
+ExecStart=/usr/bin/env docker run --rm --name {{ node_observability_fluentd_container }} \
+      --log-driver=none \
+      --network=host \
+      --label com.computestacks.role=system \
+      --env-file {{ node_observability_fluentd_env_file }} \
+      -v {{ node_observability_fluentd_config }}:/fluentd/etc/fluent.conf:ro \
+      {{ fluentd_loki_image }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker stop {{ node_observability_fluentd_container }} 2>/dev/null'
+Restart=always
+# Every tenant container on this node logs through here, so a crash loop backs
+# off rather than hammering docker while the whole fleet restarts at once.
+RestartSec={{ node_observability_fluentd_restart_sec }}
+SyslogIdentifier=fluentd
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=docker.service

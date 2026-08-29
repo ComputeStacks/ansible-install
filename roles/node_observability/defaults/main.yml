@@ -1,0 +1,47 @@
+---
+# Container names are a CONTRACT, not a preference: the controller's
+# prometheus alert rules carry an ignore-list matched on exactly these names
+# (v1 `container_ignore_list`), so a renamed system container starts firing
+# tenant alerts. Do not change them.
+node_observability_cadvisor_container: cadvisor
+node_observability_fluentd_container: fluentd
+
+# --- cadvisor --------------------------------------------------------------
+# cadvisor_image is pinned in playbooks/group_vars/all/versions.yml.
+node_observability_cadvisor_restart_sec: 30
+
+# --- fluentd (loki output plugin) ------------------------------------------
+# fluentd_loki_image is pinned in playbooks/group_vars/all/versions.yml.
+node_observability_fluentd_config_dir: /etc/fluentd
+node_observability_fluentd_config: "{{ node_observability_fluentd_config_dir }}/fluent.conf"
+# Credentials live here rather than in the unit file so the loki password is
+# not world-readable in /etc/systemd/system.
+node_observability_fluentd_env_file: "{{ node_observability_fluentd_config_dir }}/loki.env"
+# Node-local only: docker's fluentd log driver dials it on the loopback from
+# this same host, so it is not part of the cs_ports cross-host contract.
+node_observability_fluentd_forward_port: 9432
+# The fleet is one restart loop away from losing every tenant log line, so the
+# unit backs off rather than hammering docker.
+node_observability_fluentd_restart_sec: 30
+
+node_observability_metrics_group: metrics
+node_observability_loki_username: loguser
+node_observability_loki_password: "{{ loki_basic_auth_password }}"
+# Loki sits behind the metrics host's nginx TLS vhost. Prefer the metrics
+# domain (that is what the certificate is issued for) and fall back to the
+# metrics host's inventory primary_ip — an inventory var, never a gathered
+# fact (contracts.md rule 1). `first` is safe because tasks/main.yml asserts
+# the group is non-empty; a multi-host metrics group is not a v2 topology.
+node_observability_loki_host: >-
+  {{ cs_metrics_domain if (cs_metrics_domain | default('') | length > 0)
+     else hostvars[groups[node_observability_metrics_group] | first].primary_ip }}
+node_observability_loki_endpoint: "https://{{ node_observability_loki_host | trim }}:{{ cs_ports.metrics_loki }}"
+
+# --- image preloads --------------------------------------------------------
+# Images the controller expects to already be on a node when it schedules work
+# (backup, restore, bastion). All pinned in versions.yml.
+node_observability_preload_images:
+  - "{{ borg_image }}"
+  - "{{ bastion_image }}"
+  - "{{ xtrabackup24_image }}"
+  - "{{ xtrabackup80_image }}"

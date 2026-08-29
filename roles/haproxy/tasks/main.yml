@@ -1,0 +1,71 @@
+---
+# This role prepares the host for haproxy. It deliberately does NOT write
+# /etc/haproxy/haproxy.cfg: the CONTROLLER renders the whole file per
+# load balancer and deploys it over SSH at runtime (README.md).
+
+- name: Install haproxy
+  ansible.builtin.apt:
+    name: "{{ haproxy_package }}"
+    state: present
+    update_cache: true
+
+- name: Hold the haproxy package
+  ansible.builtin.dpkg_selections:
+    name: "{{ haproxy_package }}"
+    selection: "{{ 'hold' if (haproxy_hold_package | bool) else 'install' }}"
+
+- name: Create the certificate directory
+  ansible.builtin.file:
+    path: "{{ haproxy_certs_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create the error page directory
+  ansible.builtin.file:
+    path: "{{ haproxy_errors_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the ComputeStacks 503 error page
+  ansible.builtin.copy:
+    src: default.http
+    dest: "{{ haproxy_default_error_page }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# The distro package ships errors/<code>.http for each of these. Filling any
+# gap with the generic page (force: false — an existing file is never
+# overwritten) keeps a missing errorfile from turning a controller config push
+# into a node that cannot start haproxy at all.
+- name: Ensure every error page the controller's config references exists
+  ansible.builtin.copy:
+    src: default.http
+    dest: "{{ haproxy_errors_dir }}/{{ item }}.http"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  loop: "{{ haproxy_error_codes }}"
+
+- name: Generate the DH parameters the controller's config expects
+  community.crypto.openssl_dhparam:
+    path: "{{ haproxy_dhparam_file }}"
+    size: "{{ haproxy_dhparam_size | int }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: haproxy_manage_dhparam | bool
+
+# Enabled, not started: the distro's stock haproxy.cfg has no listener, so a
+# node that has never received a controller config push has nothing to serve.
+# The controller starts/reloads haproxy when it deploys the real config.
+- name: Enable haproxy
+  ansible.builtin.systemd_service:
+    name: "{{ haproxy_service }}"
+    enabled: true
+    daemon_reload: true

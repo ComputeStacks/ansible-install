@@ -1,0 +1,32 @@
+---
+# haproxy comes from the distro (Ubuntu 26.04 ships the 3.x LTS line). The
+# package is held so an unattended upgrade cannot swap the load balancer under
+# a live region; bump it deliberately by unholding, or by raising
+# haproxy_hold_package to false for a maintenance window.
+haproxy_package: haproxy
+haproxy_service: haproxy
+haproxy_hold_package: true
+
+haproxy_config_dir: /etc/haproxy
+# The controller writes per-tenant certificates into this directory over SSH
+# and points `crt` at it; it must exist (and be private) before the first
+# certificate is deployed.
+haproxy_certs_dir: "{{ haproxy_config_dir }}/certs"
+haproxy_errors_dir: "{{ haproxy_config_dir }}/errors"
+# The controller's generated config maps 503 to this path (and every other
+# error code to errors/<code>.http).
+haproxy_default_error_page: "{{ haproxy_config_dir }}/default.http"
+haproxy_error_codes:
+  - 400
+  - 403
+  - 408
+  - 500
+  - 502
+  - 504
+
+# The controller's config carries `ssl-dh-param-file /etc/haproxy/dhparam.pem`
+# unconditionally, and haproxy refuses to start when it is missing. Nothing
+# else creates it. 2048 bits matches the DHE ciphers the controller offers.
+haproxy_manage_dhparam: true
+haproxy_dhparam_file: "{{ haproxy_config_dir }}/dhparam.pem"
+haproxy_dhparam_size: 2048

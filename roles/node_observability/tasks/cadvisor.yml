@@ -1,0 +1,25 @@
+---
+- name: Pull the pinned cadvisor image
+  community.docker.docker_image_pull:
+    name: "{{ cadvisor_image }}"
+    pull: not_present
+  notify: Restart cadvisor
+
+# Convergent by construction: the image tag is baked into the unit, so a bump
+# in versions.yml re-renders the unit and the handler restarts the container.
+# (v1 restarted cadvisor on every single converge instead.)
+- name: Deploy the cadvisor systemd unit
+  ansible.builtin.template:
+    src: cadvisor.service.j2
+    dest: /etc/systemd/system/cadvisor.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart cadvisor
+
+- name: Enable and start cadvisor
+  ansible.builtin.systemd_service:
+    name: cadvisor
+    state: started
+    enabled: true
+    daemon_reload: true

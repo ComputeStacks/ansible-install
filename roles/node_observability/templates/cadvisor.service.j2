@@ -1,0 +1,38 @@
+[Unit]
+# {{ ansible_managed }}
+Description=cAdvisor container metrics exporter
+Documentation=https://github.com/google/cadvisor
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+# The image tag is baked into this unit on purpose: bumping cadvisor_image in
+# versions.yml re-renders the unit, which is what restarts the container.
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_cadvisor_container }} 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ node_observability_cadvisor_container }} 2>/dev/null'
+ExecStart=/usr/bin/env docker run --rm --name {{ node_observability_cadvisor_container }} \
+      --log-driver=none \
+      --network=host \
+      --privileged \
+      --label com.computestacks.role=system \
+      -v /:/rootfs:ro \
+      -v /var/run:/var/run:ro \
+      -v /sys:/sys:ro \
+      -v /var/lib/docker/:/var/lib/docker:ro \
+      -v /dev/disk/:/dev/disk:ro \
+      -v /etc/machine-id:/etc/machine-id:ro \
+      --device=/dev/kmsg \
+      {{ cadvisor_image }} \
+      -port={{ cs_ports.cadvisor }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_cadvisor_container }} 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ node_observability_cadvisor_container }} 2>/dev/null'
+Restart=always
+RestartSec={{ node_observability_cadvisor_restart_sec }}
+SyslogIdentifier=cadvisor
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=docker.service

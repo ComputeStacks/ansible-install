@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+# fluentd -> loki. Ported from v1 roles/fluentd/files/fluent.conf; the only
+# change is that the forward port comes from the role variable.
+<source>
+  @type  forward
+  @id    input1
+  @label @mainstream
+  port   {{ node_observability_fluentd_forward_port }}
+</source>
+
+<filter **>
+  @type stdout
+</filter>
+
+<label @mainstream>
+  <match **.**>
+    @type loki
+    url "#{ENV['LOKI_URL']}"
+    username "#{ENV['LOKI_USERNAME']}"
+    password "#{ENV['LOKI_PASSWORD']}"
+    remove_keys container_name, container_id, source
+    extra_labels {"job":"fluentd"}
+    flush_interval 10s
+    flush_at_shutdown true
+    buffer_chunk_limit 1m
+    <label>
+      container_name $.container_name
+    </label>
+    <label>
+      project_id $['com.computestacks.deployment_id']
+    </label>
+    <label>
+      service_id $['com.computestacks.service_id']
+    </label>
+  </match>
+</label>

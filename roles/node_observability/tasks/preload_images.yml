@@ -1,0 +1,14 @@
+---
+# v1 pulled these with the two xtrabackup task names swapped against their
+# tags ("Pull image xtrabackup 8" pulled 2.4 and vice versa). Harmless there
+# because both were pulled, but it hid which tag was actually wanted; v2 pulls
+# by the pinned variable so the tag and the intent cannot drift apart.
+#
+# `pull: not_present` keeps a converge from re-pulling a tag it already has:
+# every tag here is pinned in versions.yml, so a bump in that file is the only
+# thing that should move an image on a node.
+- name: Preload pinned container images
+  community.docker.docker_image_pull:
+    name: "{{ item }}"
+    pull: not_present
+  loop: "{{ node_observability_preload_images }}"

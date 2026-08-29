@@ -1,0 +1,30 @@
+---
+- name: Assert a metrics host is present for the loki log shipper
+  ansible.builtin.assert:
+    that:
+      - (groups[node_observability_metrics_group] | default([]) | length) > 0
+      - loki_basic_auth_password is defined and (loki_basic_auth_password | length > 0)
+    fail_msg: >-
+      node_observability needs at least one host in
+      groups['{{ node_observability_metrics_group }}'] and
+      `loki_basic_auth_password` in the vaulted secrets file — the node's
+      fluentd ships every tenant log line to that host's loki vhost.
+
+- name: Note that only one metrics host is used as the log destination
+  ansible.builtin.debug:
+    msg: >-
+      groups['{{ node_observability_metrics_group }}'] holds
+      {{ groups[node_observability_metrics_group] | length }} hosts;
+      {{ groups[node_observability_metrics_group] | first }} is used as the
+      loki endpoint. v2 assumes ONE shared metrics host — a real multi-host
+      metrics topology needs a decision about how logs are split or replicated.
+  when: (groups[node_observability_metrics_group] | length) > 1
+
+- name: Preload the container images the controller expects on a node
+  ansible.builtin.include_tasks: preload_images.yml
+
+- name: Configure cadvisor
+  ansible.builtin.include_tasks: cadvisor.yml
+
+- name: Configure fluentd
+  ansible.builtin.include_tasks: fluentd.yml
