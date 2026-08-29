@@ -87,7 +87,7 @@ validate_prometheus_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metri
 
 # --- borg -----------------------------------------------------------------
 validate_borg_ssh_user: "{{ cs_agent_backup_ssh_user | default('cstacks') }}"
-validate_borg_keyfile: /etc/computestacks/backup/.ssh/id_ed25519
+validate_borg_keyfile: "{{ cs_agent_backup_keyfile | default('/etc/computestacks/backup/.ssh/id_ed25519') }}"
 validate_borg_remote_path: "{{ backup_borg_remote_path | default(borg_binary_path) }}"
 # The client half of every backup is the cs-docker-borg image, whose borg is
 # `borg_version` (versions.yml pins the two together). A server on a different
