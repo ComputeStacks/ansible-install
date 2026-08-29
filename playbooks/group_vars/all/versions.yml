@@ -83,31 +83,34 @@ nginx_image: "nginx:1.30.4"
 # `apt-mark hold`). The hold is released before each install, so editing this
 # list still rolls through on a rerun (contracts rule 3).
 #
-# VERIFY (wave 4J, 2026-08-28): download.docker.com/linux/ubuntu publishes no
-# suite for Ubuntu 26.04 yet -- the newest is `resolute` (25.10) -- so there
-# is no apt version string that can honestly be pinned here today, and the
-# geerlingguy repo line (built from `ansible_distribution_release`) will not
-# resolve until Docker ships that suite. Until then the entries are bare
-# package names: the first converge installs whatever the repository offers
-# and the hold freezes it there. Add an exact apt version per entry to make
-# every host reproducible, e.g.
-#   - "docker-ce=5:28.5.2-1~ubuntu.26.04~<codename>"
-# (each package has its own version scheme -- containerd.io and the buildx
-# plugin do NOT share docker-ce's, so one shared version variable would be
-# wrong).
+# Verified 2026-08-28 (wave 4J), against
+# download.docker.com/linux/ubuntu/dists/: Docker DOES publish a `resolute`
+# suite, and `resolute` IS Ubuntu 26.04 (Resolute Raccoon) -- 25.10 is
+# `questing`, which the mirror carries as its own separate suite. So no
+# `docker_apt_repository` override is needed: geerlingguy.docker builds that
+# line from `ansible_distribution_release`, which is `resolute` on 26.04.
+#
+# Pinned to the newest version each package had in
+# dists/resolute/stable/binary-amd64 on 2026-08-28. Every package carries its
+# own version scheme -- containerd.io and the buildx plugin do NOT share
+# docker-ce's -- so one shared version variable would be wrong, and each
+# entry is pinned on its own. playbooks/site.yml and add-region.yml strip
+# `=<version>` before `apt-mark hold`, so pinned entries hold correctly.
 docker_apt_packages:
-  - docker-ce
-  - docker-ce-cli
-  - docker-ce-rootless-extras
-  - containerd.io
-  - docker-buildx-plugin
+  - "docker-ce=5:29.7.2-1~ubuntu.26.04~resolute"
+  - "docker-ce-cli=5:29.7.2-1~ubuntu.26.04~resolute"
+  - "docker-ce-rootless-extras=5:29.7.2-1~ubuntu.26.04~resolute"
+  - "containerd.io=2.3.4-1~ubuntu.26.04~resolute"
+  - "docker-buildx-plugin=0.36.1-1~ubuntu.26.04~resolute"
 
 # node_exporter is the distro package on every host (the plan keeps it that
 # way), installed and held by roles/node_exporter. Empty means "whatever
-# 26.04 currently ships, then held"; set an exact apt version to pin it.
-# VERIFY (wave 4J): no Ubuntu 26.04 archive is available to read a real
-# version string from yet.
-node_exporter_apt_version: ""
+# 26.04 currently ships, then held"; a value pins the apt version.
+# Verified 2026-08-28 (wave 4J): the Ubuntu 26.04 archive exists and its
+# universe component ships prometheus-node-exporter 1.10.2-1, so there is a
+# real version string to pin (contracts rule 4). The role releases the hold
+# before installing and allows a downgrade, so editing this rolls through.
+node_exporter_apt_version: "1.10.2-1"
 
 # Packages
 # Verified 2026-08-28 (wave 4J): Ubuntu 26.04 'resolute' ships PostgreSQL 18

@@ -169,12 +169,15 @@ delta.
 5. **`loki_image` and `fluentd_loki_image` stay paired at 2.9.10**, as Wave
    2D and 2E both asked. `versions.yml` carries the pairing note on both
    entries; they move together or not at all.
-6. **Two pins are deliberately empty**, with VERIFY notes in `versions.yml`:
-   the docker engine packages and `node_exporter_apt_version`. Neither
-   upstream publishes anything for Ubuntu 26.04 yet, so there is no version
-   string to pin honestly; both packages are `apt-mark hold`-ed after
-   install, which is what v1 actually relied on, and the holds are released
-   before each install so a later pin still rolls through.
+6. **The docker engine packages and `node_exporter_apt_version` are pinned**
+   like everything else (rule 4). They were left empty during the wave on the
+   belief that neither upstream published for Ubuntu 26.04; re-checked
+   2026-08-28, both do — `download.docker.com/linux/ubuntu` has a `resolute`
+   suite (`resolute` IS 26.04; 25.10 is `questing`) and the 26.04 archive
+   ships `prometheus-node-exporter`. `versions.yml` carries the exact
+   strings and the verification date. Both packages are still `apt-mark
+   hold`-ed after install, which is what v1 actually relied on, and the holds
+   are released before each install so a pin bump still rolls through.
 7. **`playbooks/vars/Ubuntu-26.yml`** supplies the platform variables
    `geerlingguy.postgresql` 4.0.0 is missing for Ubuntu 26 — its first task
    is an `include_vars` that would otherwise fail outright. `include_vars`

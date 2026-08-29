@@ -179,13 +179,17 @@ checkpoints:
 
 ## Known rough edges on Ubuntu 26.04
 
-Two upstream sources of packages had not caught up with 26.04 when this was
-written, and both fail loudly rather than silently:
+Two package sources need explaining, and both fail loudly rather than
+silently:
 
-* **Docker's apt repository** is keyed on the release codename. If
-  `download.docker.com/linux/ubuntu/dists/` has no suite for your release
-  yet, set `docker_apt_repository` in `group_vars/all/main.yml` to the newest
-  suite it does publish (there is a commented example there).
+* **Docker's apt repository** is keyed on the release codename, which
+  `geerlingguy.docker` derives from `ansible_distribution_release`. On 26.04
+  that is `resolute`, and `download.docker.com/linux/ubuntu/dists/resolute/`
+  exists, so nothing needs overriding. The `docker_apt_repository` example
+  commented in `group_vars/all/main.yml` is there only for a future release
+  Docker has not published a suite for; if you ever set it, change the pinned
+  versions in `versions.yml` with it, because those version strings name the
+  `resolute` suite.
 * **PostgreSQL is pinned at major 17 and does not come from the Ubuntu
   archive.** 26.04 ships PostgreSQL 18 and carries no `postgresql-17`, so
   `roles/postgres_repo` configures the PGDG repository
@@ -202,7 +206,7 @@ written, and both fail loudly rather than silently:
   the playbook directory, so no fork or patch is needed.
 
 The `docker_apt_packages` and `node_exporter_apt_version` entries in
-`versions.yml` are deliberately unpinned for the same reason — there is no
-real version string to pin to yet. Both packages are `apt-mark hold`-ed after
-the first install, so they cannot move on their own; add exact versions once
-the archives exist and you want every host reproducible.
+`versions.yml` both carry exact apt versions, verified against the live
+indexes on the date noted there. Both packages are also `apt-mark hold`-ed
+after install, so they cannot move on their own; the holds are released
+before each install, so bumping a pin still rolls through on a rerun.
