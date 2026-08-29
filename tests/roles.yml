@@ -1,0 +1,143 @@
+---
+# Per-role syntax harness. NOT a converge — playbooks/site.yml and
+# playbooks/add-region.yml own the real play ordering (docs/contracts.md).
+#
+#   ansible-playbook --syntax-check tests/roles.yml
+#
+# It exists for two things the two real playbooks cannot cover:
+#
+#   1. every role in isolation, so a role that no play happens to reach in a
+#      given wave still gets parsed;
+#   2. every reusable task-file entry point (`tasks_from:`), including the
+#      ones only another role includes — a change that breaks one of those
+#      would otherwise only surface at converge time.
+#
+# It replaces the eight per-wave harnesses (tests/wave1a.yml … wave4i.yml)
+# that existed while site.yml was still a skeleton.
+#
+# group_vars under playbooks/ are not auto-loaded for a playbook that lives
+# outside that directory, so the two contract files are loaded explicitly in
+# every play.
+
+- name: Every host — preflight, base system, firewall, validate
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - preflight
+    - common
+    - node_exporter
+    - tailscale
+    - ubuntu_pro
+    - firewall
+    - ssh_trust
+    - validate
+
+- name: Controller — vault, TLS terminator, portal, seeding, backfills
+  hosts: controller
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - docker_config
+    - vault
+    - acme_web
+    - controller
+    - controller_seed
+    - controller_post_enroll
+
+- name: Nodes — kernel, docker TLS, haproxy, observability, agent
+  hosts: nodes
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - node_kernel
+    - docker_config
+    - docker_tls
+    - haproxy
+    - node_observability
+    - cs_agent
+
+- name: Metrics host — prometheus, alertmanager, loki
+  hosts: metrics
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - acme_web
+    - metrics
+    - loki
+
+- name: Registry host — TLS terminator and the registry filesystem
+  hosts: registry
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - acme_web
+    - registry
+
+- name: Backup server
+  hosts: backup
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - backup_server
+
+- name: Nameservers
+  hosts: nameservers
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - powerdns
+
+# The alternate entry points. Four of these are what add-region.yml calls;
+# the two vault ones are included by docker_tls rather than by a play, so
+# nothing else parses them.
+- name: Reusable task-file entry points
+  hosts: nodes
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  tasks:
+    - name: Ensure the controller vault is unsealed
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: unseal
+
+    - name: Compute the clamped certificate TTL
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: ca_ttl
+
+    - name: Issue the node docker daemon certificate
+      ansible.builtin.include_role:
+        name: docker_tls
+        tasks_from: issue
+
+    - name: Prepare an existing controller for a new region
+      ansible.builtin.include_role:
+        name: controller
+        tasks_from: attach_prep
+
+    - name: Render a new region's prometheus file_sd fragments
+      ansible.builtin.include_role:
+        name: metrics
+        tasks_from: file_sd
+
+    - name: Append new node addresses to an existing v1 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v1_append

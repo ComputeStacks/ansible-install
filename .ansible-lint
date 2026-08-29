@@ -1,3 +1,8 @@
 profile: production
 exclude_paths:
   - workspace-plan-DO-NOT-COMMIT.md
+  # Installed dependencies, not our code: `ansible-galaxy ... -p galaxy_roles`
+  # and `-p collections` (both gitignored, both pinned in requirements.yml).
+  - galaxy_roles/
+  - collections/
+  - .ansible/
