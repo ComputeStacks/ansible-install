@@ -1,0 +1,91 @@
+---
+# Attach mode. This host was built by the v1 provisioner: it boots
+# /usr/local/bin/cs-recover_iptables (an INPUT-policy-DROP iptables script) via
+# cs-iptables.service. A new region's node cannot reach it until its addresses
+# are allowed, so we append them — with v1's OWN idempotent lineinfile idiom
+# (roles/iptables/tasks/update.yml), a blanket `-p all -s <addr> -j ACCEPT`
+# which is exactly how v1 grants a peer the whole inbound set — and then make
+# the same rules live without re-running the whole script (v1's handler runs it
+# again, which appends duplicate rules on every converge).
+#
+# Nothing here writes nftables, and nothing rewrites the script as a whole:
+# under `existing_env` the inventory is a PARTIAL view of the fleet
+# (docs/contracts.md rule 9).
+
+- name: Assert this is an attach-mode host
+  ansible.builtin.assert:
+    that:
+      - existing_env | default(false) | bool
+    fail_msg: >-
+      tasks/v1_append.yml only applies to hosts flagged 'existing_env: true'.
+      A v2-built host gets the nftables table instead (tasks/nftables.yml).
+
+- name: Collect the addresses of every node this run provisions
+  ansible.builtin.set_fact:
+    firewall_v1_addresses: >-
+      {{ (firewall_v1_addresses | default([]))
+         + ([hostvars[item].primary_ip | default(''), hostvars[item].public_ip | default('')]
+            | reject('equalto', '') | reject('search', ':') | list) }}
+  loop: "{{ groups['nodes'] | default([]) }}"
+  when: not (hostvars[item].existing_env | default(false) | bool)
+  # IPv6 node addresses are skipped deliberately: v1's script ends its
+  # ip6tables chain with a REJECT, so a v6 append would need a different
+  # insertion strategy. Nodes are reached over IPv4 in every v1 environment.
+
+- name: Check that the v1 firewall script is present
+  ansible.builtin.stat:
+    path: "{{ firewall_v1_script }}"
+  register: firewall_v1_script_stat
+
+- name: Fail when the v1 firewall script is missing
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is flagged 'existing_env: true' but
+      {{ firewall_v1_script }} does not exist, so this host's firewall is not
+      the v1 one this task file knows how to extend. Stopping rather than
+      guessing — inspect the host's firewall and report.
+  when: not firewall_v1_script_stat.stat.exists
+
+- name: Append the new node addresses to the v1 firewall script
+  ansible.builtin.lineinfile:
+    dest: "{{ firewall_v1_script }}"
+    line: "{{ firewall_iptables_bin }} -A INPUT -p all -s {{ item }} -j ACCEPT"
+    regexp: "{{ item | regex_escape }}"
+    insertafter: EOF
+  loop: "{{ firewall_v1_addresses | default([]) | unique }}"
+
+- name: Check whether each rule is already live
+  ansible.builtin.command:
+    argv:
+      - "{{ firewall_iptables_bin }}"
+      - "-C"
+      - INPUT
+      - "-p"
+      - all
+      - "-s"
+      - "{{ item }}"
+      - "-j"
+      - ACCEPT
+  loop: "{{ firewall_v1_addresses | default([]) | unique }}"
+  register: firewall_v1_live_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Apply the missing rules to the live INPUT chain
+  ansible.builtin.command:
+    argv:
+      - "{{ firewall_iptables_bin }}"
+      - "-A"
+      - INPUT
+      - "-p"
+      - all
+      - "-s"
+      - "{{ item.item }}"
+      - "-j"
+      - ACCEPT
+  loop: "{{ firewall_v1_live_check.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when: item.rc | default(0) != 0
+  changed_when: true

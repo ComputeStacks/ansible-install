@@ -1,0 +1,33 @@
+---
+# Two mutually exclusive paths:
+#   * greenfield / v2-built hosts -> our own nftables table (nftables.yml)
+#   * attach mode (existing_env)  -> additive appends to the v1 iptables
+#                                    script and to the live chain (v1_append.yml)
+# The nftables path must NEVER run on an existing_env host: it would replace a
+# working v1 INPUT policy with a table built from a PARTIAL inventory view
+# (docs/contracts.md rule 9) and lock the operator out of the fleet.
+
+- name: Reset the derived tailnet membership list
+  ansible.builtin.set_fact:
+    firewall_tailnet_hosts: []
+
+- name: Determine which hosts are intended members of the tailnet
+  ansible.builtin.set_fact:
+    firewall_tailnet_hosts: >-
+      {{ firewall_tailnet_hosts
+         + ([item] if (hostvars[item].tailscale_authkey | default('') | length > 0)
+                      and (hostvars[item].tailscale_enabled | default(true) | bool)
+            else []) }}
+  loop: "{{ groups['all'] }}"
+  # Pure inventory derivation (mirrors site.yml's gate and the cs_agent role's
+  # cs_agent_tailnet_joined) so it stays correct under --limit, where
+  # un-targeted hosts have no facts at all. Only the LENGTH of the authkey is
+  # ever evaluated, so no secret reaches the output.
+
+- name: Apply the additive v1 firewall updates (attach mode)
+  ansible.builtin.include_tasks: v1_append.yml
+  when: existing_env | default(false) | bool
+
+- name: Apply the ComputeStacks nftables table
+  ansible.builtin.include_tasks: nftables.yml
+  when: not (existing_env | default(false) | bool)

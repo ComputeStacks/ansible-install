@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: firewall
+  author: ComputeStacks
+  description: >-
+    Host firewall for every ComputeStacks host: one role-owned nftables table
+    (inet cs_static) applied by a role-owned oneshot unit, derived from
+    cs_ports and inventory group membership. Never flushes the ruleset and
+    never creates a forward-hook chain.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

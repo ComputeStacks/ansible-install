@@ -1,0 +1,92 @@
+---
+# Host firewall. Owns exactly ONE nftables table (`inet cs_static`), applied by
+# a role-owned oneshot unit. It NEVER flushes the ruleset and NEVER creates a
+# forward-hook chain — docs/contracts.md rule 7. See README.md.
+
+firewall_table: cs_static
+firewall_config_dir: /etc/nftables.d
+firewall_config_file: "{{ firewall_config_dir }}/cs-static.nft"
+firewall_service: cs-firewall.service
+firewall_unit_file: "/etc/systemd/system/{{ firewall_service }}"
+firewall_nft_bin: /usr/sbin/nft
+# `nft --check --file` the rendered table before installing it. Set false only
+# if a host's nft build chokes on the add/delete/redefine idiom.
+firewall_validate_config: true
+
+# Role-owned modules-load fragment (docs/contracts.md ownership map — the
+# node_kernel role owns cs-node.conf, this role owns cs-firewall.conf).
+#   nf_tables    — our own table
+#   nf_conntrack — ct state matching (also sized by node_kernel)
+#   xt_physdev   — cs-agent's DOCKER-USER isolation rule 1 matches
+#                  `-m physdev --physdev-is-bridged`
+firewall_modules_file: /etc/modules-load.d/cs-firewall.conf
+firewall_modules:
+  - nf_tables
+  - nf_conntrack
+  - xt_physdev
+
+# The distro nftables.service starts with `flush ruleset`, which would destroy
+# docker's iptables-nft tables and the agent's `cs_agent` table on every boot.
+# We disable it and ship our own unit instead.
+firewall_disable_distro_service: true
+
+# Tailscale. Membership is derived from inventory (see README §tailscale), the
+# tailnet ADDRESS is never needed here — tailnet traffic is matched by
+# interface, so this role reads no facts at all.
+firewall_tailscale_interface: tailscale0
+firewall_tailscale_v4_range: 100.64.0.0/10
+firewall_tailscale_v6_range: fd7a:115c:a1e0::/48
+# WireGuard peer port. Deliberately NOT in cs_ports: ports.yml is the
+# control-plane graph (who dials whom on the ComputeStacks control plane) and
+# this is peer-to-peer tailnet traffic, not a control-plane hop. Opening it
+# lets peers establish direct connections instead of relaying via DERP.
+firewall_tailscale_udp_port: 41641
+
+# Interfaces on which this host's OWN containers appear. Tenant containers
+# reach the agent through `metadata.internal` -> primary_ip, which arrives on
+# the project bridge (br-*); the metrics host scrapes its own node_exporter
+# from a container on the `ops` bridge.
+firewall_container_interfaces:
+  - "br-*"
+  - "docker0"
+# Ports accepted from those interfaces, per group membership.
+firewall_container_ports: >-
+  {{ ([cs_ports.agent_http] if 'nodes' in group_names else [])
+     + ([cs_ports.node_exporter] if 'metrics' in group_names else []) }}
+
+# Empty list = ssh accepted from anywhere (the default; every host is reached
+# over ssh by the operator, and nodes/registry are reached by the controller).
+# Set to a list of CIDRs/addresses to restrict it.
+firewall_allow_ssh_from: []
+
+# Escape hatches (v1 parity: extra_allowed_ipv4_addresses / _ipv6_addresses).
+firewall_extra_allowed_ipv4: []
+firewall_extra_allowed_ipv6: []
+# Raw nft statements appended verbatim to the end of the input chain.
+firewall_extra_input_rules: []
+
+# Rate-limited log of everything the policy is about to drop. Off by default.
+firewall_log_dropped: false
+
+firewall_icmp_types:
+  - echo-request
+  - echo-reply
+  - destination-unreachable
+  - time-exceeded
+  - parameter-problem
+firewall_icmpv6_types:
+  - echo-request
+  - echo-reply
+  - destination-unreachable
+  - packet-too-big
+  - time-exceeded
+  - parameter-problem
+  - nd-router-solicit
+  - nd-router-advert
+  - nd-neighbor-solicit
+  - nd-neighbor-advert
+
+# --- attach mode (existing_env hosts) --------------------------------------
+# v1's boot script. tasks/v1_append.yml appends to it with v1's own idiom.
+firewall_v1_script: /usr/local/bin/cs-recover_iptables
+firewall_iptables_bin: iptables

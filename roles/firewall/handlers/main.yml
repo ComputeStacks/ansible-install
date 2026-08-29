@@ -1,0 +1,11 @@
+---
+- name: Reload systemd for the ComputeStacks firewall
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Apply the ComputeStacks firewall
+  # Re-runs ExecStart (`nft -f`). The unit has no ExecStop, so a restart never
+  # leaves the host without a table for even an instant.
+  ansible.builtin.systemd_service:
+    name: "{{ firewall_service }}"
+    state: restarted

@@ -1,0 +1,160 @@
+#!/usr/sbin/nft -f
+#
+# {{ ansible_managed }}
+#
+# ComputeStacks static host firewall. This file defines EXACTLY ONE table,
+# `inet {{ firewall_table }}`, and touches nothing else in the ruleset:
+#
+#   * NO `flush ruleset` — it would destroy docker's iptables-nft tables (dead
+#     container networking until dockerd restarts) and the agent's `cs_agent`
+#     DNAT table (every published tenant port closed).
+#   * NO forward-hook chain — a drop there would kill the agent's DNAT path to
+#     tenant containers. Cross-project isolation lives in the agent's
+#     DOCKER-USER rules, not here.
+#
+# The add / delete / redefine sequence below is the atomic-replace idiom: the
+# bare `table` line creates the table if it is absent so the `delete` can never
+# fail, and the full definition that follows replaces it in one transaction.
+#
+# Every port comes from playbooks/group_vars/all/ports.yml (cs_ports) and every
+# address from inventory vars — never from gathered facts, so a `--limit` run
+# still renders the whole picture (docs/contracts.md rules 1 and 5).
+{% set ports = cs_ports %}
+{% set tailnet_self = inventory_hostname in (firewall_tailnet_hosts | default([])) %}
+{% macro peer_addresses(host) %}{{ [hostvars[host].primary_ip | default(''), hostvars[host].public_ip | default('')] | reject('equalto', '') | unique | join(' ') }}{% endmacro %}
+{% macro accept_from(hosts, rule) %}
+{% for host in hosts | sort %}
+{% for address in peer_addresses(host).split() %}
+        {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} {{ rule }}    comment "{{ host }}"
+{% endfor %}
+{% endfor %}
+{% if tailnet_self and (hosts | select('in', firewall_tailnet_hosts | default([])) | list | length) > 0 %}
+        iifname "{{ firewall_tailscale_interface }}" {{ rule }}    comment "over the tailnet"
+{% endif %}
+{% endmacro %}
+
+table inet {{ firewall_table }}
+delete table inet {{ firewall_table }}
+
+table inet {{ firewall_table }} {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iifname "lo" accept
+{% if tailnet_self %}
+
+        # Anti-spoof: tailnet addresses are only ever legitimate on the tailnet
+        # interface. Placed ahead of every accept below.
+        ip saddr {{ firewall_tailscale_v4_range }} iifname != "{{ firewall_tailscale_interface }}" drop
+        ip6 saddr {{ firewall_tailscale_v6_range }} iifname != "{{ firewall_tailscale_interface }}" drop
+{% endif %}
+
+        ct state established,related accept
+        ct state invalid drop
+
+        meta l4proto icmp icmp type { {{ firewall_icmp_types | join(', ') }} } accept
+        meta l4proto ipv6-icmp icmpv6 type { {{ firewall_icmpv6_types | join(', ') }} } accept
+        # DHCPv6 / SLAAC client replies.
+        ip6 daddr fe80::/64 udp dport 546 accept
+
+        # --- every host --------------------------------------------------
+{% if firewall_allow_ssh_from | length > 0 %}
+{% for address in firewall_allow_ssh_from %}
+        {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} tcp dport {{ ports.ssh }} accept    comment "ssh"
+{% endfor %}
+{% else %}
+        tcp dport {{ ports.ssh }} accept    comment "ssh"
+{% endif %}
+{% if tailnet_self %}
+        udp dport {{ firewall_tailscale_udp_port }} accept    comment "tailscale direct peer connections"
+{% endif %}
+{% if groups['metrics'] | default([]) | length > 0 %}
+        # prometheus -> node_exporter (every host runs one).
+{{ accept_from(groups['metrics'], 'tcp dport ' ~ ports.node_exporter ~ ' accept') }}
+{% endif %}
+{% for interface in firewall_container_interfaces %}
+{% for port in firewall_container_ports %}
+        iifname "{{ interface }}" tcp dport {{ port }} accept    comment "this host's own containers"
+{% endfor %}
+{% endfor %}
+{% if 'nodes' in group_names %}
+
+        # --- node --------------------------------------------------------
+        # Tenant ingress (haproxy + published container ports). Published ports
+        # that the agent DNATs traverse forward, not input; these accepts cover
+        # the host-bound half (haproxy, docker-proxy, host-network containers).
+        tcp dport { {{ ports.tenant_http }}, {{ ports.tenant_https }} } accept    comment "tenant ingress"
+        tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published tenant ports"
+        udp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published tenant ports"
+
+        # controller -> dockerd (mTLS).
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.docker_tls ~ ' accept') }}
+        # controller -> cs-agent admin API. NEVER public: the admin Bearer is
+        # sent in cleartext over this port.
+{% if tailnet_self and (groups['controller'] | default([]) | select('in', firewall_tailnet_hosts | default([])) | list | length) > 0 %}
+        # Both this node and the controller are on the tailnet, so the
+        # controller dials the tailnet address (manifest node.agent_host) and
+        # nothing off-tailnet may reach the port.
+        iifname "{{ firewall_tailscale_interface }}" tcp dport {{ ports.agent_http }} accept    comment "controller over the tailnet"
+{% else %}
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.agent_http ~ ' accept') }}
+{% endif %}
+        # prometheus -> cadvisor and haproxy stats.
+{{ accept_from(groups['metrics'] | default([]), 'tcp dport { ' ~ ports.cadvisor ~ ', ' ~ ports.haproxy_stats ~ ' } accept') }}
+{% endif %}
+{% if 'controller' in group_names %}
+
+        # --- controller --------------------------------------------------
+        tcp dport { {{ ports.controller_http }}, {{ ports.controller_https }} } accept    comment "portal + ACME HTTP-01"
+        # node haproxy -> controller ACME backend (region.acme_server).
+{{ accept_from(groups['nodes'] | default([]), 'tcp dport ' ~ ports.controller_acme_backend ~ ' accept') }}
+{% endif %}
+{% if 'metrics' in group_names %}
+
+        # --- metrics -----------------------------------------------------
+        # controller MetricClient -> prometheus vhost.
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.metrics_prometheus ~ ' accept') }}
+        # controller LogClient and node fluentd -> loki vhost.
+{{ accept_from((groups['controller'] | default([])) + (groups['nodes'] | default([])), 'tcp dport ' ~ ports.metrics_loki ~ ' accept') }}
+{% endif %}
+{% if 'registry' in group_names %}
+
+        # --- registry ----------------------------------------------------
+        # ssh from the controller (DockerSSH) rides the global ssh accept above.
+        tcp dport {{ ports.tenant_https }} accept    comment "tenant registries"
+        tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published registry ports"
+{% endif %}
+{% if 'nameservers' in group_names %}
+
+        # --- nameserver --------------------------------------------------
+        tcp dport {{ ports.dns }} accept    comment "authoritative dns"
+        udp dport {{ ports.dns }} accept    comment "authoritative dns"
+        # controller -> pdns api.
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.pdns_api ~ ' accept') }}
+        # pdns database replication between nameservers.
+{{ accept_from(groups['nameservers'] | default([]) | reject('equalto', inventory_hostname) | list, 'tcp dport ' ~ ports.postgres ~ ' accept') }}
+{% endif %}
+{% if 'backup' in group_names %}
+
+        # --- backup ------------------------------------------------------
+        # Nodes reach borg over ssh only, which the global ssh accept covers.
+{% endif %}
+{% if firewall_extra_allowed_ipv4 | length > 0 or firewall_extra_allowed_ipv6 | length > 0 or firewall_extra_input_rules | length > 0 %}
+
+        # --- operator additions ------------------------------------------
+{% for address in firewall_extra_allowed_ipv4 %}
+        ip saddr {{ address }} accept
+{% endfor %}
+{% for address in firewall_extra_allowed_ipv6 %}
+        ip6 saddr {{ address }} accept
+{% endfor %}
+{% for rule in firewall_extra_input_rules %}
+        {{ rule }}
+{% endfor %}
+{% endif %}
+{% if firewall_log_dropped | bool %}
+
+        limit rate 5/minute burst 10 packets log prefix "{{ firewall_table }} drop: " level info
+{% endif %}
+    }
+}

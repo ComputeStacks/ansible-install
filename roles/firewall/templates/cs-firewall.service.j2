@@ -1,0 +1,21 @@
+[Unit]
+# {{ ansible_managed }}
+Description=ComputeStacks host firewall (nftables table inet {{ firewall_table }})
+Documentation=file://{{ firewall_config_file }}
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+After=systemd-modules-load.service
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ firewall_nft_bin }} -f {{ firewall_config_file }}
+ExecReload={{ firewall_nft_bin }} -f {{ firewall_config_file }}
+# Deliberately NO ExecStop. Tearing our table down on stop/shutdown would leave
+# the host wide open, and `nft flush ruleset` here would destroy docker's and
+# cs-agent's tables (docs/contracts.md rule 7).
+
+[Install]
+WantedBy=sysinit.target

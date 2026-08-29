@@ -1,0 +1,84 @@
+---
+# The v2 path: one role-owned table, one role-owned unit. Nothing here touches
+# /etc/nftables.conf, the distro nftables.service, docker's tables, or the
+# agent's `cs_agent` table.
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+
+- name: Load the firewall kernel modules on boot
+  ansible.builtin.copy:
+    dest: "{{ firewall_modules_file }}"
+    content: |
+      # {{ firewall_modules_file | basename }} — owned by the firewall role.
+      # nf_tables: our table. nf_conntrack: ct state matching.
+      # xt_physdev: cs-agent's DOCKER-USER isolation rule matches
+      # '-m physdev --physdev-is-bridged'.
+      {% for module in firewall_modules %}
+      {{ module }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load the firewall kernel modules now
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ firewall_modules }}"
+
+- name: Disable the distro nftables.service unit file check
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/nftables.service
+  register: firewall_distro_unit
+  when: firewall_disable_distro_service | bool
+
+- name: Disable the distro nftables.service
+  # Its ruleset starts with `flush ruleset`, which would wipe docker's
+  # iptables-nft tables (dead container networking until dockerd restarts) and
+  # the agent's `cs_agent` DNAT table (every published tenant port closed).
+  ansible.builtin.systemd_service:
+    name: nftables.service
+    enabled: false
+    state: stopped
+  when:
+    - firewall_disable_distro_service | bool
+    - firewall_distro_unit.stat.exists | default(false)
+
+- name: Ensure the nftables include directory exists
+  ansible.builtin.file:
+    path: "{{ firewall_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the ComputeStacks nftables table
+  ansible.builtin.template:
+    src: cs-static.nft.j2
+    dest: "{{ firewall_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "{{ (firewall_nft_bin ~ ' --check --file %s') if (firewall_validate_config | bool) else omit }}"
+  notify: Apply the ComputeStacks firewall
+
+- name: Install the ComputeStacks firewall unit
+  ansible.builtin.template:
+    src: cs-firewall.service.j2
+    dest: "{{ firewall_unit_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd for the ComputeStacks firewall
+    - Apply the ComputeStacks firewall
+
+- name: Enable and start the ComputeStacks firewall
+  ansible.builtin.systemd_service:
+    name: "{{ firewall_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
