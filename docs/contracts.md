@@ -86,7 +86,10 @@ tagged task and note it in its report.
 ### Facts exception (blessed): tailscale_ip
 The ONE sanctioned use of non-inventory data in cross-host templates:
 `hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`
-(both defaults mandatory). The tailscale role owns the `tailscale_ip` key in
+(both defaults mandatory). The middle term requires the repo's persistent
+fact cache (`ansible.cfg`: `fact_caching`, `.ansible_facts_cache/`); a fresh
+clone must converge each host once before a `--limit`ed render can see that
+host's tailnet address. The tailscale role owns the `tailscale_ip` key in
 `/etc/ansible/facts.d/computestacks.fact` and MERGES into that file, never
 overwrites. Tailnet MEMBERSHIP remains a pure-inventory predicate — only the
 address VALUE uses this exception. The membership predicate has exactly ONE

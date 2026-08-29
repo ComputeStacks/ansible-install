@@ -86,8 +86,17 @@ file_sd — it is undefined for every node. Without the middle term, every
 tailnet scrape target would silently rewrite to an unroutable `primary_ip`
 and the whole fleet's metrics would go stale. The middle term reads the
 value the `tailscale` role persisted into
-`/etc/ansible/facts.d/computestacks.fact`, which survives across runs and
-`--limit` scopes.
+`/etc/ansible/facts.d/computestacks.fact`.
+
+That value reaches a `--limit`ed run only through the repo's persistent fact
+cache (`ansible.cfg`: `fact_caching = ansible.builtin.jsonfile`,
+`.ansible_facts_cache/`, never expiring). A host outside the `--limit` is not
+contacted, so its `ansible_local` comes from the cache or from nowhere.
+**Guard: the first-ever run from a fresh operator clone must be un-limited.**
+The cache is gitignored, so a fresh clone starts empty; a `--limit metrics`
+render before any full converge sees no `ansible_local` for any node and
+rewrites every tailnet scrape target to `primary_ip`. One un-limited
+`site.yml` populates the cache, and every `--limit` after that is safe.
 
 Membership stays a pure-inventory predicate — only the address value uses
 the facts exception. A remote region with tailscale disabled is scraped over

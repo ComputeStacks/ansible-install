@@ -84,6 +84,12 @@ The address value uses the blessed facts exception
 (`hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`);
 tailnet *membership* stays a pure inventory predicate.
 
+The `ansible_local` half reaches hosts outside a `--limit` only through the
+repo's persistent fact cache (`ansible.cfg`, `.ansible_facts_cache/`), which
+is gitignored. **Guard: the first-ever run from a fresh operator clone must be
+un-limited** — otherwise the manifest is seeded with the `primary_ip` fallback
+for every un-targeted tailnet node, and the role's warning is the only signal.
+
 ### `nodes[].agent_host` — only when the controller is on the tailnet
 
 `agent_host` overrides the address the **controller** dials cs-agent on, so it

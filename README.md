@@ -87,6 +87,15 @@ makes `--limit` safe: a partial run still renders the full picture, instead of
 quietly dropping the regions it did not target out of the prometheus
 configuration or the firewall.
 
+The one sanctioned exception is a node's **tailscale address**, which cannot be
+an inventory var because tailscale assigns it (docs/contracts.md §Facts
+exception). It is read from a fact the `tailscale` role persists on each host,
+and hosts outside a `--limit` supply it from the on-disk fact cache
+(`.ansible_facts_cache/`, gitignored). So from a **fresh clone the first run
+must be un-limited** — the cache is empty, and a `--limit`ed first run renders
+every un-targeted tailnet node as if it had no tailnet address. After one full
+converge, `--limit` is safe again.
+
 ### Secrets
 
 ```bash
@@ -157,7 +166,9 @@ list, what each failure means, and how to skip one.
 ## Adding a region
 
 For a v2 environment, add the node to the same inventory and re-run
-`site.yml` — optionally `--limit` scoped, which is safe by construction.
+`site.yml` — optionally `--limit` scoped, which is safe once the fact cache
+has been populated by one un-limited run (see "Templates read inventory vars
+only", above).
 
 For an environment built by the **v1** playbooks, use attach mode:
 
