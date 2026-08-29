@@ -38,13 +38,14 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region validate lint check
+.PHONY: help deps site add-region validate add-region-validate lint check
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
 	@echo "site ENV=<name>                   greenfield converge (playbooks/site.yml)"
 	@echo "add-region ENV=<name>             attach a region to an existing environment"
 	@echo "validate ENV=<name>               re-run the post-install checks only"
+	@echo "add-region-validate ENV=<name>    the same, for an attached region (add-region.yml)"
 	@echo "lint                              ansible-lint, production profile"
 	@echo "check                             syntax-check both playbooks and the role harness"
 	@echo ""
@@ -71,6 +72,14 @@ add-region:
 validate:
 	$(require_env)
 	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) --tags validate playbooks/site.yml
+
+# The attach-mode equivalent. site.yml is the wrong entry point for an
+# attached region: its validate play covers hosts this repository did not
+# build, while add-region.yml scopes the checks to the controller and the new
+# node (docs/attach-mode.md).
+add-region-validate:
+	$(require_env)
+	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) --tags validate playbooks/add-region.yml
 
 lint:
 	$(ANSIBLE_LINT)

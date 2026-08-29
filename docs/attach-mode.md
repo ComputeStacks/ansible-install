@@ -151,7 +151,9 @@ actually has.
 
 `validate` runs against the controller and the new node only — the existing
 metrics and backup hosts were not built by these playbooks and their unit set
-is not this repository's to assert. Two of its checks matter most here:
+is not this repository's to assert. To re-run just the checks later, use
+`add-region.yml --tags validate` (`make add-region-validate ENV=<name>`), not
+`site.yml`. Two of its checks matter most here:
 
 * **borg version parity.** The client half of every backup is the
   `cs-docker-borg` image; the server half is whatever borg the existing
