@@ -1,0 +1,39 @@
+---
+docker_tls_bin: /usr/bin/dockerd
+docker_tls_config_dir: /etc/docker
+docker_tls_certs_dir: "{{ docker_tls_config_dir }}/certs"
+docker_tls_ca_file: "{{ docker_tls_certs_dir }}/ca.crt"
+docker_tls_cert_file: "{{ docker_tls_certs_dir }}/server.crt"
+docker_tls_key_file: "{{ docker_tls_certs_dir }}/server.key"
+docker_tls_dropin_dir: /etc/systemd/system/docker.service.d
+# v1 used this exact filename; keeping it means a host can never end up with
+# two drop-ins setting a conflicting ExecStart.
+docker_tls_dropin_file: startup.conf
+
+# Inventory vars ONLY (contracts.md rule 1) -- never gathered facts: a
+# --limit'ed run must produce the same certificate as a full run.
+docker_tls_listen_ip: "{{ primary_ip }}"
+docker_tls_common_name: "{{ hostname }}"
+docker_tls_alt_names:
+  - localhost
+  - "{{ hostname }}"
+docker_tls_ip_sans:
+  - "127.0.0.1"
+  - "{{ primary_ip }}"
+
+# v1 node hardening flags, unchanged. --icc=false isolates containers on the
+# default bridge; --userland-proxy=false keeps published ports on the DNAT
+# path (node_kernel raises the conntrack limits this implies).
+docker_tls_daemon_flags:
+  - "--icc=false"
+  - "--userland-proxy=false"
+
+# Re-issue when the certificate is this close to notAfter, or when the SAN set
+# no longer matches the inventory. Never otherwise -- v2 does not rotate
+# healthy certificates.
+docker_tls_renew_days: 30
+
+# v1 created this user (uid 1001). Nothing enables userns-remap, in v1 or in
+# v2, so it is vestigial; kept for parity and switchable. See README.
+docker_tls_create_dockremap_user: true
+docker_tls_dockremap_uid: 1001

@@ -1,0 +1,9 @@
+{{ ansible_managed | comment }}
+# Owner: roles/docker_tls (Wave 1B).
+# Daemon options that are SIGHUP-reloadable (live-restore, shutdown-timeout,
+# registry-mirrors) belong in /etc/docker/daemon.json (roles/docker_config) --
+# docker refuses to start when an option is set in both places.
+[Service]
+ExecStart=
+ExecStart={{ docker_tls_bin }} -H unix:// -H tcp://{{ docker_tls_listen_ip }}:{{ cs_ports.docker_tls }} {{ docker_tls_daemon_flags | join(' ') }} --tlsverify --tlscacert={{ docker_tls_ca_file }} --tlscert={{ docker_tls_cert_file }} --tlskey={{ docker_tls_key_file }}
+TasksMax=infinity

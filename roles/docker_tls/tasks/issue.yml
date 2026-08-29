@@ -1,0 +1,106 @@
+---
+# Issue (or re-issue) this node's docker daemon certificate from the
+# controller's vault. Reusable on its own -- add-region.yml / any attach-mode
+# play can pull just this half:
+#
+#   - name: Issue the node docker daemon certificate
+#     ansible.builtin.include_role:
+#       name: docker_tls
+#       tasks_from: issue
+#
+# It unseals the (possibly existing, possibly rebooted) controller's vault
+# first, so it is safe against a v1 controller whose vault has been sealed
+# since its last reboot.
+- name: Ensure the docker certificate directory exists
+  ansible.builtin.file:
+    path: "{{ docker_tls_certs_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Check for an existing docker daemon certificate
+  ansible.builtin.stat:
+    path: "{{ docker_tls_cert_file }}"
+  register: docker_tls_cert_stat
+
+- name: Read the existing docker daemon certificate
+  ansible.builtin.slurp:
+    src: "{{ docker_tls_cert_file }}"
+  register: docker_tls_cert_pem
+  when: docker_tls_cert_stat.stat.exists
+
+- name: Inspect the existing docker daemon certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ docker_tls_cert_pem.content | b64decode }}"
+  delegate_to: localhost
+  become: false
+  register: docker_tls_cert_info
+  when: docker_tls_cert_stat.stat.exists
+
+- name: Build the desired SAN set
+  ansible.builtin.set_fact:
+    docker_tls_desired_sans: >-
+      {{ (([docker_tls_common_name] + docker_tls_alt_names) | unique | map('regex_replace', '^', 'DNS:') | list)
+         + (docker_tls_ip_sans | unique | map('regex_replace', '^', 'IP:') | list) }}
+
+- name: Decide whether the docker daemon certificate must be issued
+  ansible.builtin.set_fact:
+    docker_tls_issue_required: >-
+      {{ not docker_tls_cert_stat.stat.exists
+         or ((docker_tls_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ') - now(true)).total_seconds()
+             < (docker_tls_renew_days | int * 86400))
+         or ((docker_tls_cert_info.subject_alt_name | default([], true) | sort) != (docker_tls_desired_sans | sort)) }}
+
+- name: Issue the docker daemon certificate
+  when: docker_tls_issue_required | bool
+  block:
+    - name: Ensure the controller vault is unsealed
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: unseal
+
+    - name: Compute the clamped certificate TTL
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: ca_ttl
+
+    - name: Request a server certificate from vault
+      ansible.builtin.command: >-
+        {{ vault_command }} write -format=json
+        {{ vault_pki_docker_path }}/issue/server
+        common_name={{ docker_tls_common_name | quote }}
+        alt_names={{ docker_tls_alt_names | unique | join(',') | quote }}
+        ip_sans={{ docker_tls_ip_sans | unique | join(',') | quote }}
+        ttl={{ vault_effective_cert_ttl_hours | int }}h
+      delegate_to: "{{ vault_host }}"
+      register: docker_tls_issue
+      changed_when: true
+      no_log: true
+
+    - name: Parse the issued server certificate
+      ansible.builtin.set_fact:
+        docker_tls_issued: "{{ docker_tls_issue.stdout | from_json }}"
+      no_log: true
+
+    - name: Write the docker daemon certificate files
+      ansible.builtin.copy:
+        content: "{{ item.content }}\n"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - dest: "{{ docker_tls_cert_file }}"
+          content: "{{ docker_tls_issued.data.certificate }}"
+          mode: "0640"
+        - dest: "{{ docker_tls_ca_file }}"
+          content: "{{ docker_tls_issued.data.issuing_ca }}"
+          mode: "0640"
+        - dest: "{{ docker_tls_key_file }}"
+          content: "{{ docker_tls_issued.data.private_key }}"
+          mode: "0600"
+      loop_control:
+        label: "{{ item.dest }}"
+      no_log: true
+      notify: Restart docker

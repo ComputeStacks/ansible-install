@@ -1,0 +1,46 @@
+---
+# Wave 1B syntax-check harness. NOT a converge — site.yml owns the real play
+# ordering (docs/contracts.md). Run:
+#
+#   ansible-playbook --syntax-check tests/wave1b.yml
+#
+# group_vars under playbooks/ are not auto-loaded for a playbook that lives
+# outside that directory, so the two contract files are loaded explicitly.
+- name: Controller vault and docker daemon configuration
+  hosts: controller
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - docker_config
+    - vault
+
+- name: Node docker daemon configuration and vault-issued TLS
+  hosts: nodes
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - docker_config
+    - docker_tls
+
+# Attach mode reuses the issuance half on its own; kept here so a change that
+# breaks the tasks_from entry points fails the syntax check.
+- name: Attach-mode entry points
+  hosts: nodes
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  tasks:
+    - name: Ensure the existing controller vault is unsealed
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: unseal
+
+    - name: Issue the node docker daemon certificate from the existing vault
+      ansible.builtin.include_role:
+        name: docker_tls
+        tasks_from: issue

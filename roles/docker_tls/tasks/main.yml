@@ -1,0 +1,36 @@
+---
+- name: Assert the inventory vars required for the node docker certificate are set
+  ansible.builtin.assert:
+    that:
+      - hostname is defined and hostname | length > 0
+      - primary_ip is defined and primary_ip | length > 0
+    fail_msg: "docker_tls requires the inventory vars `hostname` and `primary_ip` on every node."
+
+- name: Issue the node docker daemon certificate
+  ansible.builtin.include_tasks: issue.yml
+
+- name: Create the dockremap user
+  ansible.builtin.user:
+    name: dockremap
+    uid: "{{ docker_tls_dockremap_uid | int }}"
+    shell: /bin/false
+    create_home: false
+    system: true
+  when: docker_tls_create_dockremap_user | bool
+
+- name: Ensure the docker systemd drop-in directory exists
+  ansible.builtin.file:
+    path: "{{ docker_tls_dropin_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the docker TLS systemd drop-in
+  ansible.builtin.template:
+    src: docker-tls.conf.j2
+    dest: "{{ docker_tls_dropin_dir }}/{{ docker_tls_dropin_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
