@@ -132,6 +132,9 @@ table inet {{ firewall_table }} {
 {% if 'metrics' in group_names %}
 
         # --- metrics -----------------------------------------------------
+        # ACME HTTP-01 webroot (acme_web runs here too). No 443: this host's
+        # TLS vhosts are the prometheus/loki ports below, not the default port.
+        tcp dport {{ ports.controller_http }} accept    comment "acme http-01"
         # controller MetricClient -> prometheus vhost.
 {{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.metrics_prometheus ~ ' accept') }}
         # controller LogClient and node fluentd -> loki vhost.
@@ -141,6 +144,7 @@ table inet {{ firewall_table }} {
 
         # --- registry ----------------------------------------------------
         # ssh from the controller (DockerSSH) rides the global ssh accept above.
+        tcp dport {{ ports.controller_http }} accept    comment "acme http-01"
         tcp dport {{ ports.tenant_https }} accept    comment "tenant registries"
         tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published registry ports"
 {% endif %}

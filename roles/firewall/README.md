@@ -92,6 +92,7 @@ tailnet members — see [pairwise accepts](#pairwise-accepts-address-path-and-ta
 
 | Port | Proto | Source | Row |
 |---|---|---|---|
+| `controller_http` (80) | tcp | anywhere — ACME HTTP-01 webroot (`acme_web` runs here; no 443, its TLS vhosts are 3101/3102) | — |
 | `metrics_prometheus` (3101) | tcp | controller addresses | 10 |
 | `metrics_loki` (3102) | tcp | controller addresses + every node address | 10, 14 |
 | `node_exporter` (9100) | tcp | metrics addresses (itself) **and** its own container bridges — prometheus scrapes the host exporter from a container on the `ops` network | 9 |
@@ -100,6 +101,7 @@ tailnet members — see [pairwise accepts](#pairwise-accepts-address-path-and-ta
 
 | Port | Proto | Source | Row |
 |---|---|---|---|
+| `controller_http` (80) | tcp | anywhere — ACME HTTP-01 webroot (`acme_web` runs here) | — |
 | `tenant_https` (443) | tcp | anywhere | 18 |
 | `tenant_port_begin`–`tenant_port_end` | tcp | anywhere | 18 |
 | `ssh` (22) | tcp | covered by the global ssh accept (controller `DockerSSH`) | 19 |
