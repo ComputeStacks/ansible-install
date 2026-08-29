@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: controller
+  author: ComputeStacks
+  description: >-
+    ComputeStacks controller host: the cstacks CLI, /etc/default/computestacks,
+    the portal container, the application ssh keypair and the self-signed
+    tenant wildcard certificate.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

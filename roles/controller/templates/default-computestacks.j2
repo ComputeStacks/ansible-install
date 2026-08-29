@@ -1,0 +1,62 @@
+{{ ansible_managed | comment }}
+#
+# ComputeStacks controller environment. Sourced by /usr/local/bin/cstacks and
+# handed to the portal container.
+#
+# SECRET_KEY_BASE and USER_AUTH_SECRET are IMMUTABLE INSTALL INPUTS. They come
+# from the vaulted secrets file and are never generated here. Changing
+# SECRET_KEY_BASE silently destroys every encrypted credential in the database
+# (agent tokens, DNS API keys, load balancer certificates) — treat a rotation
+# as a full reinstall.
+#
+# This file is rendered whole ONLY on a greenfield controller. On an existing
+# environment (existing_env: true) it is append-only; see
+# roles/controller/tasks/attach_prep.yml.
+
+# --- paths ----------------------------------------------------------------
+CS_APP_ID={{ controller_app_id }}
+CS_CERT_PATH={{ controller_certificates_dir }}
+CS_SSH_KEYS_PATH={{ controller_ssh_key_dir }}
+CS_BRANDING_PATH={{ controller_branding_dir }}
+CS_PROXY_IPS_PATH={{ controller_proxy_ips_dir }}
+CS_STATE_PATH={{ controller_data_dir }}
+DB_BACKUPS_PATH={{ controller_backups_dir }}
+
+# --- application ----------------------------------------------------------
+CS_LOCALE={{ controller_locale }}
+CS_CURRENCY={{ controller_currency }}
+CS_DB_NAME={{ controller_postgres_database }}
+CS_CONTAINER_NAME={{ controller_container_name }}
+
+SECRET_KEY_BASE={{ secret_key_base }}
+USER_AUTH_SECRET={{ user_auth_secret }}
+# Shared bearer for POST /api/system/agent_tokens — the cs-agent enrollment
+# endpoint (controller repo config/routes/api/system.rb).
+NODE_ENROLLMENT_TOKEN={{ node_enrollment_token }}
+
+DATABASE_URL=postgresql://{{ controller_postgres_user }}:{{ postgres_password }}@{{ controller_postgres_host }}/{{ controller_postgres_database }}?pool={{ controller_postgres_pool }}
+REDIS_HOST={{ controller_redis_host }}
+REDIS_PORT={{ cs_ports.redis }}
+
+# --- image ----------------------------------------------------------------
+# The minor tag is a deliberate rolling release channel: `cstacks upgrade`
+# pulls the newest patch in the line. Do not pin a digest here — that would
+# make every future upgrade a silent no-op.
+CS_IMAGE_REPO={{ controller_image_repo }}
+CS_IMAGE_TAG={{ controller_image_tag }}
+CS_REG={{ controller_image_repo }}:{{ controller_image_tag }}
+
+# --- concurrency ----------------------------------------------------------
+RAILS_MAX_THREADS={{ controller_rails_max_threads | int }}
+RAILS_MIN_THREADS={{ controller_rails_min_threads | int }}
+WEB_CONCURRENCY={{ controller_puma_workers | int }}
+QUEUE_SYSTEM={{ controller_queue_system | int }}
+QUEUE_DEPLOYMENTS={{ controller_queue_deployments | int }}
+QUEUE_LE={{ controller_queue_le | int }}
+
+# --- ruby runtime ---------------------------------------------------------
+MALLOC_CONF={{ controller_malloc_conf }}
+RUBY_YJIT_ENABLE={{ controller_ruby_yjit_enable }}
+
+# --- bug reporting (empty disables) ---------------------------------------
+SENTRY_DSN={{ controller_sentry_dsn }}

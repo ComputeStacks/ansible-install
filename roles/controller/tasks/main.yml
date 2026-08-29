@@ -1,0 +1,263 @@
+---
+# Greenfield controller converge. Attach mode (existing_env: true) does NOT
+# run this file — add-region.yml calls tasks_from: attach_prep, which is
+# strictly additive. See README.md.
+
+# `tasks_from:` is a parameter of include_role/import_role, NOT of the play's
+# `roles:` keyword — listing it there is silently ignored and main.yml runs
+# instead. playbooks/add-region.yml currently uses that form (Wave 4J owns
+# that file), which would run this whole greenfield converge against a live
+# v1 controller. Fail loudly instead.
+- name: Refuse to run the greenfield converge on an existing controller
+  ansible.builtin.assert:
+    that:
+      - not (existing_env | default(false))
+    fail_msg: >-
+      roles/controller/tasks/main.yml is the GREENFIELD converge and
+      {{ inventory_hostname }} is marked `existing_env: true`. Attach mode must
+      enter through tasks/attach_prep.yml, and `tasks_from:` only works with
+      include_role/import_role — in a play's `roles:` list it is ignored and
+      main.yml runs. Fix the calling play to use:
+          - name: Prepare the existing controller for a new region
+            ansible.builtin.include_role:
+              name: controller
+              tasks_from: attach_prep
+
+- name: Assert the controller image is repo + a non-floating tag
+  ansible.builtin.assert:
+    that:
+      - controller_image_repo | default('') | length > 0
+      - controller_image_tag | default('') | length > 0
+      - controller_image_tag not in ['latest', 'stable', 'main', 'master']
+    fail_msg: >-
+      controller_image_repo and controller_image_tag must be set in
+      playbooks/group_vars/all/versions.yml, and the tag must not float
+      ('latest'/'stable'/'main'). The minor line (e.g. '9.7') is the intended
+      rolling channel — `cstacks upgrade` pulls the newest patch within it.
+
+- name: Assert the immutable application secrets are present
+  ansible.builtin.assert:
+    that:
+      - (secret_key_base | default('')) | length >= 128
+      - (user_auth_secret | default('')) | length >= 128
+      - (node_enrollment_token | default('')) | length > 0
+    fail_msg: >-
+      secret_key_base, user_auth_secret and node_enrollment_token must be set
+      in the vaulted secrets file. This role NEVER generates them — rotating
+      secret_key_base destroys every encrypted credential in the controller
+      database. (preflight asserts the same thing earlier and with more
+      detail; this is the role-local backstop.) No no_log here on purpose: a
+      failed assert prints the assertion EXPRESSION, never the value.
+
+- name: Assert the postgres password is URL-safe
+  ansible.builtin.assert:
+    that:
+      - (postgres_password | default('')) | length > 0
+      - postgres_password is match('^[A-Za-z0-9._~-]+$')
+    fail_msg: >-
+      postgres_password must be set and must contain only URL-safe characters
+      ([A-Za-z0-9._~-]). It is interpolated verbatim into DATABASE_URL, where
+      a '@', ':', '/' or '#' silently truncates the connection string.
+      Generate it with `openssl rand -hex 32`.
+
+- name: Assert the tenant wildcard domain is set
+  ansible.builtin.assert:
+    that:
+      - (controller_wildcard_domain | default('')) | length > 0
+      - "'*' not in controller_wildcard_domain"
+    fail_msg: >-
+      cs_app_zone (or controller_wildcard_domain) must be the bare tenant zone
+      — e.g. 'usercontent.example.com', not '*.usercontent.example.com'. It is
+      the CN of the self-signed certificate every load balancer serves as its
+      shared certificate.
+
+- name: Create the controller directory layout
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ controller_config_dir }}", mode: "0755"}
+    - {path: "{{ controller_certificates_dir }}", mode: "0700"}
+    - {path: "{{ controller_ssh_key_dir }}", mode: "0700"}
+    - {path: "{{ controller_data_dir }}", mode: "0755"}
+    - {path: "{{ controller_backups_dir }}", mode: "0700"}
+    - {path: "{{ controller_branding_dir }}", mode: "0755"}
+    - {path: "{{ controller_proxy_ips_dir }}", mode: "0755"}
+    - {path: "{{ controller_wildcard_dir }}", mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Generate the application ssh keypair
+  community.crypto.openssh_keypair:
+    path: "{{ controller_ssh_key }}"
+    type: ed25519
+    comment: ComputeStacks Portal
+    owner: root
+    group: root
+    mode: "0600"
+    regenerate: never
+    state: present
+
+- name: Write the self-signed wildcard openssl config
+  ansible.builtin.template:
+    src: ssl_wildcard.cnf.j2
+    dest: "{{ controller_wildcard_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+# GENERATE-ONCE. `creates:` is the whole point: v1 regenerated this on every
+# run, and under v2's convergent rule that would hand every load balancer in
+# the fleet a new shared certificate on every converge. Key and certificate
+# go into ONE pem, which is the form haproxy wants.
+- name: Generate the self-signed tenant wildcard certificate (once)
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -days
+      - "{{ controller_wildcard_days }}"
+      - -newkey
+      - "rsa:{{ controller_wildcard_key_bits }}"
+      - -sha256
+      - -keyout
+      - "{{ controller_wildcard_cert }}"
+      - -out
+      - "{{ controller_wildcard_cert }}"
+      - -config
+      - "{{ controller_wildcard_config }}"
+      - -extensions
+      - v3_req
+    creates: "{{ controller_wildcard_cert }}"
+
+- name: Restrict the wildcard certificate (it carries the private key)
+  ansible.builtin.file:
+    path: "{{ controller_wildcard_cert }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Log in to the controller image registry
+  community.docker.docker_login:
+    registry_url: "{{ controller_image_repo.split('/')[0] }}"
+    username: "{{ controller_registry_username }}"
+    password: "{{ controller_registry_password }}"
+    reauthorize: true
+  no_log: true
+  when:
+    - controller_registry_username is defined
+    - controller_registry_password is defined
+
+- name: Install the cstacks CLI
+  ansible.builtin.copy:
+    src: cstacks.sh
+    dest: "{{ controller_bin }}"
+    owner: root
+    group: root
+    mode: "0750"
+  notify: Recreate the portal container
+
+- name: Install the cstacks bash completion
+  ansible.builtin.copy:
+    src: cstacks_completion.sh
+    dest: "{{ controller_completion_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the controller environment file
+  ansible.builtin.template:
+    src: default-computestacks.j2
+    dest: "{{ controller_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Recreate the portal container
+  when: not (existing_env | default(false))
+
+- name: Create the peer-auth postgres superuser and its database
+  ansible.builtin.include_tasks: postgres.yml
+
+# The portal reads the docker client certificate once, at boot. roles/vault
+# rotates it when it nears expiry, and nothing else would notice.
+- name: Stat the controller docker client certificate
+  ansible.builtin.stat:
+    path: "{{ controller_docker_client_cert }}"
+    checksum_algorithm: sha256
+  register: controller_docker_cert_stat
+
+- name: Record the docker client certificate fingerprint
+  ansible.builtin.copy:
+    content: "{{ controller_docker_cert_stat.stat.checksum }}\n"
+    dest: "{{ controller_docker_cert_state_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: controller_docker_cert_stat.stat.exists
+  notify: Recreate the portal container
+
+- name: Load the database schema on a greenfield controller
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_bin }}"
+      - bootstrap-db
+    creates: "{{ controller_db_sentinel }}"
+
+- name: Read the image the portal container is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{% raw %}{{ .Config.Image }}{% endraw %}"
+      - "{{ controller_container_name }}"
+  register: controller_running_image
+  changed_when: false
+  failed_when: false
+
+# A controller_image_tag bump must not simply recreate the container on an
+# unmigrated schema, so it goes through the full upgrade path instead of the
+# restart handler.
+- name: Upgrade the controller to the configured image
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_bin }}"
+      - upgrade
+  register: controller_upgrade
+  changed_when: controller_upgrade.rc == 0
+  when:
+    - controller_auto_upgrade | bool
+    - controller_running_image.rc == 0
+    - controller_running_image.stdout | trim != (controller_image_repo ~ ':' ~ controller_image_tag)
+
+# Config changes queued above land before the "is it running" check below, so
+# a first converge starts the container exactly once.
+- name: Apply queued portal changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Check whether the portal container is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - -f
+      - "{% raw %}{{ .State.Running }}{% endraw %}"
+      - "{{ controller_container_name }}"
+  register: controller_portal_state
+  changed_when: false
+  failed_when: false
+
+- name: Start the portal container
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_bin }}"
+      - run
+  register: controller_portal_run
+  changed_when: controller_portal_run.rc == 0
+  when: controller_portal_state.stdout | trim != 'true'

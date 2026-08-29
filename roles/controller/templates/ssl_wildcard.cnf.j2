@@ -1,0 +1,25 @@
+{{ ansible_managed | comment }}
+# openssl req config for the self-signed tenant wildcard certificate. The
+# certificate is the load balancer `shared_certificate` input; it is generated
+# ONCE and never rotated by a converge.
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = {{ controller_wildcard_country }}
+ST = {{ controller_wildcard_state }}
+L = {{ controller_wildcard_locality }}
+O = {{ controller_wildcard_org }}
+OU = {{ controller_wildcard_org_unit }}
+CN = {{ controller_wildcard_domain }}
+
+[v3_req]
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = *.{{ controller_wildcard_domain }}
+DNS.2 = {{ controller_wildcard_domain }}

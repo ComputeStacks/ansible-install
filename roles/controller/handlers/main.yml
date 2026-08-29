@@ -1,0 +1,16 @@
+---
+# The portal's environment is baked into the container at creation time and
+# the docker client certificate is read once at boot, so neither a `docker
+# restart` nor a SIGHUP is enough: the container has to be recreated. That is
+# exactly what `cstacks run` does (stop, rm, docker run).
+#
+# Notified by: the environment file, the cstacks script, the docker client
+# certificate fingerprint (roles/vault rotates the certificate; nothing else
+# would notice), and attach mode's environment-file appends.
+- name: Recreate the portal container
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_bin }}"
+      - run
+  register: controller_handler_run
+  changed_when: controller_handler_run.rc == 0

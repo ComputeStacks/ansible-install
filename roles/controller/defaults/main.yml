@@ -1,0 +1,95 @@
+---
+# Controller host. Owns /etc/default/computestacks, the `cstacks` CLI, the
+# portal container, the app ssh keypair and the self-signed tenant wildcard.
+# See README.md.
+
+# --- paths (v1 layout, with the two v2 changes noted) ---------------------
+controller_config_dir: /etc/computestacks
+controller_certificates_dir: "{{ controller_config_dir }}/certificates"
+# Written by roles/vault (pki/docker client cert). Watched by this role's
+# restart handler: the portal reads it once at boot, so a rotation that
+# nobody restarts for leaves the controller talking to nodes with an expired
+# client certificate.
+controller_docker_certs_dir: "{{ controller_certificates_dir }}/docker"
+controller_docker_client_cert: "{{ controller_docker_certs_dir }}/cert.pem"
+
+# v2 CHANGE: v1 kept the app keypair in /var/lib/computestacks/sshkeys. It
+# moves under /etc/computestacks because roles/ssh_trust reads
+# /etc/computestacks/.ssh/id_ed25519.pub to seed root's authorized_keys on
+# every node and on the registry host (control-plane edges #4/#19).
+controller_ssh_key_dir: "{{ controller_config_dir }}/.ssh"
+controller_ssh_key: "{{ controller_ssh_key_dir }}/id_ed25519"
+
+controller_data_dir: /var/lib/computestacks
+controller_backups_dir: "{{ controller_data_dir }}/backups"
+controller_branding_dir: "{{ controller_data_dir }}/branding"
+# v2 NEW: ProxyIpList's persistent store (app/services/proxy_ip_list.rb).
+# Bind-mounted onto /usr/src/app/lib/proxy_ips; without it the CDN proxy IP
+# lists are re-fetched into a throwaway container filesystem on every restart.
+controller_proxy_ips_dir: "{{ controller_data_dir }}/proxy_ips"
+
+controller_wildcard_dir: "{{ controller_data_dir }}/.ssl_wildcard"
+controller_wildcard_cert: "{{ controller_wildcard_dir }}/sharedcert.pem"
+controller_wildcard_config: "{{ controller_wildcard_dir }}/selfwildcard.conf"
+
+controller_env_file: /etc/default/computestacks
+controller_db_sentinel: "{{ controller_data_dir }}/.db_provisioned"
+controller_docker_cert_state_file: "{{ controller_data_dir }}/.docker_cert.sha256"
+controller_bin: /usr/local/bin/cstacks
+controller_completion_file: /etc/bash_completion.d/cstacks
+
+# --- self-signed tenant wildcard -----------------------------------------
+# The LoadBalancer `shared_certificate` input (manifest
+# locations[].regions[].load_balancer.shared_certificate, Wave 4I). Cert and
+# key are written into ONE pem, which is the form haproxy wants.
+#
+# GENERATE-ONCE (`creates:`). v1 regenerated this on every run; under v2's
+# convergent-by-default rule that would rotate the shared certificate on every
+# converge and roll it out to every load balancer in the fleet.
+controller_wildcard_domain: "{{ cs_app_zone }}"
+controller_wildcard_days: 3650
+controller_wildcard_key_bits: 2048
+controller_wildcard_country: US
+controller_wildcard_state: OR
+controller_wildcard_locality: Portland
+controller_wildcard_org: ComputeStacks
+controller_wildcard_org_unit: Deployment
+
+# --- application ----------------------------------------------------------
+controller_container_name: portal
+# Links bug reports to this installation. Single lowercase word.
+controller_app_id: default
+controller_locale: "{{ locale | default('en') }}"
+controller_currency: "{{ currency | default('USD') }}"
+
+controller_postgres_user: computestacks
+controller_postgres_database: cloudportal
+controller_postgres_host: 127.0.0.1
+controller_postgres_pool: 40
+# Peer-auth superuser role + matching database, so `cstacks database-backup`
+# can pg_dump as root with no credentials in the command line. v1's
+# roles/controller_postgres created these; geerlingguy.postgresql does not.
+controller_postgres_root_role: root
+controller_postgres_service: postgresql
+
+controller_redis_host: 127.0.0.1
+
+controller_rails_max_threads: 15
+controller_rails_min_threads: 15
+controller_puma_workers: 2
+controller_queue_system: 15
+controller_queue_deployments: 20
+controller_queue_le: 2
+controller_malloc_conf: "dirty_decay_ms:1000,narenas:2,background_thread:true,stats_print:false"
+controller_ruby_yjit_enable: 1
+
+# Bug reporting. Empty disables it. Set `sentry_dsn` in the vaulted secrets
+# file to report to ComputeStacks' Sentry or to your own installation.
+controller_sentry_dsn: "{{ sentry_dsn | default('') }}"
+
+# When the running container's image no longer matches CS_REG (a
+# controller_image_tag bump in versions.yml), run the full
+# `cstacks upgrade` — database backup, pull, migrate, restart — instead of
+# just recreating the container on an unmigrated schema. Set false to make a
+# tag bump a manual, operator-driven upgrade.
+controller_auto_upgrade: true

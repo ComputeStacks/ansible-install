@@ -1,0 +1,141 @@
+---
+# Attach mode (add-region.yml). Prepares an EXISTING, v1-built controller to
+# accept a new region without ever rewriting anything it already owns.
+#
+# docs/contracts.md §Attach mode: /etc/default/computestacks is append-only,
+# ALWAYS. The v2 cstacks script is one of the two whole-file exceptions.
+#
+# Assert first, then take a database backup, then append, then swap the
+# script, then recreate the container.
+
+- name: Stat the existing controller environment file
+  ansible.builtin.stat:
+    path: "{{ controller_env_file }}"
+  register: controller_attach_env_stat
+
+- name: Assert the existing controller environment file is present
+  ansible.builtin.assert:
+    that:
+      - controller_attach_env_stat.stat.exists
+    fail_msg: >-
+      {{ controller_env_file }} does not exist on {{ inventory_hostname }}.
+      Attach mode expects an existing, running ComputeStacks controller. If
+      this is a greenfield install, drop `existing_env: true` and run
+      site.yml instead.
+
+- name: Read the existing controller environment file
+  ansible.builtin.slurp:
+    src: "{{ controller_env_file }}"
+  register: controller_attach_env_raw
+  no_log: true
+
+- name: Extract the environment keys attach mode cares about
+  ansible.builtin.set_fact:
+    controller_attach_env_lines: "{{ (controller_attach_env_raw.content | b64decode).splitlines() }}"
+  no_log: true
+
+- name: Extract the existing SECRET_KEY_BASE
+  ansible.builtin.set_fact:
+    controller_attach_secret_key_base: >-
+      {{ (([''] + (controller_attach_env_lines | select('match', '^SECRET_KEY_BASE=') | list))
+          | last | split('=', 1) | last | trim) }}
+  no_log: true
+
+# The manifest apply encrypts with SECRET_KEY_BASE. Applying under a
+# different one writes secrets the running controller decrypts to nil —
+# silent, total credential loss for everything the apply touches. This is the
+# single most expensive mistake attach mode can make, so it aborts here.
+- name: Assert the configured secret_key_base matches the existing controller
+  ansible.builtin.assert:
+    that:
+      - controller_attach_secret_key_base | length > 0
+      - secret_key_base == controller_attach_secret_key_base
+    fail_msg: >-
+      secret_key_base in the vaulted secrets file does not match
+      SECRET_KEY_BASE in {{ controller_env_file }} on {{ inventory_hostname }}
+      (or that key is missing from the file). Every encrypted column in the
+      controller keys off SECRET_KEY_BASE; seeding under a different value
+      writes credentials the running application cannot decrypt. Copy the
+      EXISTING value into secrets.yml — never the other way around.
+    success_msg: "secret_key_base matches the existing controller"
+  when: secret_key_base is defined
+
+- name: Assert the cstacks CLI exists on the existing controller
+  ansible.builtin.stat:
+    path: "{{ controller_bin }}"
+  register: controller_attach_bin_stat
+  failed_when: not controller_attach_bin_stat.stat.exists
+
+# Gate: nothing below is destructive, but everything after it (the manifest
+# apply in controller_seed) writes to the database. A failed pg_dump stops
+# the attach here.
+- name: Back up the existing controller database
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_bin }}"
+      - database-backup
+  register: controller_attach_backup
+  changed_when: controller_attach_backup.rc == 0
+
+- name: Create the proxy IP list directory
+  ansible.builtin.file:
+    path: "{{ controller_proxy_ips_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# APPEND ONLY, and only when the key is absent. A key that is already present
+# keeps its existing value byte-for-byte — no regexp, so lineinfile can never
+# rewrite a line that is already there.
+- name: Append NODE_ENROLLMENT_TOKEN to the existing environment file
+  ansible.builtin.lineinfile:
+    path: "{{ controller_env_file }}"
+    line: "NODE_ENROLLMENT_TOKEN={{ node_enrollment_token }}"
+    insertafter: EOF
+    state: present
+  no_log: true
+  when: controller_attach_env_lines | select('match', '^NODE_ENROLLMENT_TOKEN=') | list | length == 0
+  notify: Recreate the portal container
+
+- name: Append CS_PROXY_IPS_PATH to the existing environment file
+  ansible.builtin.lineinfile:
+    path: "{{ controller_env_file }}"
+    line: "CS_PROXY_IPS_PATH={{ controller_proxy_ips_dir }}"
+    insertafter: EOF
+    state: present
+  when: controller_attach_env_lines | select('match', '^CS_PROXY_IPS_PATH=') | list | length == 0
+  notify: Recreate the portal container
+
+- name: Warn when the existing controller carries no NODE_ENROLLMENT_TOKEN of its own
+  ansible.builtin.debug:
+    msg: >-
+      NODE_ENROLLMENT_TOKEN was appended to {{ controller_env_file }}. The new
+      node's cs-agent enrollment uses this value; it must be the same one the
+      inventory hands the node. If this controller already had a token under a
+      different name, stop and reconcile before enrolling.
+  when: controller_attach_env_lines | select('match', '^NODE_ENROLLMENT_TOKEN=') | list | length == 0
+
+- name: Install the v2 cstacks CLI
+  ansible.builtin.copy:
+    src: cstacks.sh
+    dest: "{{ controller_bin }}"
+    owner: root
+    group: root
+    mode: "0750"
+    backup: true
+  notify: Recreate the portal container
+
+- name: Install the cstacks bash completion
+  ansible.builtin.copy:
+    src: cstacks_completion.sh
+    dest: "{{ controller_completion_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Explicit, not left to the end of the play: controller_seed runs next and
+# needs a portal container that carries NODE_ENROLLMENT_TOKEN and the
+# proxy_ips mount.
+- name: Apply the queued portal recreate
+  ansible.builtin.meta: flush_handlers

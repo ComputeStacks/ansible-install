@@ -1,0 +1,35 @@
+---
+# geerlingguy.postgresql (applied by the play, see README §Postgres) creates
+# the `computestacks` login role, the `cloudportal` database and the hba
+# entries. What it does NOT create is v1's peer-auth `root` SUPERUSER role and
+# its matching `root` database — and without them `cstacks database-backup`
+# dies at pg_dump, which means `cstacks upgrade` aborts under `set -e` before
+# it ever migrates. Recreate them here, exactly as v1's controller_postgres
+# role did.
+
+- name: Ensure the postgres service is running
+  ansible.builtin.systemd_service:
+    name: "{{ controller_postgres_service }}"
+    state: started
+    enabled: true
+
+# `pg_dump` with no -d connects to a database named after the connecting role.
+- name: Create the postgres root database
+  community.postgresql.postgresql_db:
+    name: "{{ controller_postgres_root_role }}"
+    encoding: UTF-8
+    template: template0
+    state: present
+  become: true
+  become_user: postgres
+  become_method: ansible.builtin.su
+
+- name: Create the peer-auth root superuser role
+  community.postgresql.postgresql_user:
+    name: "{{ controller_postgres_root_role }}"
+    db: "{{ controller_postgres_root_role }}"
+    role_attr_flags: SUPERUSER
+    state: present
+  become: true
+  become_user: postgres
+  become_method: ansible.builtin.su
