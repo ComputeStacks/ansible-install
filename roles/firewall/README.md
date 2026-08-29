@@ -54,7 +54,9 @@ Every port below is `cs_ports.<name>` from the ports contract; every address is
 an inventory var (`primary_ip`, `public_ip`) — no gathered facts, so a
 `--limit` run still renders the full picture (docs/contracts.md rule 1).
 "controller / metrics / node addresses" always means *every* host in that
-group, iterated (never `[0]`).
+group, iterated (never `[0]`), and **every** source-restricted accept in the
+tables below also gets an `iifname "tailscale0"` accept when both ends are
+tailnet members — see [pairwise accepts](#pairwise-accepts-address-path-and-tailnet-path).
 
 ### Every host
 
@@ -65,7 +67,7 @@ group, iterated (never `[0]`).
 | icmp / icmpv6 sane types | icmp | anywhere | — |
 | 546 | udp | `fe80::/64` destination (DHCPv6/SLAAC client) | — |
 | `ssh` (22) | tcp | anywhere, or `firewall_allow_ssh_from` | 1, 4, 11, 19 |
-| `node_exporter` (9100) | tcp | metrics addresses | 9 |
+| `node_exporter` (9100) | tcp | metrics addresses **+ `iifname tailscale0`** when both this host and the metrics host are tailnet members | 9 |
 | 41641 | udp | anywhere — only when this host is on the tailnet | — (peer WireGuard) |
 | `100.64.0.0/10`, `fd7a:115c:a1e0::/48` | any | **dropped** unless it arrives on `tailscale0` — only when this host is on the tailnet | — (anti-spoof) |
 
@@ -77,7 +79,7 @@ group, iterated (never `[0]`).
 | `tenant_port_begin`–`tenant_port_end` (10000–50000) | tcp + udp | anywhere | 13 |
 | `docker_tls` (2376) | tcp | controller addresses | 2 |
 | `agent_http` (8500) | tcp | see [the 8500 rule](#the-8500-rule) | 3, 8 |
-| `cadvisor` (8080), `haproxy_stats` (81) | tcp | metrics addresses | 9 |
+| `cadvisor` (8080), `haproxy_stats` (81) | tcp | metrics addresses **+ `iifname tailscale0`** when both this node and the metrics host are tailnet members | 9 |
 
 ### controller
 
@@ -113,6 +115,55 @@ group, iterated (never `[0]`).
 ### backup
 
 Nothing beyond the global ssh accept — nodes reach borg over ssh only (row 11).
+
+## Pairwise accepts: address path and tailnet path
+
+A source-restricted accept keyed only on a peer's `primary_ip` / `public_ip`
+**drops that peer's traffic the moment the peer is tailnet-joined**: prometheus
+on a tailnet-joined metrics host dials the node's *tailnet* address, so the
+packet arrives on `tailscale0` with a `100.64.0.0/10` source that no
+address-keyed rule matches (and the anti-spoof rule above sends anything
+claiming that source on another interface straight to `drop`). Every
+source-restricted rule in this role is therefore emitted through one helper,
+`accept_from()`, which renders both halves:
+
+* one `ip saddr <peer address> … accept` per peer address — the LAN /
+  `primary_ip` / public path; and
+* one `iifname "tailscale0" … accept` when **this host and that peer are both
+  tailnet members** — the tailnet path.
+
+Both stay in place at once, because a mixed fleet has both paths at once (a
+same-L2 region with `tailscale_enabled: false` next to a remote tailnet
+region). Membership on both sides is the pure-inventory predicate described
+under [tailnet membership](#tailnet-membership-is-inventory-derived-not-a-fact),
+so it holds under `--limit`.
+
+This covers the exporter scrapes (`node_exporter` 9100 on every host,
+`cadvisor` 8080 and `haproxy_stats` 81 on nodes) exactly as it covers
+`docker_tls`, `controller_acme_backend`, the metrics vhosts, `pdns_api` and the
+nameserver `postgres` replication. `agent_http` is the one deliberate exception
+— it is *exclusively* tailnet when both ends are joined, never both paths (see
+below), because the admin Bearer it carries is cleartext.
+
+Scenario check for a node's exporter ports (verified by rendering each case and
+running `nft --check`):
+
+| metrics host | this node | Rules emitted for 9100 / 8080 / 81 | Scrape path |
+|---|---|---|---|
+| tailnet | tailnet | metrics addresses **and** `iifname tailscale0` | tailnet |
+| tailnet | opted out / no key | metrics addresses only | prometheus dials `primary_ip`, source is the metrics host's own address |
+| not tailnet | tailnet | metrics addresses only | address path |
+| not tailnet | not tailnet | metrics addresses only | address path |
+
+In all four the public interface stays closed for 8080 and 81: the only accepts
+that exist for those ports are the metrics host's addresses and, where both ends
+are on the tailnet, `tailscale0`. That matters more than it used to — Wave 2D's
+`node_observability` now runs cadvisor on the **host network bound to
+`0.0.0.0`** (a `primary_ip` bind would refuse the tailnet scrape), so this
+accept set is the only thing keeping 8080 off the public interface. The one way
+to undo that is `firewall_extra_allowed_ipv4` / `_ipv6`, which are blanket
+`accept`s for an address and therefore open every port on this host to it —
+they are a v1-parity escape hatch, not a per-port knob.
 
 ## The 8500 rule
 
@@ -188,17 +239,23 @@ Wave 4J's `attach_fragments` role calls this entry point directly:
     tasks_from: v1_append
 ```
 
-## Known limitation — published container ports are not filtered here
+## What an input chain can and cannot enforce
 
 An input chain only sees traffic terminating on the **host**. A port published
-by a container (`-p 8080:8080`) is DNAT'd in `nat` PREROUTING by docker and
-then traverses **forward**, so the input accepts for such ports are documented
-intent, not enforcement. Ports affected: `cadvisor` (8080) and the fluentd
-listener on nodes, and the nginx vhosts (3101/3102) on the metrics host. The
-enforcement for those has to be the **publish bind address** in the owning role
-(e.g. `-p {{ primary_ip }}:8080:8080` rather than `-p 8080:8080`) — Wave 2D
-(`node_observability`) and Wave 2E (`metrics`, `loki`). Closing them here would
-require a forward-hook chain, which rule 7 forbids. Raised with the manager.
+by a container (`-p 8080:8080`) is DNAT'd in `nat` PREROUTING by docker and then
+traverses **forward**, so an input accept for such a port is documented intent,
+not enforcement — and closing it would require a forward-hook chain, which
+rule 7 forbids. The fix belongs in the owning role: run the listener on the host
+network (or bind it to a host address), never publish it.
+
+Current status of every port in the matrix that is served by a container:
+
+| Port | Owning role | Status |
+|---|---|---|
+| `cadvisor` 8080 (nodes) | Wave 2D `node_observability` | **Enforced.** Runs on the host network with no `-p`, bound `0.0.0.0`; this role's accept set is its only protection. |
+| fluentd forward (nodes) | Wave 2D `node_observability` | **N/A.** Host network bound `127.0.0.1` — only docker's local log driver dials it, so there is no matrix entry at all. |
+| `haproxy_stats` 81 (nodes) | Wave 2D `haproxy` | **Enforced.** haproxy runs on the host. |
+| `metrics_prometheus` 3101 / `metrics_loki` 3102 (metrics) | Wave 3G `acme_web` | **Pending.** prometheus and loki themselves bind `127.0.0.1` inside their containers (Wave 2E); the nginx TLS terminator that will listen on 3101/3102 is Wave 3G's. It must run on the host network or bind host addresses — if it publishes with `-p`, these accepts become intent rather than enforcement. Flagged for Wave 3G. |
 
 ## Variables
 

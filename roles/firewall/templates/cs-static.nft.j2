@@ -19,9 +19,25 @@
 # Every port comes from playbooks/group_vars/all/ports.yml (cs_ports) and every
 # address from inventory vars — never from gathered facts, so a `--limit` run
 # still renders the whole picture (docs/contracts.md rules 1 and 5).
+#
+# Every source-restricted accept below is emitted TWICE where it has to be: once
+# per peer address (the LAN / public path) and once as `iifname "tailscale0"`
+# when this host and that peer are BOTH tailnet members. That second rule is not
+# optional — a peer that is tailnet-joined dials this host's tailnet address, so
+# the packet arrives on tailscale0 with a 100.64.0.0/10 source that no
+# address-keyed rule matches. It applies to the exporter scrapes (9100 / 8080 /
+# haproxy stats) exactly as it applies to 8500. Mixed fleets have both paths at
+# once, so both rules stay.
 {% set ports = cs_ports %}
 {% set tailnet_self = inventory_hostname in (firewall_tailnet_hosts | default([])) %}
 {% macro peer_addresses(host) %}{{ [hostvars[host].primary_ip | default(''), hostvars[host].public_ip | default('')] | reject('equalto', '') | unique | join(' ') }}{% endmacro %}
+{#
+  accept_from(hosts, rule) — the pairwise accept helper. DO NOT reduce it to the
+  address half: see the header note above. `tailnet_self` and the membership of
+  each peer are pure-inventory predicates (tailscale_authkey set +
+  tailscale_enabled), so this stays correct under --limit where other hosts have
+  no facts.
+#}
 {% macro accept_from(hosts, rule) %}
 {% for host in hosts | sort %}
 {% for address in peer_addresses(host).split() %}
@@ -69,7 +85,9 @@ table inet {{ firewall_table }} {
         udp dport {{ firewall_tailscale_udp_port }} accept    comment "tailscale direct peer connections"
 {% endif %}
 {% if groups['metrics'] | default([]) | length > 0 %}
-        # prometheus -> node_exporter (every host runs one).
+        # prometheus -> node_exporter (every host runs one). Scrapes arrive
+        # from the metrics host's address, or on tailscale0 when both ends are
+        # tailnet members — see the header note.
 {{ accept_from(groups['metrics'], 'tcp dport ' ~ ports.node_exporter ~ ' accept') }}
 {% endif %}
 {% for interface in firewall_container_interfaces %}
@@ -99,7 +117,9 @@ table inet {{ firewall_table }} {
 {% else %}
 {{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.agent_http ~ ' accept') }}
 {% endif %}
-        # prometheus -> cadvisor and haproxy stats.
+        # prometheus -> cadvisor and haproxy stats. cadvisor runs on the host
+        # network bound to all interfaces (node_observability), so these accepts
+        # are the ONLY thing keeping 8080 off the public interface.
 {{ accept_from(groups['metrics'] | default([]), 'tcp dport { ' ~ ports.cadvisor ~ ', ' ~ ports.haproxy_stats ~ ' } accept') }}
 {% endif %}
 {% if 'controller' in group_names %}
