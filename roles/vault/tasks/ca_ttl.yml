@@ -1,0 +1,48 @@
+---
+# Compute vault_effective_cert_ttl_hours: the requested leaf TTL clamped to the
+# docker CA's remaining lifetime. Vault refuses (opaquely) to sign a leaf whose
+# notAfter runs past the CA's, which is exactly what happens on an older
+# environment whose CA was created years ago.
+#
+# Reusable from any host:
+#
+#   - name: Compute the clamped certificate TTL
+#     ansible.builtin.include_role:
+#       name: vault
+#       tasks_from: ca_ttl
+#
+# Sets (on the CURRENT host, even though the reads are delegated):
+#   vault_ca_remaining_hours       CA lifetime left, in whole hours
+#   vault_effective_cert_ttl_hours what to pass as ttl=<n>h
+- name: Read the docker CA certificate for TTL clamping
+  ansible.builtin.command: "{{ vault_command }} read -field=certificate {{ vault_pki_docker_path }}/cert/ca"
+  delegate_to: "{{ vault_host }}"
+  register: vault_ca_pem
+  changed_when: false
+
+- name: Inspect the docker CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ vault_ca_pem.stdout }}"
+  delegate_to: localhost
+  become: false
+  register: vault_ca_info
+
+- name: Compute the clamped certificate TTL
+  ansible.builtin.set_fact:
+    vault_ca_remaining_hours: "{{ ((vault_ca_info.not_after | to_datetime('%Y%m%d%H%M%SZ') - now(true)).total_seconds() / 3600) | int }}"
+
+- name: Set the effective certificate TTL
+  ansible.builtin.set_fact:
+    vault_effective_cert_ttl_hours: >-
+      {{ [vault_cert_ttl_hours | int,
+          vault_ca_remaining_hours | int - vault_cert_ttl_clamp_margin_hours | int] | min }}
+
+- name: Assert the docker CA has usable life left
+  ansible.builtin.assert:
+    that:
+      - vault_effective_cert_ttl_hours | int > 0
+    fail_msg: >-
+      The docker CA on {{ vault_host }} expires in {{ vault_ca_remaining_hours }}h
+      ({{ vault_ca_info.not_after }}) — too soon to issue a usable leaf. The CA
+      must be replaced (cs-agent Phase 4 / controller-as-CA) before nodes can be
+      issued certificates.

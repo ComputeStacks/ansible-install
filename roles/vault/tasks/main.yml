@@ -1,0 +1,78 @@
+---
+- name: Assert the vault image is pinned
+  ansible.builtin.assert:
+    that:
+      - vault_image is defined
+      - vault_image | length > 0
+      - vault_image is search(':')
+      - not (vault_image is search(':latest$'))
+    fail_msg: >-
+      vault_image must be an exact pin from playbooks/group_vars/all/versions.yml
+      (got: {{ vault_image | default('undefined') }}).
+
+- name: Ensure the vault and certificate directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ vault_certificates_path }}"
+      mode: "0755"
+    - path: "{{ vault_docker_certs_path }}"
+      mode: "0755"
+    - path: "{{ vault_storage_path }}"
+      mode: "0700"
+    - path: "{{ vault_storage_path }}/file"
+      mode: "0700"
+    - path: "{{ vault_storage_path }}/logs"
+      mode: "0700"
+    - path: "{{ vault_storage_path }}/keys"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Check whether vault has already been initialised
+  ansible.builtin.stat:
+    path: "{{ vault_storage_path }}/keys/unseal_key_0"
+  register: vault_initialised
+
+- name: Initialise vault
+  ansible.builtin.include_tasks: initialize.yml
+  when: not vault_initialised.stat.exists
+
+- name: Ensure the vault-bootstrap container is running
+  community.docker.docker_container:
+    name: "{{ vault_container_name }}"
+    image: "{{ vault_image }}"
+    command: server
+    env: "{{ vault_container_env }}"
+    volumes: "{{ vault_container_volumes + [vault_root_token_volume] }}"
+    capabilities:
+      - IPC_LOCK
+    labels:
+      com.computestacks.role: system
+    restart_policy: unless-stopped
+    state: started
+
+- name: Register the vault CLI alias for root
+  ansible.builtin.lineinfile:
+    path: /root/.bashrc
+    line: "alias vault='docker exec -it {{ vault_container_name }} vault'"
+    regexp: "^alias vault="
+    owner: root
+    group: root
+    mode: "0644"
+    create: true
+    state: present
+  when: vault_manage_root_alias | bool
+
+- name: Unseal vault when sealed
+  ansible.builtin.include_tasks: unseal.yml
+
+- name: Configure the pki/docker secrets engine
+  ansible.builtin.include_tasks: pki_docker.yml
+
+- name: Issue the controller docker client certificate
+  ansible.builtin.include_tasks: client_cert.yml

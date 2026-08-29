@@ -1,0 +1,70 @@
+---
+# First converge only (guarded by the presence of keys/unseal_key_0).
+# The running container bind-mounts keys/rootkey as /root/.vault-token, which
+# cannot exist before `operator init` — docker would create a directory in its
+# place. So bring the container up WITHOUT that mount, initialise, write the
+# key material, and let tasks/main.yml recreate it with the token mounted.
+- name: Start the vault-bootstrap container for initialisation
+  community.docker.docker_container:
+    name: "{{ vault_container_name }}"
+    image: "{{ vault_image }}"
+    command: server
+    env: "{{ vault_container_env }}"
+    volumes: "{{ vault_container_volumes }}"
+    capabilities:
+      - IPC_LOCK
+    labels:
+      com.computestacks.role: system
+    restart_policy: unless-stopped
+    state: started
+
+- name: Wait for vault to answer before initialising
+  ansible.builtin.command: "{{ vault_command }} status -format=json"
+  register: vault_preinit_status
+  changed_when: false
+  # 0 = unsealed, 2 = sealed: both mean the server is answering.
+  # 1 = not responding yet.
+  failed_when: vault_preinit_status.rc not in [0, 1, 2]
+  until: vault_preinit_status.rc in [0, 2]
+  retries: 12
+  delay: 5
+
+- name: Initialise the vault operator
+  ansible.builtin.command: >-
+    {{ vault_command }} operator init
+    -key-shares={{ vault_key_shares | int }}
+    -key-threshold={{ vault_key_threshold | int }}
+    -format=json
+  register: vault_init
+  changed_when: vault_init.rc == 0
+  until: vault_init.rc == 0
+  retries: 3
+  delay: 5
+  no_log: true
+
+- name: Parse the vault init output
+  ansible.builtin.set_fact:
+    vault_init_parsed: "{{ vault_init.stdout | from_json }}"
+  no_log: true
+
+- name: Write the unseal keys
+  ansible.builtin.copy:
+    content: "{{ item }}"
+    dest: "{{ vault_storage_path }}/keys/unseal_key_{{ vault_key_index }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ vault_init_parsed.unseal_keys_hex }}"
+  loop_control:
+    index_var: vault_key_index
+    label: "unseal_key_{{ vault_key_index }}"
+  no_log: true
+
+- name: Write the root token
+  ansible.builtin.copy:
+    content: "{{ vault_init_parsed.root_token }}"
+    dest: "{{ vault_storage_path }}/keys/rootkey"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true

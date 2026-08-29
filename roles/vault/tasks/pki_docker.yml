@@ -1,0 +1,81 @@
+---
+# pki/docker is the ONLY secrets engine v2 enables. v1's pki/consul mount is
+# deliberately not ported (consul is gone from the stack).
+- name: List the enabled secrets engines
+  ansible.builtin.command: "{{ vault_command }} secrets list -format=json"
+  delegate_to: "{{ vault_host }}"
+  register: vault_secrets_list
+  changed_when: false
+
+- name: Create the docker PKI mount
+  when: (vault_pki_docker_path ~ '/') not in (vault_secrets_list.stdout | from_json)
+  block:
+    - name: Enable the docker PKI secrets engine
+      ansible.builtin.command: "{{ vault_command }} secrets enable -path={{ vault_pki_docker_path }} pki"
+      delegate_to: "{{ vault_host }}"
+      changed_when: true
+
+    - name: Tune the docker PKI max lease TTL
+      ansible.builtin.command: >-
+        {{ vault_command }} secrets tune
+        -max-lease-ttl={{ vault_max_lease_ttl_hours | int }}h
+        {{ vault_pki_docker_path }}
+      delegate_to: "{{ vault_host }}"
+      changed_when: true
+
+    - name: Generate the docker root CA
+      ansible.builtin.command: >-
+        {{ vault_command }} write -field=certificate
+        {{ vault_pki_docker_path }}/root/generate/internal
+        common_name={{ vault_pki_ca_common_name | quote }}
+        ttl={{ vault_pki_ca_ttl_hours | int }}h
+      delegate_to: "{{ vault_host }}"
+      changed_when: true
+
+# Role definitions are declarative server-side: rewriting them every converge
+# is how a TTL change in defaults/main.yml rolls out (contracts.md rule 3).
+- name: Configure the docker server PKI role
+  ansible.builtin.command: >-
+    {{ vault_command }} write {{ vault_pki_docker_path }}/roles/server
+    max_ttl={{ vault_max_lease_ttl_hours | int }}h
+    ttl={{ vault_cert_ttl_hours | int }}h
+    allow_any_name=true
+    allow_localhost=true
+    allow_ip_sans=true
+    allow_bare_domains=true
+    allow_subdomains=true
+    server_flag=true
+    client_flag=false
+    key_usage=DigitalSignature,KeyEncipherment
+    ou="Docker Daemon"
+  delegate_to: "{{ vault_host }}"
+  changed_when: false
+
+- name: Configure the docker client PKI role
+  ansible.builtin.command: >-
+    {{ vault_command }} write {{ vault_pki_docker_path }}/roles/client
+    max_ttl={{ vault_max_lease_ttl_hours | int }}h
+    ttl={{ vault_cert_ttl_hours | int }}h
+    allow_any_name=true
+    enforce_hostnames=false
+    server_flag=false
+    client_flag=true
+    key_usage=DigitalSignature
+    ou="Docker Client"
+    no_store=true
+  delegate_to: "{{ vault_host }}"
+  changed_when: false
+
+- name: Read the docker CA certificate
+  ansible.builtin.command: "{{ vault_command }} read -field=certificate {{ vault_pki_docker_path }}/cert/ca"
+  delegate_to: "{{ vault_host }}"
+  register: vault_docker_ca
+  changed_when: false
+
+- name: Write the docker CA certificate
+  ansible.builtin.copy:
+    content: "{{ vault_docker_ca.stdout }}\n"
+    dest: "{{ vault_docker_certs_path }}/ca.pem"
+    owner: root
+    group: root
+    mode: "0644"

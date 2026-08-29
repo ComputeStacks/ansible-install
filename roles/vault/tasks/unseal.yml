@@ -1,0 +1,80 @@
+---
+# UNSEAL-IF-SEALED. Idempotent, safe to run on every converge, and reusable
+# from any host:
+#
+#   - name: Ensure vault is unsealed
+#     ansible.builtin.include_role:
+#       name: vault
+#       tasks_from: unseal
+#
+# Every action is delegated to vault_host, so a node (docker_tls, add-region)
+# gets the same behaviour as the controller itself. This file NEVER creates or
+# recreates the container — attach mode must not touch an existing v1
+# controller's vault-bootstrap definition.
+- name: Gather the vault-bootstrap container state
+  community.docker.docker_container_info:
+    name: "{{ vault_container_name }}"
+  delegate_to: "{{ vault_host }}"
+  register: vault_container_state
+
+- name: Fail when the vault-bootstrap container is missing
+  ansible.builtin.fail:
+    msg: >-
+      The {{ vault_container_name }} container does not exist on {{ vault_host }}.
+      Greenfield: run the vault role on the controller first. Attach mode: this
+      is not a ComputeStacks controller, or its vault was removed.
+  when: not vault_container_state.exists
+
+- name: Start the vault-bootstrap container when it is stopped
+  ansible.builtin.command: "docker start {{ vault_container_name }}"
+  delegate_to: "{{ vault_host }}"
+  when: not vault_container_state.container.State.Running
+  changed_when: true
+
+- name: Read the vault seal status
+  ansible.builtin.command: "{{ vault_command }} status -format=json"
+  delegate_to: "{{ vault_host }}"
+  register: vault_status
+  changed_when: false
+  # 0 = unsealed, 2 = sealed. 1 = not answering (yet).
+  failed_when: vault_status.rc not in [0, 1, 2]
+  until: vault_status.rc in [0, 2]
+  retries: 12
+  delay: 5
+
+- name: Unseal vault
+  when: (vault_status.stdout | from_json).sealed | bool
+  block:
+    - name: Read the unseal keys
+      ansible.builtin.slurp:
+        src: "{{ vault_storage_path }}/keys/unseal_key_{{ item }}"
+      loop: "{{ range(vault_key_threshold | int) | list }}"
+      delegate_to: "{{ vault_host }}"
+      register: vault_unseal_keys
+      no_log: true
+
+    - name: Submit the unseal keys
+      ansible.builtin.command: "{{ vault_command }} operator unseal {{ item['content'] | b64decode | trim }}"
+      loop: "{{ vault_unseal_keys.results }}"
+      loop_control:
+        label: "unseal share"
+      delegate_to: "{{ vault_host }}"
+      register: vault_unseal
+      changed_when: vault_unseal.rc == 0
+      until: vault_unseal.rc == 0
+      retries: 3
+      delay: 5
+      no_log: true
+
+    - name: Re-read the vault seal status
+      ansible.builtin.command: "{{ vault_command }} status -format=json"
+      delegate_to: "{{ vault_host }}"
+      register: vault_status_after_unseal
+      changed_when: false
+      failed_when: vault_status_after_unseal.rc not in [0, 2]
+
+    - name: Assert vault is unsealed
+      ansible.builtin.assert:
+        that:
+          - not ((vault_status_after_unseal.stdout | from_json).sealed | bool)
+        fail_msg: "vault on {{ vault_host }} is still sealed after submitting {{ vault_key_threshold }} key shares."

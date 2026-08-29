@@ -1,0 +1,85 @@
+---
+# The controller's docker CLIENT certificate. The portal container bind-mounts
+# {{ vault_docker_certs_path }} at /root/.docker (v1 cstacks.sh:
+# `-v $CS_CERT_PATH/docker:/root/.docker`, DOCKER_CERT_PATH=/root/.docker), so
+# the file names here are the docker client's expected cert.pem/key.pem/ca.pem.
+- name: Check for an existing controller docker client certificate
+  ansible.builtin.stat:
+    path: "{{ vault_docker_certs_path }}/cert.pem"
+  register: vault_client_cert_file
+
+- name: Read the existing controller docker client certificate
+  ansible.builtin.slurp:
+    src: "{{ vault_docker_certs_path }}/cert.pem"
+  register: vault_client_cert_pem
+  when: vault_client_cert_file.stat.exists
+
+- name: Inspect the existing controller docker client certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ vault_client_cert_pem.content | b64decode }}"
+  delegate_to: localhost
+  become: false
+  register: vault_client_cert_info
+  when: vault_client_cert_file.stat.exists
+
+- name: Decide whether the controller docker client certificate must be issued
+  ansible.builtin.set_fact:
+    vault_client_cert_needed: >-
+      {{ not vault_client_cert_file.stat.exists
+         or ((vault_client_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ') - now(true)).total_seconds()
+             < (vault_cert_renew_days | int * 86400)) }}
+
+- name: Issue the controller docker client certificate
+  when: vault_client_cert_needed | bool
+  block:
+    - name: Compute the clamped certificate TTL
+      ansible.builtin.include_tasks: ca_ttl.yml
+
+    - name: Request a client certificate from vault
+      ansible.builtin.command: >-
+        {{ vault_command }} write -format=json
+        {{ vault_pki_docker_path }}/issue/client
+        common_name={{ vault_client_common_name | quote }}
+        ttl={{ vault_effective_cert_ttl_hours | int }}h
+      delegate_to: "{{ vault_host }}"
+      register: vault_client_issue
+      changed_when: true
+      no_log: true
+
+    - name: Parse the issued client certificate
+      ansible.builtin.set_fact:
+        vault_client_issued: "{{ vault_client_issue.stdout | from_json }}"
+      no_log: true
+
+    - name: Write the controller docker client certificate files
+      ansible.builtin.copy:
+        content: "{{ item.content }}\n"
+        dest: "{{ vault_docker_certs_path }}/{{ item.name }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - name: cert.pem
+          content: "{{ vault_client_issued.data.certificate }}"
+          mode: "0644"
+        - name: ca.pem
+          content: "{{ vault_client_issued.data.issuing_ca }}"
+          mode: "0644"
+        - name: key.pem
+          content: "{{ vault_client_issued.data.private_key }}"
+          mode: "0600"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
+
+    # v1 parity. No consumer is known in this repo or in the portal env
+    # (DOCKER_CERT_PATH uses the three files above), but it is cheap to keep
+    # and an operator tool may depend on it.
+    - name: Write the combined client PEM bundle
+      ansible.builtin.copy:
+        content: "{{ [vault_client_issued.data.certificate, vault_client_issued.data.issuing_ca, vault_client_issued.data.private_key] | join('\n') }}\n"
+        dest: "{{ vault_docker_certs_path }}/client.pem"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true

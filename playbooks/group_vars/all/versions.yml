@@ -42,7 +42,10 @@ fluentd_loki_image: "grafana/fluent-plugin-loki:2.9.10" # VERIFY tag exists; v1 
 cadvisor_image: "ghcr.io/google/cadvisor:v0.54.0"  # VERIFY
 
 # Infra containers
-vault_image: "hashicorp/vault:1.20.4"              # VERIFY (wave B); v1 floated `latest`
+# Verified 2026-08-28 (wave B): latest 1.x release line; hashicorp/vault:1.21.4
+# exists on Docker Hub (linux/amd64). Vault 2.0 is out but untested here and
+# this PKI is retired by cs-agent Phase 4 — stay on 1.x. v1 floated `latest`.
+vault_image: "hashicorp/vault:1.21.4"
 nginx_image: "nginx:1.28"                          # VERIFY (wave G/E)
 
 # Packages

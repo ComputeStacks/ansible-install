@@ -1,0 +1,52 @@
+---
+# Where the vault CLI is executed. Every task in this role runs the CLI inside
+# the bootstrap container on the controller, so the role also works when its
+# task files are included from a node (docker_tls, attach mode).
+# Delegating an ACTION to groups['controller'][0] is permitted by
+# docs/contracts.md rule 2 (single controller is architectural).
+vault_host: "{{ groups['controller'][0] }}"
+vault_container_name: vault-bootstrap
+vault_command: "docker exec {{ vault_container_name }} vault"
+
+# v1 on-disk layout. DO NOT change: attach mode reads the unseal keys of an
+# EXISTING v1 controller from exactly these paths.
+vault_storage_path: /etc/computestacks/.vault-bootstrap
+vault_certificates_path: /etc/computestacks/certificates
+vault_docker_certs_path: "{{ vault_certificates_path }}/docker"
+
+# Loopback-only listener. Deliberately NOT in cs_ports: ports.yml is the
+# cross-host port contract (firewall/scrape/vhost inputs) and 8200 is never
+# reachable off the controller, never firewalled, never referenced by another
+# role. See README.
+vault_listen_address: "127.0.0.1"
+vault_listen_port: 8200
+
+vault_default_lease_ttl_hours: 168
+vault_max_lease_ttl_hours: 87600
+
+# operator init shape (v1 parity — the key files attach mode reads).
+vault_key_shares: 5
+vault_key_threshold: 3
+
+# pki/docker mount (the ONLY mount v2 creates; v1's consul PKI is dead).
+vault_pki_docker_path: pki/docker
+vault_pki_ca_common_name: "Docker Root CA"
+vault_pki_ca_ttl_hours: 87600
+
+# Requested leaf TTL: 1 year. v1 asked for 43800h (5y) — v2 shortens
+# deliberately, cs-agent Phase 4 (controller-as-CA) replaces this PKI well
+# inside a year. Always clamped to the CA's remaining lifetime minus the
+# margin below (vault errors opaquely when notAfter exceeds the CA's).
+vault_cert_ttl_hours: 8760
+vault_cert_ttl_clamp_margin_hours: 24
+
+# Re-issue a leaf this close to its notAfter. Applies to the controller client
+# cert here and (same var name, same meaning) to node daemon certs in
+# docker_tls via docker_tls_renew_days.
+vault_cert_renew_days: 30
+
+# Controller client cert (mounted into the portal container as /root/.docker).
+vault_client_common_name: portal
+
+# Convenience alias for operators: `vault …` on the controller shell.
+vault_manage_root_alias: true

@@ -1,0 +1,26 @@
+---
+# Server config handed to the container as VAULT_LOCAL_CONFIG (v1 parity).
+# Rendered to JSON at container-create time; a change here recreates the
+# container on the next converge.
+vault_local_config:
+  backend:
+    file:
+      path: /vault/file
+  default_lease_ttl: "{{ vault_default_lease_ttl_hours | int }}h"
+  max_lease_ttl: "{{ vault_max_lease_ttl_hours | int }}h"
+  listener:
+    tcp:
+      address: "{{ vault_listen_address }}:{{ vault_listen_port | int }}"
+      tls_disable: "true"
+
+vault_container_env:
+  VAULT_ADDR: "http://{{ vault_listen_address }}:{{ vault_listen_port | int }}"
+  VAULT_LOCAL_CONFIG: "{{ vault_local_config | to_json }}"
+
+# Bind mounts common to both the bootstrap (pre-init) and the running
+# container. The root token mount is added only once the token file exists.
+vault_container_volumes:
+  - "{{ vault_storage_path }}/file:/vault/file"
+  - "{{ vault_storage_path }}/logs:/vault/logs"
+
+vault_root_token_volume: "{{ vault_storage_path }}/keys/rootkey:/root/.vault-token"
