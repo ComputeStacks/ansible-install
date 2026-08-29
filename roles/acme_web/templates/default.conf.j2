@@ -1,0 +1,29 @@
+{{ ansible_managed | comment }}
+server {
+  listen {{ cs_ports.controller_http }} default_server;
+  listen [::]:{{ cs_ports.controller_http }} default_server;
+  server_name _;
+
+  include /etc/nginx/common/acme.conf;
+  include /etc/nginx/common/error_pages.conf;
+
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen {{ cs_ports.controller_https }} ssl default_server;
+  listen [::]:{{ cs_ports.controller_https }} ssl default_server;
+  http2 on;
+  server_name _;
+
+  ssl_certificate {{ acme_web_cert_fullchain }};
+  ssl_certificate_key {{ acme_web_cert_key }};
+  ssl_dhparam /etc/nginx/dhparam;
+
+  include /etc/nginx/common/acme.conf;
+  include /etc/nginx/common/error_pages.conf;
+
+  location / {
+    root {{ acme_web_html_dir }};
+  }
+}

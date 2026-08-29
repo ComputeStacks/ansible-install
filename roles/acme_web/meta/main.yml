@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: acme_web
+  author: ComputeStacks
+  description: >-
+    Containerized nginx TLS terminator plus a pinned acme.sh, on the
+    controller, metrics and registry hosts. Runs on the host network so the
+    firewall's input chain governs its listeners.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

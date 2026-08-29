@@ -1,0 +1,6 @@
+{{ ansible_managed | comment }}
+# HTTP-01 challenge location. Included by every vhost; acme.sh writes tokens
+# into {{ acme_web_webroot }}/.well-known/acme-challenge/.
+location ~ ^/\.well-known/acme-challenge/([-_a-zA-Z0-9]+)$ {
+  root {{ acme_web_webroot }};
+}

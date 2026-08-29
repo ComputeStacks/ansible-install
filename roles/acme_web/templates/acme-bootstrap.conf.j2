@@ -1,0 +1,14 @@
+{{ ansible_managed | comment }}
+# Bootstrap-only vhost: served while the host has no certificate yet, so
+# nginx can come up and answer the HTTP-01 challenge. Replaced by
+# default.conf as soon as the certificate is issued.
+server {
+  listen {{ cs_ports.controller_http }} default_server;
+  listen [::]:{{ cs_ports.controller_http }} default_server;
+  server_name _;
+  include /etc/nginx/common/acme.conf;
+
+  location / {
+    root {{ acme_web_html_dir }};
+  }
+}

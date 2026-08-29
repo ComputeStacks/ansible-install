@@ -1,0 +1,49 @@
+---
+# Registry host only. The tenant registry containers the CONTROLLER creates
+# over DockerSSH bind-mount /opt/container_registry/ssl and read
+# fullchain.pem / privkey.pem from it (controller repo
+# app/models/container_registry.rb, behind the `updated_cr_cert` feature).
+# They read the files once, at container start, so a renewal has to restart
+# them — that is what the reload hook does.
+
+- name: Create the container registry ssl directory
+  ansible.builtin.file:
+    path: "{{ acme_web_registry_ssl_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the certificate reload hook
+  ansible.builtin.template:
+    src: post_acme_reload.sh.j2
+    dest: "{{ acme_web_registry_reload_hook }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Check whether the registry certificate is installed
+  ansible.builtin.stat:
+    path: "{{ acme_web_registry_fullchain }}"
+  register: acme_web_registry_cert_stat
+
+- name: Install the certificate for the container registries
+  ansible.builtin.command:
+    argv:
+      - "{{ acme_web_executable }}"
+      - --config-home
+      - "{{ acme_web_config_home }}"
+      - --install-cert
+      - -d
+      - "{{ acme_web_cert_name }}"
+      - --key-file
+      - "{{ acme_web_registry_key }}"
+      - --fullchain-file
+      - "{{ acme_web_registry_fullchain }}"
+      - --reloadcmd
+      - "{{ acme_web_registry_reload_hook }}"
+  register: acme_web_install_registry
+  changed_when: acme_web_install_registry.rc == 0
+  when: >-
+    not acme_web_registry_cert_stat.stat.exists
+    or acme_web_force_install_cert | bool

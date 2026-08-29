@@ -1,0 +1,4 @@
+key "{{ acme_web_dns_tsig_name }}" {
+  algorithm {{ acme_web_dns_tsig_algo }};
+  secret "{{ acme_web_dns_tsig_secret }}";
+}

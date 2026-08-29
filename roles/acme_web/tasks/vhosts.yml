@@ -1,0 +1,64 @@
+---
+# Per-group vhosts. Written after the certificate exists — every one of them
+# references it, and nginx refuses to start on a missing ssl_certificate.
+
+- name: Render the default vhost (port 80 redirect + TLS catch-all)
+  ansible.builtin.template:
+    src: default.conf.j2
+    dest: "{{ acme_web_config_dir }}/conf.d/default.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Render the portal vhost
+  ansible.builtin.template:
+    src: computestacks.conf.j2
+    dest: "{{ acme_web_config_dir }}/conf.d/computestacks.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+  when: "'controller' in group_names"
+
+- name: Render the prometheus vhost
+  ansible.builtin.template:
+    src: prometheus.conf.j2
+    dest: "{{ acme_web_config_dir }}/conf.d/prometheus.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+  when: "'metrics' in group_names"
+
+- name: Render the loki vhost
+  ansible.builtin.template:
+    src: loki.conf.j2
+    dest: "{{ acme_web_config_dir }}/conf.d/loki.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+  when: "'metrics' in group_names"
+
+- name: Create the prometheus basic-auth file
+  community.general.htpasswd:
+    path: "{{ acme_web_htpasswd_dir }}/prometheus.htpasswd"
+    name: "{{ acme_web_prometheus_username }}"
+    password: "{{ acme_web_prometheus_password }}"
+    owner: root
+    group: root
+    mode: "0640"
+  no_log: true
+  when: "'metrics' in group_names"
+
+- name: Create the loki basic-auth file
+  community.general.htpasswd:
+    path: "{{ acme_web_htpasswd_dir }}/loki.htpasswd"
+    name: "{{ acme_web_loki_username }}"
+    password: "{{ acme_web_loki_password }}"
+    owner: root
+    group: root
+    mode: "0640"
+  no_log: true
+  when: "'metrics' in group_names"

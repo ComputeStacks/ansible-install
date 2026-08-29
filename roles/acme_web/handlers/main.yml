@@ -1,0 +1,16 @@
+---
+# A vhost or snippet change only needs a SIGHUP — the unit's ExecReload sends
+# one to the container.
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
+
+# The unit file, nginx.conf and the image itself are baked into the container
+# at creation, so those go through a full restart.
+- name: Restart nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: restarted
+    enabled: true
+    daemon_reload: true

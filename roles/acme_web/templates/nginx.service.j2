@@ -1,0 +1,43 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Nginx TLS terminator
+Requires=docker.service
+After=docker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ acme_web_container_name }} 2>/dev/null'
+ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ acme_web_container_name }} 2>/dev/null'
+
+# --network=host, and deliberately NO -p/--publish. A published port is DNAT'd
+# in PREROUTING and never traverses the nftables input chain, which would make
+# the firewall role's accepts for {{ cs_ports.controller_https }} /
+# {{ cs_ports.metrics_prometheus }} / {{ cs_ports.metrics_loki }} decorative.
+# Host networking is also what lets these vhosts proxy to 127.0.0.1 upstreams
+# (the portal, prometheus and loki all bind loopback on the host).
+ExecStart=/usr/bin/env docker run --rm --name {{ acme_web_container_name }} \
+      --log-driver=none \
+      --network=host \
+      --label com.computestacks.role=system \
+      -v {{ acme_web_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro \
+      -v {{ acme_web_config_dir }}/conf.d:/etc/nginx/conf.d:ro \
+      -v {{ acme_web_config_dir }}/common:/etc/nginx/common:ro \
+      -v {{ acme_web_config_dir }}/dhparam:/etc/nginx/dhparam:ro \
+      -v {{ acme_web_config_dir }}/ssl:/etc/nginx/ssl:ro \
+      -v {{ acme_web_config_dir }}/error_pages:/etc/nginx/error_pages:ro \
+      -v {{ acme_web_htpasswd_dir }}:/etc/nginx/passwords:ro \
+      -v {{ acme_web_html_dir }}:/etc/nginx/html:ro \
+      -v {{ acme_web_webroot }}:{{ acme_web_webroot }}:ro \
+      {{ nginx_image }}
+
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ acme_web_container_name }} 2>/dev/null'
+ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ acme_web_container_name }} 2>/dev/null'
+ExecReload=/usr/bin/env sh -c '/usr/bin/env docker kill -s HUP {{ acme_web_container_name }} 2>/dev/null'
+Restart=always
+RestartSec=30
+SyslogIdentifier=nginx
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=docker.service

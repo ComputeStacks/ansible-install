@@ -1,0 +1,98 @@
+---
+# acme.sh, pinned to an upstream release tag.
+#
+# Two deliberate differences from v1, which cloned the default branch and then
+# turned acme.sh's own self-updater on:
+#   * `version: "{{ acme_sh_version }}"` on the clone, so the installed client
+#     is the one versions.yml names.
+#   * `--auto-upgrade 0`, so acme.sh never silently replaces itself with HEAD
+#     from cron and defeats the pin. v1 ran `--upgrade --auto-upgrade`, which
+#     made the pin decorative.
+
+- name: Read the installed acme.sh version
+  ansible.builtin.command:
+    argv:
+      - "{{ acme_web_executable }}"
+      - --version
+  register: acme_web_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Install acme.sh at the pinned tag
+  when: acme_sh_version not in (acme_web_installed_version.stdout | default(''))
+  block:
+    - name: Create the acme.sh directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ acme_web_home }}"
+        - "{{ acme_web_config_home }}"
+
+    - name: Clone acme.sh at {{ acme_sh_version }}
+      ansible.builtin.git:
+        repo: "{{ acme_web_repo }}"
+        dest: "{{ acme_web_install_src }}"
+        version: "{{ acme_sh_version }}"
+        depth: 1
+        force: true
+      register: acme_web_clone
+      retries: 5
+      delay: 5
+      until: acme_web_clone is succeeded
+
+    - name: Run the acme.sh installer
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/bash
+          - "{{ acme_web_install_src }}/acme.sh"
+          - --install
+          - --nocron
+          - --noprofile
+          - --home
+          - "{{ acme_web_home }}"
+          - --config-home
+          - "{{ acme_web_config_home }}"
+          - --accountemail
+          - "{{ acme_web_account_email }}"
+        chdir: "{{ acme_web_install_src }}"
+      changed_when: true
+
+    - name: Remove the acme.sh clone
+      ansible.builtin.file:
+        path: "{{ acme_web_install_src }}"
+        state: absent
+
+- name: Disable the acme.sh self-upgrade
+  ansible.builtin.command:
+    argv:
+      - "{{ acme_web_executable }}"
+      - --config-home
+      - "{{ acme_web_config_home }}"
+      - --upgrade
+      - --auto-upgrade
+      - "0"
+  changed_when: false
+
+- name: Select the default certificate authority
+  ansible.builtin.command:
+    argv:
+      - "{{ acme_web_executable }}"
+      - --config-home
+      - "{{ acme_web_config_home }}"
+      - --set-default-ca
+      - --server
+      - "{{ 'zerossl' if acme_web_use_zerossl | bool else 'letsencrypt' }}"
+  changed_when: false
+
+- name: Register the ACME account
+  ansible.builtin.command:
+    argv: >-
+      {{ [acme_web_executable, '--config-home', acme_web_config_home,
+          '--register-account', '-m', acme_web_account_email]
+         + (['--server', 'zerossl'] if acme_web_use_zerossl | bool else []) }}
+  register: acme_web_register
+  changed_when: "'Already registered' not in acme_web_register.stdout"

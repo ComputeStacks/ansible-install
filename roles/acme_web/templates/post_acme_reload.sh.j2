@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+#
+# acme.sh --reloadcmd hook for the registry host.
+#
+# acme.sh keeps ONE install-cert configuration per certificate, so the registry
+# install (which runs last) is the one renewal fires. This hook therefore has
+# to do both jobs: refresh nginx's copy of the certificate AND restart the
+# tenant registry containers, which read their certificate once at start.
+# (v1's roles/nginx/files/post_acme_reload.sh, with its two bugs fixed: it
+# passed two `--filter ancestor=` values to one `docker ps`, and it wiped
+# nginx's certificate directory with `rm -rf` before copying.)
+
+set -euo pipefail
+
+REGISTRY_SSL="{{ acme_web_registry_ssl_dir }}"
+NGINX_SSL="{{ acme_web_ssl_dir }}"
+
+if [ -d "$NGINX_SSL" ]; then
+  rsync -a "${REGISTRY_SSL}/" "${NGINX_SSL}/"
+  systemctl reload nginx || systemctl restart nginx
+fi
+
+# One `docker ps` per image: repeated same-key filters are not reliably OR'd.
+containers=""
+for image in {% for image in acme_web_registry_images %}{{ image | quote }} {% endfor %}; do
+  containers="${containers} $(docker ps -q --filter "ancestor=${image}")"
+done
+
+for c in $(echo "$containers" | tr ' ' '\n' | sort -u); do
+  [ -n "$c" ] || continue
+  echo "Restarting registry container ${c}"
+  docker restart "$c" >/dev/null
+done

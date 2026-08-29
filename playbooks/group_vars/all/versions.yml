@@ -70,9 +70,18 @@ cadvisor_image: "ghcr.io/google/cadvisor:v0.60.5"
 # exists on Docker Hub (linux/amd64). Vault 2.0 is out but untested here and
 # this PKI is retired by cs-agent Phase 4 — stay on 1.x. v1 floated `latest`.
 vault_image: "hashicorp/vault:1.21.4"
-nginx_image: "nginx:1.28"                          # VERIFY (wave G/E)
+# Verified 2026-08-28 (wave G): nginx's even minor numbers are the stable
+# line, odd ones are mainline. 1.28 has been superseded — the current stable
+# line is 1.30 and its newest patch on Docker Hub (library/nginx) is 1.30.4,
+# updated 2026-08-25. Pinned to the exact patch rather than the 1.30 alias so
+# a converge cannot silently move the TLS terminator under the fleet.
+nginx_image: "nginx:1.30.4"
 
 # Packages
 postgresql_version: 17
-# acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED
-acme_sh_version: "3.1.2"                           # VERIFY (wave G)
+# acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED.
+# Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release
+# (acmesh-official/acme.sh releases/latest). Note the tag carries NO leading
+# 'v' on the 3.x line, unlike the old v2.x tags -- the role clones this string
+# verbatim, so do not add one.
+acme_sh_version: "3.1.4"

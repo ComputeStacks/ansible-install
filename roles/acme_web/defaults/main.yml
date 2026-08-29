@@ -1,0 +1,219 @@
+---
+# nginx TLS terminator + acme.sh, on the controller, metrics and registry
+# hosts. See README.md; DNS-01 provider credentials are documented in
+# docs/acme-providers.md.
+
+# --- nginx ----------------------------------------------------------------
+acme_web_container_name: nginx
+acme_web_config_dir: /etc/nginx
+acme_web_html_dir: "{{ acme_web_config_dir }}/html"
+acme_web_ssl_dir: "{{ acme_web_config_dir }}/ssl/acme"
+acme_web_cert_fullchain: "{{ acme_web_ssl_dir }}/fullchain.pem"
+acme_web_cert_key: "{{ acme_web_ssl_dir }}/privkey.pem"
+acme_web_dhparam_url: https://ssl-config.mozilla.org/ffdhe2048.txt
+
+# --- acme.sh --------------------------------------------------------------
+acme_web_home: /opt/acme
+acme_web_config_home: "{{ acme_web_home }}/data"
+acme_web_install_src: "{{ acme_web_home }}/src"
+acme_web_executable: "{{ acme_web_home }}/acme.sh"
+acme_web_repo: https://github.com/acmesh-official/acme.sh.git
+# HTTP-01 webroot. nginx serves /.well-known/acme-challenge/ from here on
+# port 80 for every vhost.
+acme_web_webroot: /var/www/acme-sh
+
+# ZeroSSL is the default CA (v1 parity). Set `use_zerossl: false` in the
+# inventory for Let's Encrypt.
+#
+# NOTE on naming: every variable an OPERATOR sets lives in the inventory under
+# its short, documented name (`use_zerossl`, `acme_challenge_method`,
+# `acme_cf_token`, ... — see docs/acme-providers.md). The role reads each one
+# through a prefixed role variable, which is what keeps the operator-facing
+# vocabulary stable across the v1 -> v2 rewrite while still satisfying the
+# role-prefix rule.
+acme_web_use_zerossl: "{{ use_zerossl | default(true) }}"
+acme_web_account_email: "{{ acme_account_email | default(cs_admin_email | default('')) }}"
+
+# HTTP-01 by default. Any other value selects a DNS-01 provider — see
+# docs/acme-providers.md for the per-provider credential variables.
+acme_web_challenge_method: "{{ acme_challenge_method | default('http') }}"
+
+# The certificate this host requests, derived from group membership (an
+# inventory predicate, never a gathered fact). A host in more than one group
+# gets one certificate covering every name; the first is the acme.sh cert
+# name, which is how acme.sh identifies it for --install-cert and renewal.
+acme_web_domains: >-
+  {{ (([cs_portal_domain] if 'controller' in group_names else [])
+      + ([cs_metrics_domain] if 'metrics' in group_names else [])
+      + ([cs_registry_domain] if 'registry' in group_names else []))
+     | reject('equalto', '') | list }}
+acme_web_cert_name: "{{ acme_web_domains | first | default('') }}"
+# ['-d', 'a.example.com', '-d', 'b.example.com'] — the argv fragment acme.sh
+# wants, built without shell quoting.
+acme_web_domain_args: "{{ ['-d'] | product(acme_web_domains) | list | flatten }}"
+
+# Re-run `acme.sh --install-cert` even when the target files already exist.
+# Needed after changing a --reloadcmd; off by default because the install
+# runs the reload hook, which restarts every registry container on the
+# registry host.
+acme_web_force_install_cert: false
+
+# Renewal timer (acme.sh --cron). acme.sh's own cron installer is disabled
+# (--nocron) in favour of this unit.
+acme_web_renew_service: acme_renew
+
+# --- container registry ---------------------------------------------------
+# Where the registry containers read their certificate from. The tree is
+# owned by roles/registry; this role creates the ssl directory because
+# site.yml runs acme_web first and --install-cert needs the target to exist.
+acme_web_registry_ssl_dir: /opt/container_registry/ssl
+acme_web_registry_fullchain: "{{ acme_web_registry_ssl_dir }}/fullchain.pem"
+acme_web_registry_key: "{{ acme_web_registry_ssl_dir }}/privkey.pem"
+acme_web_registry_reload_hook: /usr/local/bin/post_acme_reload
+# Images the reload hook restarts after a renewal. NOT pinnable here: the
+# controller hard-codes `cmptstks/registry:latest` when it creates a tenant
+# registry (app/models/container_registry.rb); `registry:2` is what older
+# installs are running. This list only decides which running containers get
+# restarted.
+acme_web_registry_images:
+  - cmptstks/registry:latest
+  - registry:2
+
+# --- basic auth (metrics host) -------------------------------------------
+acme_web_htpasswd_dir: "{{ acme_web_config_dir }}/passwords"
+acme_web_prometheus_username: promuser
+acme_web_loki_username: loguser
+acme_web_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
+acme_web_loki_password: "{{ loki_basic_auth_password | default('') }}"
+# Loopback upstreams, published by roles/metrics and roles/loki on this host.
+acme_web_prometheus_upstream: 127.0.0.1:9090
+acme_web_loki_upstream: 127.0.0.1:3100
+# The portal container runs --net=host and binds this itself.
+acme_web_portal_upstream: "127.0.0.1:{{ cs_ports.controller_acme_backend }}"
+
+# --- DNS-01 provider credentials -----------------------------------------
+# Ported from v1 roles/nginx/defaults. Each role variable reads the short,
+# operator-facing inventory name documented in docs/acme-providers.md and
+# defaults to empty. Set only the block for the provider named by
+# `acme_challenge_method`.
+
+# autodns
+acme_web_autodns_user: "{{ acme_autodns_user | default('') }}"
+acme_web_autodns_pass: "{{ acme_autodns_pass | default('') }}"
+acme_web_autodns_context: "{{ acme_autodns_context | default('') }}"
+
+# aws (Route 53)
+acme_web_aws_key: "{{ acme_aws_key | default('') }}"
+acme_web_aws_secret: "{{ acme_aws_secret | default('') }}"
+
+# cloudflare
+acme_web_cf_token: "{{ acme_cf_token | default('') }}"
+acme_web_cf_account: "{{ acme_cf_account | default('') }}"
+acme_web_cf_zone: "{{ acme_cf_zone | default('') }}"
+
+# cpanel
+acme_web_cpanel_username: "{{ acme_cpanel_username | default('') }}"
+acme_web_cpanel_api_key: "{{ acme_cpanel_api_key | default('') }}"
+acme_web_cpanel_hostname: "{{ acme_cpanel_hostname | default('') }}"
+
+# do (DigitalOcean)
+acme_web_do_key: "{{ acme_do_key | default('') }}"
+
+# gandi
+acme_web_gandi_key: "{{ acme_gandi_key | default('') }}"
+
+# godaddy
+acme_web_gd_key: "{{ acme_gd_key | default('') }}"
+acme_web_gd_secret: "{{ acme_gd_secret | default('') }}"
+
+# ionos
+acme_web_ionos_prefix: "{{ acme_ionos_prefix | default('') }}"
+acme_web_ionos_secret: "{{ acme_ionos_secret | default('') }}"
+
+# linode
+acme_web_linode_token: "{{ acme_linode_token | default('') }}"
+
+# nsupdate (RFC 2136)
+acme_web_dns_server: "{{ acme_dns_server | default('') }}"
+acme_web_dns_port: "{{ acme_dns_port | default(cs_ports.dns) }}"
+acme_web_dns_tsig_name: "{{ acme_dns_tsig_name | default('') }}"
+acme_web_dns_tsig_algo: "{{ acme_dns_tsig_algo | default('hmac-sha256') }}"
+acme_web_dns_tsig_secret: "{{ acme_dns_tsig_secret | default('') }}"
+acme_web_dns_tsig_key_path: "{{ acme_dns_tsig_key_path | default('/root/.acme-nsupdate.key') }}"
+
+# pdns (PowerDNS API)
+acme_web_pdns_url: "{{ acme_pdns_url | default('') }}"
+acme_web_pdns_serverid: "{{ acme_pdns_serverid | default('localhost') }}"
+acme_web_pdns_token: "{{ acme_pdns_token | default('') }}"
+acme_web_pdns_ttl: "{{ acme_pdns_ttl | default(60) }}"
+
+# vultr
+acme_web_vultr_key: "{{ acme_vultr_key | default('') }}"
+
+# Maps acme_web_challenge_method -> acme.sh --dns plugin + the environment the
+# plugin reads. Everything is a single data structure so adding a provider is
+# a defaults edit, not a new task file (v1 had eleven near-identical ones).
+acme_web_dns_providers:
+  autodns:
+    plugin: dns_autodns
+    env:
+      AUTODNS_USER: "{{ acme_web_autodns_user }}"
+      AUTODNS_PASSWORD: "{{ acme_web_autodns_pass }}"
+      AUTODNS_CONTEXT: "{{ acme_web_autodns_context }}"
+  aws:
+    plugin: dns_aws
+    env:
+      AWS_ACCESS_KEY_ID: "{{ acme_web_aws_key }}"
+      AWS_SECRET_ACCESS_KEY: "{{ acme_web_aws_secret }}"
+  cloudflare:
+    plugin: dns_cf
+    env:
+      CF_Token: "{{ acme_web_cf_token }}"
+      CF_Account_ID: "{{ acme_web_cf_account }}"
+      CF_Zone_ID: "{{ acme_web_cf_zone }}"
+  cpanel:
+    plugin: dns_cpanel
+    env:
+      cPanel_Username: "{{ acme_web_cpanel_username }}"
+      cPanel_Apitoken: "{{ acme_web_cpanel_api_key }}"
+      cPanel_Hostname: "{{ acme_web_cpanel_hostname }}"
+  do:
+    plugin: dns_dgon
+    env:
+      DO_API_KEY: "{{ acme_web_do_key }}"
+  gandi:
+    plugin: dns_gandi_livedns
+    env:
+      GANDI_LIVEDNS_KEY: "{{ acme_web_gandi_key }}"
+  godaddy:
+    plugin: dns_gd
+    env:
+      GD_Key: "{{ acme_web_gd_key }}"
+      GD_Secret: "{{ acme_web_gd_secret }}"
+  ionos:
+    plugin: dns_ionos
+    env:
+      IONOS_PREFIX: "{{ acme_web_ionos_prefix }}"
+      IONOS_SECRET: "{{ acme_web_ionos_secret }}"
+  linode:
+    plugin: dns_linode_v4
+    extra_args: ["--dnssleep", "900"]
+    env:
+      LINODE_V4_API_KEY: "{{ acme_web_linode_token }}"
+  nsupdate:
+    plugin: dns_nsupdate
+    env:
+      NSUPDATE_SERVER: "{{ acme_web_dns_server }}"
+      NSUPDATE_SERVER_PORT: "{{ acme_web_dns_port }}"
+      NSUPDATE_KEY: "{{ acme_web_dns_tsig_key_path }}"
+  pdns:
+    plugin: dns_pdns
+    env:
+      PDNS_Url: "{{ acme_web_pdns_url }}"
+      PDNS_ServerId: "{{ acme_web_pdns_serverid }}"
+      PDNS_Token: "{{ acme_web_pdns_token }}"
+      PDNS_Ttl: "{{ acme_web_pdns_ttl }}"
+  vultr:
+    plugin: dns_vultr
+    env:
+      VULTR_API_KEY: "{{ acme_web_vultr_key }}"

@@ -1,0 +1,39 @@
+{{ ansible_managed | comment }}
+# The controller portal. The portal container runs --net=host and its own
+# nginx binds {{ acme_web_portal_upstream }}; this vhost is the TLS edge in
+# front of it.
+server {
+  listen {{ cs_ports.controller_https }} ssl;
+  listen [::]:{{ cs_ports.controller_https }} ssl;
+  http2 on;
+  server_name {{ cs_portal_domain }};
+
+  ssl_certificate {{ acme_web_cert_fullchain }};
+  ssl_certificate_key {{ acme_web_cert_key }};
+  ssl_dhparam /etc/nginx/dhparam;
+  add_header Strict-Transport-Security max-age=31536000;
+
+  include /etc/nginx/common/acme.conf;
+  include /etc/nginx/common/error_pages.conf;
+
+  location / {
+    set $target http://{{ acme_web_portal_upstream }};
+    proxy_read_timeout 90s;
+    proxy_connect_timeout 90s;
+    proxy_pass $target;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass_request_headers on;
+    proxy_set_header Host $host;
+    proxy_set_header Accept-Encoding "";
+    proxy_set_header X-Forwarded-By $server_addr:$server_port;
+    proxy_hide_header Server;
+    proxy_hide_header X-Powered-By;
+    proxy_set_header Front-End-Https on;
+    proxy_intercept_errors on;
+    proxy_redirect off;
+  }
+}

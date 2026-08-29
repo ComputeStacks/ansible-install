@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Renew ACME certificates with acme.sh
+After=network-online.target nginx.service
+Wants=network-online.target
+Requires=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash {{ acme_web_executable }} --config-home {{ acme_web_config_home }} --cron --home {{ acme_web_home }}
+
+# acme.sh exits 2 when nothing was due for renewal.
+SuccessExitStatus=0 2

@@ -1,0 +1,187 @@
+---
+# nginx TLS terminator + acme.sh. Runs on the controller, metrics and
+# registry hosts (playbooks/site.yml).
+
+- name: Assert the nginx image is an exact pin
+  ansible.builtin.assert:
+    that:
+      - nginx_image is defined
+      - nginx_image is search(':')
+      - not (nginx_image is search(':(latest|stable|mainline)$'))
+    fail_msg: >-
+      nginx_image must be an exact repo:tag pin from
+      playbooks/group_vars/all/versions.yml. 'latest'/'stable'/'mainline'
+      float and would silently change the TLS terminator under the fleet.
+
+- name: Assert acme_sh_version is pinned to a release tag
+  ansible.builtin.assert:
+    that:
+      - acme_sh_version is defined
+      - acme_sh_version | length > 0
+      - acme_sh_version not in ['master', 'main', 'HEAD']
+    fail_msg: >-
+      acme_sh_version must be an upstream acme.sh RELEASE TAG (see
+      playbooks/group_vars/all/versions.yml). This role clones at that tag and
+      disables acme.sh's self-upgrade; tracking a branch would defeat both.
+
+- name: Assert this host has a certificate domain
+  ansible.builtin.assert:
+    that:
+      - acme_web_domains | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} runs acme_web but no domain is configured for
+      its group(s) {{ group_names | join(', ') }}. Set cs_portal_domain
+      (controller), cs_metrics_domain (metrics) and/or cs_registry_domain
+      (registry) in the inventory.
+
+- name: Assert the metrics basic-auth passwords are set
+  ansible.builtin.assert:
+    that:
+      - acme_web_prometheus_password | length > 0
+      - acme_web_loki_password | length > 0
+    fail_msg: >-
+      prometheus_basic_auth_password and loki_basic_auth_password must be set
+      in the vaulted secrets file. They are the ONLY thing standing between
+      the public internet and prometheus/loki on
+      {{ cs_ports.metrics_prometheus }}/{{ cs_ports.metrics_loki }}.
+  when: "'metrics' in group_names"
+
+# The registry and metrics hosts do not accept port 80 in the nftables input
+# chain (roles/firewall), so HTTP-01 validation cannot complete there.
+- name: Warn when HTTP-01 is selected on a host whose firewall does not open port 80
+  ansible.builtin.debug:
+    msg: >-
+      acme_web_challenge_method is 'http', but roles/firewall opens
+      cs_ports.controller_http ({{ cs_ports.controller_http }}) on the
+      controller only. HTTP-01 validation for {{ acme_web_domains | join(', ') }}
+      on {{ inventory_hostname }} will time out unless port 80 is reachable.
+      Use a DNS-01 provider here (docs/acme-providers.md), or have the
+      firewall wave open port 80 on this group.
+  when:
+    - acme_web_challenge_method == 'http'
+    - "'controller' not in group_names"
+
+- name: Install the nginx support packages
+  ansible.builtin.apt:
+    name:
+      - python3-passlib      # community.general.htpasswd
+      - rsync                # the registry certificate reload hook
+      - git                  # acme.sh clone
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the nginx directory layout
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ acme_web_config_dir }}"
+    - "{{ acme_web_config_dir }}/common"
+    - "{{ acme_web_config_dir }}/conf.d"
+    - "{{ acme_web_config_dir }}/error_pages"
+    - "{{ acme_web_html_dir }}"
+    - "{{ acme_web_ssl_dir }}"
+    - "{{ acme_web_webroot }}/.well-known/acme-challenge"
+
+- name: Create the htpasswd directory
+  ansible.builtin.file:
+    path: "{{ acme_web_htpasswd_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install nginx.conf
+  ansible.builtin.copy:
+    src: nginx.conf
+    dest: "{{ acme_web_config_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+- name: Install the shared error page config
+  ansible.builtin.copy:
+    src: error_pages.conf
+    dest: "{{ acme_web_config_dir }}/common/error_pages.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Install the error pages
+  ansible.builtin.copy:
+    src: "error_files/{{ item }}"
+    dest: "{{ acme_web_config_dir }}/error_pages/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - 400-error.html
+    - 403-error.html
+    - 404-error.html
+    - 408-error.html
+    - 500-error.html
+    - 502-error.html
+    - 503-error.html
+    - 504-error.html
+
+- name: Install the holding page
+  ansible.builtin.copy:
+    src: error_files/503-error.html
+    dest: "{{ acme_web_html_dir }}/index.html"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the dhparam group
+  ansible.builtin.get_url:
+    url: "{{ acme_web_dhparam_url }}"
+    dest: "{{ acme_web_config_dir }}/dhparam"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Install the ACME challenge location snippet
+  ansible.builtin.template:
+    src: acme.conf.j2
+    dest: "{{ acme_web_config_dir }}/common/acme.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Pull the nginx image
+  community.docker.docker_image_pull:
+    name: "{{ nginx_image }}"
+  notify: Restart nginx
+
+- name: Render the nginx systemd unit
+  ansible.builtin.template:
+    src: nginx.service.j2
+    dest: /etc/systemd/system/nginx.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+- name: Install acme.sh
+  ansible.builtin.include_tasks: acme_install.yml
+
+- name: Issue and install the certificate
+  ansible.builtin.include_tasks: acme_cert.yml
+
+- name: Render the vhosts
+  ansible.builtin.include_tasks: vhosts.yml
+
+- name: Ensure nginx is enabled and running
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: started
+    enabled: true
+    daemon_reload: true
