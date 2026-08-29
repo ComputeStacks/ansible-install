@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: ubuntu_pro
+  author: ComputeStacks
+  description: >-
+    Idempotently attaches a host to an Ubuntu Pro contract and keeps livepatch
+    enabled. No-op when the host is already attached; the token is never
+    logged.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

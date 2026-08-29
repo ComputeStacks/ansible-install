@@ -1,0 +1,88 @@
+---
+# Join this host to the tailnet, then record its tailnet address so the plays
+# that need PAIRWISE derivation (prometheus scrape targets, manifest
+# node.agent_host) can read it out of hostvars. See README.
+
+- name: Assert a tailscale auth key is present
+  ansible.builtin.assert:
+    that:
+      - tailscale_authkey is defined
+      - tailscale_authkey | default('') | length > 0
+    fail_msg: >-
+      The tailscale role ran without a 'tailscale_authkey'. site.yml gates this
+      role on the key being set in the vaulted secrets file; set it, or set
+      'tailscale_enabled: false' on the hosts that must stay off the tailnet.
+    quiet: true
+
+- name: Install and join tailscale
+  ansible.builtin.include_role:
+    name: artis3n.tailscale
+  vars:
+    # Upstream role variables. 'state' is the upstream name (a generic one —
+    # it is scoped to this include).
+    state: "{{ tailscale_package_state }}"
+    tailscale_args: "{{ tailscale_up_args | trim }}"
+
+- name: Read this host's tailnet IPv4 address
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - ip
+      - "-4"
+  register: tailscale_ip_result
+  changed_when: false
+  check_mode: false
+
+- name: Assert the host actually joined the tailnet
+  ansible.builtin.assert:
+    that:
+      - tailscale_ip_result.stdout_lines | default([]) | length > 0
+      - tailscale_ip_result.stdout_lines[0] is match('^100\\.')
+    fail_msg: >-
+      'tailscale ip -4' did not return a tailnet address on
+      {{ inventory_hostname }} (got: {{ tailscale_ip_result.stdout | default('') }}).
+      Every consumer of the tailnet address (prometheus scrape targets, the
+      manifest's node.agent_host) would silently fall back to the public path,
+      so this fails loudly instead.
+    quiet: true
+
+- name: Record the tailnet address for this play
+  ansible.builtin.set_fact:
+    tailscale_ip: "{{ tailscale_ip_result.stdout_lines[0] | trim }}"
+
+- name: Ensure the local facts directory exists
+  ansible.builtin.file:
+    path: "{{ tailscale_facts_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Read the existing local fact file
+  ansible.builtin.slurp:
+    src: "{{ tailscale_fact_file }}"
+  register: tailscale_existing_fact
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Persist the tailnet address as a local fact
+  # Merged, not overwritten: computestacks.fact is a shared namespace, and this
+  # role only owns the 'tailscale_ip' key in it.
+  ansible.builtin.copy:
+    dest: "{{ tailscale_fact_file }}"
+    content: >-
+      {{ ((tailscale_existing_fact.content | default('') | b64decode | from_json)
+          if (tailscale_existing_fact.content is defined) else {})
+         | combine({'tailscale_ip': tailscale_ip}) | to_nice_json }}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Refresh local facts so ansible_local is current for later plays
+  # Cheap (one filtered gather) and unconditional: the later plays that read
+  # hostvars[h].ansible_local.computestacks.tailscale_ip must never see the
+  # pre-join value.
+  ansible.builtin.setup:
+    filter:
+      - ansible_local

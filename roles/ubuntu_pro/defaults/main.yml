@@ -1,0 +1,17 @@
+---
+# Ubuntu Pro attach + livepatch. Enabled by setting 'ubuntu_pro_token' in the
+# vaulted secrets file (site.yml gates the role on it). The token is never
+# printed: every task that touches it is no_log.
+
+ubuntu_pro_package: ubuntu-pro-client
+ubuntu_pro_bin: /usr/bin/pro
+
+# Services to keep enabled once attached. `pro attach` already auto-enables the
+# entitlement set the contract ships with; this list is what the role asserts
+# and enables if missing.
+ubuntu_pro_services:
+  - livepatch
+
+# Extra flags for `pro attach` (e.g. "--no-auto-enable"). Leave empty to keep
+# the contract's default entitlements.
+ubuntu_pro_attach_args: ""

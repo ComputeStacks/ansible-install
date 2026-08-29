@@ -1,0 +1,29 @@
+---
+# Thin wrapper around artis3n.tailscale (pinned in requirements.yml).
+# `tailscale_authkey` itself comes from the vaulted secrets file and is the
+# switch that turns the whole feature on (site.yml gates the role on it).
+
+# Passed to the upstream role's `state` variable. 'present' installs the
+# package and leaves it alone; the upstream default of 'latest' would upgrade
+# tailscale on every converge, which contradicts docs/contracts.md rule 4
+# (every version pinned, nothing floats). See README §pinning.
+tailscale_package_state: present
+
+# MagicDNS would rewrite /etc/resolv.conf on every host. Servers here resolve
+# through their own resolver and the controller dials addresses, not names, so
+# DNS is deliberately left alone.
+tailscale_accept_dns: false
+
+# No exit node, no subnet routes, no tags by default. Extra flags for
+# `tailscale up` go here (e.g. "--advertise-tags=tag:cs" needs tailscale_tags
+# on the upstream role instead).
+tailscale_extra_args: ""
+tailscale_up_args: >-
+  --accept-dns={{ tailscale_accept_dns | bool | lower }}
+  {{ tailscale_extra_args }}
+tailscale_up_timeout: "120"
+
+# Local facts. Written so LATER runs and plays can read this host's tailnet
+# address out of hostvars without re-deriving it (see README §consumers).
+tailscale_facts_dir: /etc/ansible/facts.d
+tailscale_fact_file: "{{ tailscale_facts_dir }}/computestacks.fact"

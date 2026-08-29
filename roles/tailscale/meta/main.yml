@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: tailscale
+  author: ComputeStacks
+  description: >-
+    Joins a host to the ComputeStacks tailnet via the pinned artis3n.tailscale
+    role, then records the host's tailnet IPv4 address as a local fact for the
+    pairwise address derivations (prometheus scrape targets, manifest
+    node.agent_host).
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

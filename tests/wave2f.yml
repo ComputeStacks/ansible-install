@@ -1,0 +1,43 @@
+---
+# Wave 2F syntax-check harness (firewall, tailscale, ubuntu_pro). NOT a
+# converge — playbooks/site.yml owns the real play ordering and the gates on
+# tailscale_authkey / ubuntu_pro_token (docs/contracts.md).
+#
+#   ansible-playbook --syntax-check tests/wave2f.yml
+#
+# group_vars under playbooks/ are not auto-loaded for a playbook that lives
+# outside that directory, so the ports contract is loaded explicitly.
+
+- name: Host firewalls
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+  roles:
+    - firewall
+
+- name: Optional integrations, gated exactly as site.yml gates them
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+  roles:
+    - role: tailscale
+      when: tailscale_authkey is defined and (tailscale_enabled | default(true))
+    - role: ubuntu_pro
+      when: ubuntu_pro_token is defined
+
+# Attach mode reaches the v1 append path directly (Wave 4J's attach_fragments
+# role calls it this way); kept here so a change that breaks the entry point
+# fails the syntax check.
+- name: Attach-mode entry point
+  hosts: controller:metrics:backup
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+  tasks:
+    - name: Append the new node addresses to an existing v1 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v1_append
+      when: existing_env | default(false) | bool

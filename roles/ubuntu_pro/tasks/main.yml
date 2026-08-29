@@ -1,0 +1,66 @@
+---
+- name: Assert an Ubuntu Pro token is present
+  ansible.builtin.assert:
+    that:
+      - ubuntu_pro_token is defined
+      - ubuntu_pro_token | default('') | length > 0
+    fail_msg: >-
+      The ubuntu_pro role ran without an 'ubuntu_pro_token'. site.yml gates
+      this role on the token being set in the vaulted secrets file.
+    quiet: true
+
+- name: Install the Ubuntu Pro client
+  ansible.builtin.apt:
+    name: "{{ ubuntu_pro_package }}"
+    state: present
+
+- name: Check whether this host is already attached
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_pro_bin }}"
+      - api
+      - u.pro.status.is_attached.v1
+  register: ubuntu_pro_is_attached
+  changed_when: false
+  check_mode: false
+
+- name: Attach this host to the Ubuntu Pro contract
+  ansible.builtin.command:
+    argv: >-
+      {{ [ubuntu_pro_bin, 'attach', ubuntu_pro_token]
+         + (ubuntu_pro_attach_args | split if ubuntu_pro_attach_args | length > 0 else []) }}
+  # The token is an argument, so both the command line and any output are
+  # withheld from the log.
+  no_log: true
+  when: not ((ubuntu_pro_is_attached.stdout | from_json).data.attributes.is_attached | default(false))
+  changed_when: true
+
+- name: Read the current Ubuntu Pro service status
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_pro_bin }}"
+      - status
+      - "--all"
+      - "--format"
+      - json
+  register: ubuntu_pro_status
+  changed_when: false
+  check_mode: false
+
+- name: Determine which required services are not enabled yet
+  ansible.builtin.set_fact:
+    ubuntu_pro_missing_services: >-
+      {{ ubuntu_pro_services
+         | difference((ubuntu_pro_status.stdout | from_json).services
+                      | selectattr('status', 'equalto', 'enabled')
+                      | map(attribute='name') | list) }}
+
+- name: Enable the required Ubuntu Pro services
+  ansible.builtin.command:
+    argv:
+      - "{{ ubuntu_pro_bin }}"
+      - enable
+      - "{{ item }}"
+      - "--assume-yes"
+  loop: "{{ ubuntu_pro_missing_services }}"
+  changed_when: true
