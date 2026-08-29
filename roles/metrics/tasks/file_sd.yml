@@ -38,8 +38,12 @@
 # Tailscale pairwise derivation (docs/contracts.md "Tailscale address
 # derivation"): the scrape address for a node is its tailscale IP ONLY if
 # BOTH this metrics host and that node are tailnet-joined; otherwise
-# primary_ip. `tailscale_ip` is a Wave 2F hostvar that does not exist yet --
-# `default(primary_ip)` makes this correct before and after Wave 2F lands.
+# primary_ip. The address VALUE uses the blessed facts expression from
+# contracts.md "Facts exception" -- the set_fact `tailscale_ip` only exists
+# for hosts targeted THIS run, so under `--limit metrics` every un-targeted
+# node would otherwise silently rewrite to an unroutable primary_ip. The
+# persisted `ansible_local.computestacks.tailscale_ip` fact carries the value
+# for hosts this run never touched; primary_ip is the final fallback.
 - name: Render the per-AZ file_sd fragments (node_exporter, cadvisor, haproxy)
   ansible.builtin.template:
     src: file_sd_fragment.yml.j2
@@ -58,7 +62,9 @@
     # inline (rather than via intermediate named booleans) to avoid
     # chaining a `| bool` filter over a cross-referenced templated var.
     metrics_scrape_address: >-
-      {{ (hostvars[item.1].tailscale_ip | default(hostvars[item.1].primary_ip))
+      {{ (hostvars[item.1].tailscale_ip
+          | default(hostvars[item.1].ansible_local.computestacks.tailscale_ip
+                    | default(hostvars[item.1].primary_ip)))
          if (tailscale_authkey is defined
              and (tailscale_enabled | default(true))
              and (hostvars[item.1].tailscale_enabled | default(true)))

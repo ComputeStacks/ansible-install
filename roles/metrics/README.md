@@ -68,19 +68,31 @@ this metrics host and that node are tailnet-joined**; otherwise
 `primary_ip`. `tasks/file_sd.yml` computes this per target as:
 
 ```
-metrics_scrape_address = (hostvars[node].tailscale_ip | default(hostvars[node].primary_ip))
+metrics_scrape_address = (hostvars[node].tailscale_ip
+                          | default(hostvars[node].ansible_local.computestacks.tailscale_ip
+                                    | default(hostvars[node].primary_ip)))
                           if (tailscale_authkey is defined
                               and (tailscale_enabled | default(true))          # this host
                               and (hostvars[node].tailscale_enabled | default(true)))  # target node
                           else hostvars[node].primary_ip
 ```
 
-`tailscale_ip` is a **Wave 2F** hostvar that does not exist yet;
-`default(hostvars[node].primary_ip)` makes this correct both before and
-after Wave 2F lands (it evaluates to `primary_ip` today, and to the real
-tailnet address once Wave 2F sets `tailscale_ip` on tailnet-joined hosts).
-A remote region with tailscale disabled is scraped over its public/LAN route
-in cleartext — that's the operator's explicit, documented choice, not a bug.
+The address VALUE uses the blessed facts expression from docs/contracts.md
+("Facts exception: tailscale_ip"), with `primary_ip` as the final fallback
+instead of `''`. Both defaults are load bearing: `hostvars[node].tailscale_ip`
+is a `set_fact` the `tailscale` role sets only on hosts targeted in the
+current run, so under `--limit metrics` — the normal way to re-render
+file_sd — it is undefined for every node. Without the middle term, every
+tailnet scrape target would silently rewrite to an unroutable `primary_ip`
+and the whole fleet's metrics would go stale. The middle term reads the
+value the `tailscale` role persisted into
+`/etc/ansible/facts.d/computestacks.fact`, which survives across runs and
+`--limit` scopes.
+
+Membership stays a pure-inventory predicate — only the address value uses
+the facts exception. A remote region with tailscale disabled is scraped over
+its public/LAN route in cleartext — that's the operator's explicit,
+documented choice, not a bug.
 
 ### Attach mode (`existing_env: true`)
 
