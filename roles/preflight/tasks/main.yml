@@ -48,6 +48,59 @@
     success_msg: "az values are unique across all {{ groups['nodes'] | length }} node(s)"
   run_once: true
 
+- name: Assert exactly one controller host
+  ansible.builtin.assert:
+    that:
+      - (groups['controller'] | default([])) | length == 1
+    fail_msg: >-
+      groups['controller'] must contain exactly one host (found
+      {{ (groups['controller'] | default([])) | length }}). Later roles
+      (vault, and the controller-runner delegation cs_agent's enroll task
+      uses) assume a single controller and delegate to it directly. Fix the
+      inventory so 'controller' has exactly one host.
+    success_msg: "groups['controller'] has exactly one host"
+  run_once: true
+
+- name: Assert exactly one metrics host
+  ansible.builtin.assert:
+    that:
+      - (groups['metrics'] | default([])) | length == 1
+    fail_msg: >-
+      groups['metrics'] must contain exactly one host (found
+      {{ (groups['metrics'] | default([])) | length }}). A second/multi
+      metrics host is not supported — prometheus/loki/alertmanager and the
+      per-AZ file_sd fragments assume a single metrics host. Fix the
+      inventory so 'metrics' has exactly one host.
+    success_msg: "groups['metrics'] has exactly one host"
+  run_once: true
+
+- name: Assert at most one backup host
+  ansible.builtin.assert:
+    that:
+      - (groups['backup'] | default([])) | length == 1
+    fail_msg: >-
+      groups['backup'] must contain exactly one host (found
+      {{ (groups['backup'] | default([])) | length }}) — cs_agent delegates
+      borg key installation to `groups['backup'] | first`. Fix the
+      inventory so 'backup' has exactly one host.
+    success_msg: "groups['backup'] has exactly one host"
+  when: (groups['backup'] | default([])) | length > 0
+  run_once: true
+
+- name: Assert exactly one primary nameserver when using the powerdns driver
+  ansible.builtin.assert:
+    that:
+      - (groups['ns_primary'] | default([])) | length == 1
+    fail_msg: >-
+      groups['ns_primary'] must contain exactly one host (found
+      {{ (groups['ns_primary'] | default([])) | length }}) when
+      dns_driver == 'powerdns' — it is the pdns replication leader and the
+      controller's zone-management API target. Fix the inventory so
+      'ns_primary' has exactly one host.
+    success_msg: "groups['ns_primary'] has exactly one host"
+  when: dns_driver | default('') == 'powerdns'
+  run_once: true
+
 - name: Assert hostnames (where defined) are a single lowercase word, not an FQDN
   ansible.builtin.assert:
     that:
