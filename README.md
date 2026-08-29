@@ -1,190 +1,251 @@
-# Ansible playbooks to install a complete ComputeStacks installation
+# ComputeStacks provisioner
 
-Before proceeding, be sure to review our [architecture overview](https://computestacks.notion.site/Architecture-Overview-63ad0f8b371a41c7b89770f315191648), and our [minimum requirements](https://computestacks.notion.site/Installation-Plan-d40223528e254733a7bf08925059c711#cb50536966fc46cb8980ed71535e4cb7). We are also more than happy to help you design your ComputeStacks environments. Please [contact us](https://www.computestacks.com/contact) to learn more.
+Ansible playbooks that install and maintain a complete [ComputeStacks](https://www.computestacks.com)
+environment: the controller, the metrics and logging stack, the backup server,
+the container registry host, authoritative DNS, and one or more regions of
+container nodes.
 
-## Local Machine Prerequisites
+Two entry points:
 
-* make _(installed by default on all linux & mac systems)_
-* [ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html)
+| Playbook | Use it for |
+| --- | --- |
+| `playbooks/site.yml` | A whole environment, from bare Ubuntu 26.04 hosts. |
+| `playbooks/add-region.yml` | A new region/AZ/node attached to an environment that already exists. |
 
-Once ansible is installed, run:
+Both are convergent: re-running reconciles configuration, images and package
+versions rather than skipping work it thinks is already done. Everything
+externally sourced is pinned in `playbooks/group_vars/all/versions.yml`, and
+a bump there rolls out on the next run.
 
-```bash
-make roles
-```
+Start with [`docs/install.md`](docs/install.md) for a step-by-step greenfield
+install. This file is the reference.
 
+## Requirements
 
-> Please first check and see if [terraform]((https://github.com/ComputeStacks?q=terraform&type=&language=)) scripts exist for your platform. This is will greatly aid in building your inventory file and ensuring a more successful installation process.
-
-### Inventory File
-
-If you used one of our [terraform setup scripts](https://github.com/ComputeStacks?q=terraform&type=&language=) **_(RECOMMENDED)_** to create your cluster, then you should already have a skeleton `inventory.yml` file that you can place in this directory. Otherwise, `cp inventory.yml.sample inventory.yml`.
-
-Ensure you fill out all the variables and ensure everything is correct. To see all available settings, check each [role](roles/) and look at their `defaults/main.yml` file.
-
-### DNS
-
-Various parts of this ansible package will require the domains defined in your `inventory.yml` file to be correctly setup. Please configure those domains and ensure the changes have been propagated before proceeding.
-
-<details>
-<summary>Example DNS Settings</summary>
-<p>
-
-```
-a.dev.cmptstks.net. IN A %{PUBLIC IP OF NODE}
-metrics.dev.cmptstks.net. IN A %{PUBLIC IP OF METRICS SERVER}
-*.a.dev.cmptstks.net. IN CNAME a.dev.cmptstks.net.
-portal.dev.cmptstks.net. IN A %{controller ip address}
-cr.dev.cmptstks.net. IN CNAME portal.dev.cmptstks.net.
-```
-
-</p>
-</details>
-
-### Requirements for each server
-#### Server Hostnames (Skip if you used Terraform)
-
-Ensure all hostnames are configured properly on each node.
-Our system expects the hostnames on nodes to be 1 lowercase word (dashes or underscores are ok), no special characters or spaces. They should not be FQDN or have the dot notation.
-
-<details>
-<summary>Example using node101, node102, node103</summary>
-<p>
+**Control machine.** ansible-core 2.19 or newer, plus the `cryptography`
+python library — several roles inspect certificates with
+`community.crypto`, which runs on the control machine rather than on the
+managed hosts so the fleet needs no python crypto libraries.
 
 ```bash
-hostname node101 && echo "node101" > /etc/hostname && echo "127.0.0.1 node101" >> /etc/hosts
+ansible-galaxy role install -r requirements.yml -p galaxy_roles
+ansible-galaxy collection install -r requirements.yml -p collections
 ```
 
-</p>
-</details>
+`galaxy_roles/` and `collections/` are gitignored; `ansible.cfg` already
+points `roles_path` and `collections_path` at them. Re-run both commands after
+a `requirements.yml` bump.
 
+**Managed hosts.** Ubuntu 26.04 LTS, amd64, with root SSH from the control
+machine and a resolvable, unique, single-word hostname (`node101`, not
+`node101.example.com`). Nothing else — the playbooks install their own
+prerequisites. Hosts in an *existing* v1 environment are the exception: they
+are Debian, they are flagged `existing_env: true`, and attach mode only ever
+adds to them.
 
-#### Install the following packages (Skip if you used Terraform)
+**DNS.** The portal, metrics and registry domains must resolve to their hosts
+before the run, because the TLS certificates are issued during it:
 
-<details>
-<summary>Required packages when NOT using our terraform provisioners</summary>
-<p>
+```
+portal.example.com.       IN A     <controller public ip>
+metrics.example.com.      IN A     <metrics public ip>
+cr.example.com.           IN A     <registry public ip>
+usercontent.example.com.  IN NS    ns1.example.com.
+```
+
+## Inventory
+
+One inventory describes the whole install — every region, every shared host.
+Copy the example and edit it:
 
 ```bash
-apt-get update
-apt-get -y install openssl \
-                   ca-certificates \
-                   linux-headers-amd64 \
-                   python3 \
-                   python3-pip \
-                   python3-openssl \
-                   python3-apt \
-                   python3-setuptools \
-                   python3-wheel
+cp -r inventories/example inventories/prod
 ```
 
-</p>
-</details>
+* `hosts.yml` — the groups (`controller`, `metrics`, `backup`, `registry`,
+  `nameservers` with `ns_primary`/`ns_followers`, `nodes`) and the host vars.
+  Every node needs `hostname`, `primary_ip`, `public_ip`, `region`, `az`,
+  `container_network` and `container_network_name`; preflight asserts all of
+  them. `region` becomes a controller *Location*, `az` becomes a controller
+  *Region*, and there is exactly one node per `az`.
+* `group_vars/all/main.yml` — domains, locale, currency, DNS driver, ACME
+  settings.
+* `group_vars/all/secrets.yml` — everything secret. Encrypt it (below).
+* `constructed.yml` — generates `region_<name>` and `az_<name>` groups from
+  the node host vars, so `--limit region_exm001` works with no maintained
+  nesting.
 
+Templates read **inventory vars only**, never gathered facts. That is what
+makes `--limit` safe: a partial run still renders the full picture, instead of
+quietly dropping the regions it did not target out of the prometheus
+configuration or the firewall.
 
-***
-## Running the installer
-
-### Pre-Bootstrap
-
-Ensure nameservers are configured prior to running the bootstrap process.
+### Secrets
 
 ```bash
-make nameservers
+ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
+ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 ```
 
-
-
-### Bootstrap A New Cluster
+Generate the two immutable values once, before the first run:
 
 ```bash
-make bootstrap
+openssl rand -hex 64   # secret_key_base
+openssl rand -hex 64   # user_auth_secret
 ```
 
-The last step in this script will reboot servers to finalize configuration.
+> **`secret_key_base` and `user_auth_secret` can never be changed.** Every
+> encrypted column in the controller — agent tokens, DNS API keys, load
+> balancer certificates — is keyed off `secret_key_base`, and
+> `Secret.decrypt!` returns `nil` on a mismatch rather than raising. Rotating
+> it does not lock you out; it silently empties every credential the
+> controller holds, and the symptoms appear days later as failing DNS,
+> unreachable agents and broken TLS. **Rotation is a reinstall.** These
+> playbooks never generate either value (v1 did, when they were blank) and
+> preflight fails on a blank or short one.
 
-
-## Post-Installation
-
-After running and allowing the servers to reboot, you can perform some basic validation by running:
+## Running an install
 
 ```bash
-make validate
+ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 ```
 
-## Add Region / Availability Zone
-To add a new region or availability zone, make a copy of your previous `inventory.yml` file and make the following changes:
+The play order is a contract, not a convenience (`docs/contracts.md`):
 
-1. Change `region_name` and/or, `availability_zone_name`
-2. Replace all nodes with your new nodes
-3. (optional) Change metrics / backup servers. You can re-use the existing ones if you wish.
+```
+preflight -> base system -> tailscale -> nameservers -> docker
+  -> controller (vault, postgres, redis, nginx/acme, portal)
+  -> node docker TLS -> metrics -> registry -> backup -> node base stack
+  -> firewalls -> ssh trust
+  -> controller_seed        creates the Node rows and mints the agent tokens
+  -> cs_agent on the nodes  installs and enrols against those rows
+  -> controller_post_enroll datachannel + metadata backfills
+  -> validate
+```
 
-Re-run the bootstrap command:
+Seeding has to precede enrolment (the token does not exist before it), and the
+backfills have to follow it (they call every node's agent, which rejects an
+unenrolled node). Re-ordering those three breaks the install.
+
+Useful flags: `--limit region_exm001` for one region, `--check` for a dry run
+(with the usual check-mode caveats around anything driven by a command's
+output), `--tags enroll` to re-enrol a node on its own.
+
+## Validating
+
+The last play asserts the things that otherwise fail silently: services and
+containers up, the controller reaching each node's agent, the prometheus
+label contract answering the controller's own placement query, borg reachable
+from every node, the portal reachable from every node, root SSH from the
+controller, and the tenant zone resolving on every nameserver. Run it on its
+own at any time:
 
 ```bash
-make bootstrap
+ansible-playbook -i inventories/prod playbooks/site.yml --tags validate
 ```
 
+See [`roles/validate/README.md`](roles/validate/README.md) for the full check
+list, what each failure means, and how to skip one.
 
-## FAQ
+## Adding a region
 
-### How to install ansible
+For a v2 environment, add the node to the same inventory and re-run
+`site.yml` — optionally `--limit` scoped, which is safe by construction.
 
-<details>
-<summary>Mac OSX</summary>
-<p>
-
-[Install Homebrew](https://docs.brew.sh/Installation)
+For an environment built by the **v1** playbooks, use attach mode:
 
 ```bash
-brew install ansible
+ansible-playbook -i inventories/prod playbooks/add-region.yml --ask-vault-pass
 ```
 
-</p>
-</details>
+It builds the new node in full and touches the existing shared hosts only
+additively — a prometheus `file_sd` fragment, firewall appends, a borg
+authorized_keys entry, and two appended environment keys on the controller. It
+never re-renders a file on a host it does not fully describe. Read
+[`docs/attach-mode.md`](docs/attach-mode.md) first: it has prerequisites,
+including a controller already upgraded to a release carrying
+`rake bootstrap:apply`, and it restarts the portal.
 
-<details>
-<summary>Linux</summary>
-<p>
+## Upgrades
 
-[Install pyenv](https://github.com/pyenv/pyenv) for your local (non-root) user account.
+**Anything pinned in `versions.yml`** — container images, the cs-agent
+package, borg, acme.sh, prometheus, loki — is upgraded by editing that file
+and re-running the playbook. The roles are convergent: a changed pin
+re-renders the unit or re-installs the package and the handler restarts the
+service. Nothing floats, so nothing moves on its own.
 
-You can set the new version with `pyenv global 3.9.1` _(replace `3.9.1` with the version you installed)_
+Two pins move together and are marked as such in `versions.yml`:
+`borg_version` (the server binary) with `borg_image` (the client container),
+and `loki_image` with `fluentd_loki_image`.
+
+**The controller** is pinned by *minor* tag (`controller_image_tag: "9.7"`),
+which is a deliberate rolling channel: patch releases inside the line are
+picked up by
 
 ```bash
-python -m pip install --user ansible
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+cstacks upgrade      # on the controller: pg_dump, pull, migrate, restart
 ```
 
-_Note: Check if you have a `.bashrc` file, it may be `.bash_profile` for your distribution._
+which the `controller` role also runs for you when the running container's
+image no longer matches the configured tag. A new minor or major line is an
+edit to `versions.yml` and a re-run. Read the controller's own release notes
+first; this playbook does not know what a given release needs.
 
-This will ensure you have the most recent version of ansible.
+**The playbooks themselves**: pull, re-install the galaxy dependencies, re-run
+`site.yml`.
 
-</p>
-</details>
+## Controller database backup and restore
 
-### Enable Swap Limit
+`cstacks database-backup` writes a gzipped `pg_dump` of the controller
+database to `/var/lib/computestacks/backups/`, connecting as the peer-auth
+`root` superuser over the unix socket. `cstacks upgrade` runs it first, before
+it pulls or migrates anything, so a failed dump aborts the upgrade instead of
+leaving you mid-migration with no copy.
 
-In order to allow swap limitations set on containers, you need to perform the following on each node:
+This is the *controller's own* database. Tenant volumes are backed up
+separately by cs-agent to the borg server; nothing else backs up the
+controller. Schedule it — a systemd timer or a cron entry calling
+`cstacks database-backup` daily, with the output directory copied off-host —
+and keep the dumps somewhere that survives the controller.
 
-1) Modify the file `/etc/default/grub`
-2) Add `cgroup_enable=memory swapaccount=1` to the existing `GRUB_CMDLINE_LINUX_DEFAULT` setting
-3) run `update-grub`
-4) reboot
+To restore:
 
-_Note: This can add about 1% of overhead._
+```bash
+cstacks stop
+# as root, on the controller:
+dropdb cloudportal && createdb -O computestacks cloudportal
+zcat /var/lib/computestacks/backups/cloudportal-<stamp>.sql.gz | psql cloudportal
+cstacks run
+```
 
-## Troubleshooting
-### NetworkManager Hostname Error
+A restore is only usable with the **same** `secret_key_base` the dump was
+taken under. Keep the vaulted `secrets.yml` with the backups; the dump alone
+is not a recoverable environment.
 
-How to Resolve `set-hostname: current hostname was changed outside NetworkManager: '<hostname>'` in logs:
-
-Edit `/etc/NetworkManager/NetworkManager.conf` and add `hostname-mode=none` to the `[main]` block, and reboot the server.
-
-**Example:**
+## Repository layout
 
 ```
-[main]
-#plugins=ifcfg-rh,ibft
-hostname-mode=none
+ansible.cfg                     roles_path, collections_path, ssh settings
+requirements.yml                pinned galaxy roles and collections
+playbooks/site.yml              greenfield converge
+playbooks/add-region.yml        attach mode
+playbooks/group_vars/all/       versions.yml (pins) and ports.yml (the ports contract)
+playbooks/vars/                 platform vars a pinned galaxy role is missing
+inventories/example/            copy this
+roles/                          one README.md per role: what it owns and why
+tests/roles.yml                 per-role syntax harness
+docs/
 ```
+
+* [`docs/install.md`](docs/install.md) — step-by-step greenfield install.
+* [`docs/attach-mode.md`](docs/attach-mode.md) — adding a region to an
+  existing v1 environment.
+* [`docs/acme-providers.md`](docs/acme-providers.md) — ACME challenge methods
+  and the DNS-01 provider matrix.
+* [`docs/contracts.md`](docs/contracts.md) — the rules every role obeys:
+  ownership, play ordering, the ports and prometheus contracts, attach-mode
+  limits. Read this before changing anything.
+
+Each role's `README.md` documents what it owns, its variables, and how it
+differs from the v1 role it replaces. They are the reference for behaviour;
+this file is the reference for running the thing.

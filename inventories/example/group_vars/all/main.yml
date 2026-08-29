@@ -43,4 +43,8 @@ acme_account_email: admin@example.com
 # Attach-mode required inputs describing the existing environment:
 # backup_host_path: /mnt
 # backup_borg_remote_path: /usr/bin/borg
-# (backups_key must be the existing environment's value, in secrets.yml)
+# In secrets.yml, these must ALSO be the existing environment's values, not
+# new ones — nothing on a shared host is re-rendered to match them:
+#   secret_key_base (asserted byte-for-byte), backups_key,
+#   prometheus_basic_auth_password, loki_basic_auth_password.
+# See docs/attach-mode.md.

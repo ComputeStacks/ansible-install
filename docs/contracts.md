@@ -123,7 +123,57 @@ Sections omittable. Secrets-bearing file: root 0600, deleted after successful
 apply. `cstacks seed` wraps `rake bootstrap:apply[<path>]`; `DRY_RUN=1`
 supported and used as the attach-mode gate.
 
-### Definition of done (every provisioner wave)
+### Final wiring (Wave 4J) — decisions that closed the plan
+
+Recorded here because they change what the ownership map above says, or
+resolve a flag an earlier wave raised. Nothing above is amended; this is the
+delta.
+
+1. **`attach_fragments` was not built.** The plan gave Wave 4J a thin glue
+   role composing the attach entry points per host group. Written out, it was
+   one role whose entire body was `when: 'metrics' in group_names` branches
+   around three `include_role` calls — strictly worse than the plays that
+   already scope by `hosts:`. The entry points are called directly from
+   `playbooks/add-region.yml`, one play per host group. Ignore
+   `attach_fragments` in the Wave 4J ownership line.
+2. **`node_exporter` is a new role** (`roles/node_exporter`, Wave 4J), on
+   `hosts: all`. The plan assigned it to "a community role in the all-hosts
+   play", but no such role was ever pinned, and both consumers (`metrics`
+   scrapes it everywhere, `firewall` opens 9100 everywhere) were already
+   built. Distro package, held, as the plan requires.
+3. **`add-region.yml` runs the whole `docker_tls` role on the new node**, not
+   `tasks_from: issue`. `tasks/main.yml` routes through `issue.yml` — which
+   is the piece that reaches the existing controller's vault — and then
+   installs the listener drop-in, without which the certificate sits on disk
+   and the controller has nothing to dial. The `issue` entry point remains
+   for callers that only want issuance; `tests/roles.yml` keeps it parsed.
+4. **The metrics/loki containerization style stays as built** (hand-rolled
+   systemd units wrapping `docker run --rm`) alongside `vault`'s
+   `community.docker.docker_container`. Wave 2E flagged the inconsistency;
+   both satisfy rule 3, and unifying them means rewriting three working
+   roles for style. **Punted deliberately** — if it is ever unified, the
+   `docker_container` form is the one to keep, and it is one change across
+   `metrics`, `loki` and `node_observability` at once, not a drive-by.
+5. **`loki_image` and `fluentd_loki_image` stay paired at 2.9.10**, as Wave
+   2D and 2E both asked. `versions.yml` carries the pairing note on both
+   entries; they move together or not at all.
+6. **Two pins are deliberately empty**, with VERIFY notes in `versions.yml`:
+   the docker engine packages and `node_exporter_apt_version`. Neither
+   upstream publishes anything for Ubuntu 26.04 yet, so there is no version
+   string to pin honestly; both packages are `apt-mark hold`-ed after
+   install, which is what v1 actually relied on, and the holds are released
+   before each install so a later pin still rolls through.
+7. **`playbooks/vars/Ubuntu-26.yml`** supplies the platform variables
+   `geerlingguy.postgresql` 4.0.0 is missing for Ubuntu 26 — its first task
+   is an `include_vars` that would otherwise fail outright. `include_vars`
+   falls back to the playbook directory, so this needs no fork of the pinned
+   role.
+8. **The eight per-wave syntax harnesses are one file**, `tests/roles.yml`.
+   They existed because `site.yml` did not parse yet. It does now, so the
+   harness keeps only what the two playbooks cannot cover: every role in
+   isolation and every reusable `tasks_from:` entry point.
+
+## Definition of done (every provisioner wave)
 `ansible-lint roles/<role>` clean (new .ansible-lint at repo root, production
 profile); `ansible-playbook --syntax-check` of a minimal per-role test play if
 site.yml doesn't parse yet; role README.md (purpose, vars, owner); no writes

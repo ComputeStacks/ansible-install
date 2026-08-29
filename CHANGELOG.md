@@ -1,5 +1,49 @@
 # Changelog
 
+## v2 — August 28, 2026
+
+Ground-up rewrite. The previous tree is tagged `v1-final`; an environment
+built by it keeps working and is extended with `playbooks/add-region.yml`
+rather than converged onto this one.
+
+* **Ubuntu 26.04 LTS** replaces Debian. Consul is gone from the whole stack,
+  along with the consul PKI, the containerized backup agent, and the
+  generated `bootstrap.rake`.
+* **Multi-region is first class.** One inventory describes the whole
+  install; `region`/`az` are node host vars, and shared-host config is
+  rendered by iterating groups instead of indexing `[0]`. Templates read
+  inventory vars only, never gathered facts, so `--limit` can no longer drop
+  an untargeted region out of the prometheus configuration or the firewall.
+* **Two playbooks:** `site.yml` for a whole environment, `add-region.yml` for
+  a new region against an existing one — which writes to the existing shared
+  hosts only additively (`docs/attach-mode.md`).
+* **Controller seeding is a versioned manifest** applied by
+  `rake bootstrap:apply`, replacing the generated rake task that had drifted
+  from the application's models across three releases.
+* **cs-agent v3.3.0** as a native deb, enrolled by reading the token hash
+  controller-side.
+* **Every version is pinned** in `playbooks/group_vars/all/versions.yml`, and
+  every role is convergent: a pin bump rolls out on the next run, and no role
+  skips its work because a service already exists.
+* **`SECRET_KEY_BASE` and `USER_AUTH_SECRET` are immutable inputs.** v1
+  generated them when blank, which silently destroyed every encrypted column
+  on a re-run against a wiped environment file. Preflight now fails instead.
+* **nftables in a dedicated table**, never `flush ruleset` — v1's script
+  destroyed docker's and the agent's rules on every reload, and appended
+  duplicate rules on every converge.
+* **Backups are SSH/borg only**; NFS is gone, the borg client and server are
+  pinned to the same version, and the node authenticates as an unprivileged
+  account with its own key.
+* **Optional tailscale mesh** for control-plane traffic between regions, and
+  optional Ubuntu Pro livepatch.
+* **A `validate` role that checks the legs that fail silently**: the
+  prometheus label contract, the datachannel latch, the controller's dial
+  path to each agent, borg, root SSH, and the portal from the nodes.
+* Secrets live in an ansible-vault file; nothing in the tree carries a real
+  hostname, address or credential.
+
+***
+
 ## December 3, 2025
 
 * Update cadvisor, node backup agent, and docker daemon.
