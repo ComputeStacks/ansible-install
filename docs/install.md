@@ -186,12 +186,20 @@ written, and both fail loudly rather than silently:
   `download.docker.com/linux/ubuntu/dists/` has no suite for your release
   yet, set `docker_apt_repository` in `group_vars/all/main.yml` to the newest
   suite it does publish (there is a commented example there).
-* **`geerlingguy.postgresql`** ships no `Ubuntu-26` platform vars file. This
-  repository supplies one at `playbooks/vars/Ubuntu-26.yml`, which
-  `include_vars` picks up from the playbook directory — no fork or patch
-  needed. It assumes the archive has `postgresql-17`; if 26.04 ships a
-  different default major version, change `postgresql_version` in
-  `versions.yml` and that file together.
+* **PostgreSQL is pinned at major 17 and does not come from the Ubuntu
+  archive.** 26.04 ships PostgreSQL 18 and carries no `postgresql-17`, so
+  `roles/postgres_repo` configures the PGDG repository
+  (`apt.postgresql.org`, `resolute-pgdg` suite) with an apt preferences pin
+  and runs before `geerlingguy.postgresql` on the controller and before
+  `roles/powerdns` on the nameservers — the only two places a postgres
+  package is installed. **Do not "fix" a mismatch by bumping
+  `postgresql_version` to whatever major the archive offers**: 17 is the
+  major the controller's schema and CI are validated against, which is the
+  entire reason `postgres_repo` exists. Changing it means re-validating the
+  controller repo and editing `playbooks/vars/Ubuntu-26.yml` in the same
+  commit. That file also supplies the `Ubuntu-26` platform vars
+  `geerlingguy.postgresql` ships no copy of; `include_vars` picks it up from
+  the playbook directory, so no fork or patch is needed.
 
 The `docker_apt_packages` and `node_exporter_apt_version` entries in
 `versions.yml` are deliberately unpinned for the same reason — there is no

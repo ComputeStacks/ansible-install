@@ -22,6 +22,12 @@ rather than converged onto this one.
   from the application's models across three releases.
 * **cs-agent v3.3.0** as a native deb, enrolled by reading the token hash
   controller-side.
+* **PostgreSQL comes from PGDG, pinned at major 17** (`roles/postgres_repo`,
+  on the controller and the nameservers). Ubuntu 26.04 defaults to 18 and
+  carries no `postgresql-17`, and 17 is what the controller's schema is
+  validated against; the role adds the repository and an apt preferences pin
+  that also refuses the unversioned `postgresql*` metapackages outright, so a
+  stray dependency cannot drag the fleet onto another major.
 * **Every version is pinned** in `playbooks/group_vars/all/versions.yml`, and
   every role is convergent: a pin bump rolls out on the next run, and no role
   skips its work because a service already exists.
