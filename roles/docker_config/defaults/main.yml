@@ -1,0 +1,22 @@
+---
+docker_config_dir: /etc/docker
+
+# Keep containers running across a docker daemon restart. Docker only supports
+# this for patch release upgrades (YY.MM.x) -- a major daemon upgrade still
+# stops every container.
+docker_config_live_restore: true
+
+# Seconds the daemon waits for containers to exit on shutdown before SIGKILL.
+# Docker's default of 15 is too short for tenant databases to close cleanly on
+# a node running hundreds of containers.
+docker_config_shutdown_timeout: 120
+
+# Optional pull-through cache(s), e.g. ["https://mirror.example.com"].
+# v1 passed this as a --registry-mirror ExecStart flag; daemon.json is the
+# better home (SIGHUP-reloadable, and it keeps the node ExecStart override in
+# docker_tls free of options docker would reject as doubly-defined).
+docker_config_registry_mirrors: []
+
+# Escape hatch, merged last. Everything added here MUST be SIGHUP-reloadable
+# (this role reloads, it never restarts dockerd) -- see README.
+docker_config_extra_options: {}

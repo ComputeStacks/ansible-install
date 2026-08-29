@@ -1,0 +1,26 @@
+---
+# This role does NOT install docker. geerlingguy.docker (pinned in
+# requirements.yml) owns the engine; this role owns /etc/docker/daemon.json on
+# every docker host. See README for the geerlingguy vars the play must set so
+# ownership of daemon.json is not contested.
+- name: Ensure the docker configuration directory exists
+  ansible.builtin.file:
+    path: "{{ docker_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# live-restore and shutdown-timeout live here rather than in the systemd
+# ExecStart flags on purpose: both are SIGHUP-reloadable from daemon.json, so
+# they can be changed on a running node with `systemctl reload docker` and no
+# container downtime. Docker hard-errors if an option is set in both places, so
+# neither may be added to the docker_tls ExecStart override.
+- name: Deploy the docker daemon configuration
+  ansible.builtin.copy:
+    content: "{{ docker_config_daemon_options | to_nice_json }}\n"
+    dest: "{{ docker_config_dir }}/daemon.json"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload docker

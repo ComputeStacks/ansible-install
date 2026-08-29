@@ -1,0 +1,12 @@
+---
+# The complete daemon.json this role owns. Rendered with to_nice_json, so the
+# file is always valid JSON and always byte-identical for identical inputs.
+docker_config_daemon_options: >-
+  {{
+    {
+      'live-restore': docker_config_live_restore | bool,
+      'shutdown-timeout': docker_config_shutdown_timeout | int,
+    }
+    | combine({'registry-mirrors': docker_config_registry_mirrors} if docker_config_registry_mirrors | length > 0 else {})
+    | combine(docker_config_extra_options)
+  }}
