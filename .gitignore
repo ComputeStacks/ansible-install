@@ -6,3 +6,5 @@ inventory/
 tmp
 workspace/
 workspace-plan-DO-NOT-COMMIT.md
+collections/
+.ansible/

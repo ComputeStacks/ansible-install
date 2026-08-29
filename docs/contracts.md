@@ -23,8 +23,9 @@ everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
 4. **Every version pinned** in `playbooks/group_vars/all/versions.yml`. No
    `latest`, `stable`, `main` tags. Items marked VERIFY are the owning wave's
    DoD.
-5. **Ports come from `cs_ports`** (ports.yml). No literal port numbers in
-   roles or templates.
+5. **Cross-host ports come from `cs_ports`** (ports.yml) — any port another
+   host dials or the firewall opens. Loopback-only role-internal ports (e.g.
+   vault 8200) may live in role defaults. No literal port numbers in templates.
 6. **Public repo hygiene.** No real hostnames, IPs, or credentials in tracked
    files — RFC 5737/1918 examples only. `workspace/` is gitignored scratch.
 7. **Firewall:** dedicated nftables table via role-owned file + unit. NEVER
