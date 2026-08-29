@@ -1,0 +1,27 @@
+---
+# ATTACH MODE (existing_env: true): only the three tasks in account.yml run —
+# the cstacks user, its authorized_keys directory, and the repository path's
+# ownership. Nothing else on a live v1 backup server is touched, and in
+# particular v2's borg is NOT installed over the server's existing one unless
+# backup_server_install_borg is explicitly set (docs/contracts.md rule 9).
+
+- name: Ensure the cstacks account and the repository path
+  ansible.builtin.include_tasks: account.yml
+
+- name: Install the pinned upstream borg release
+  ansible.builtin.include_tasks: borg.yml
+  when: not (existing_env | default(false) | bool) or (backup_server_install_borg | bool)
+
+- name: Report that borg installation was skipped on an existing backup server
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is flagged existing_env, so its borg install was
+      left alone. Every node attaching to it MUST set backup_borg_remote_path
+      to this server's existing borg (v1 servers: /usr/bin/borg) — the v2
+      default ({{ borg_binary_path }}) does not exist here and every backup
+      would fail with "command not found". The validate role compares the
+      server's borg version against the node container's and blocks on a
+      mismatch.
+  when:
+    - existing_env | default(false) | bool
+    - not (backup_server_install_borg | bool)

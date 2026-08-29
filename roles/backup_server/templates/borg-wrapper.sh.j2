@@ -1,0 +1,16 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# Stable path for the pinned borg release. Nodes call this over SSH
+# (cs-agent's backups.borg.ssh_borg_remote_path), so the version it execs is
+# switched here rather than on every node.
+#
+# TMPDIR: borg writes scratch files while compacting a repository; keeping
+# them on the ComputeStacks filesystem rather than /tmp avoids filling a small
+# tmpfs during a compact of a large repository.
+set -eu
+
+TMPDIR="{{ backup_server_tmp_dir }}"
+export TMPDIR
+
+exec "{{ backup_server_borg_binary }}" "$@"

@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: backup_server
+  author: ComputeStacks
+  description: >-
+    Shared borg backup server: the cstacks SSH account nodes back up as, the
+    GPG-verified upstream borg release under /opt/computestacks, and the
+    repository path. Attach-mode safe.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

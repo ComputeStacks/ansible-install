@@ -1,0 +1,49 @@
+---
+# The account every node's cs-agent SSHes in as. Plain key auth, no forced
+# command: the agent runs `mkdir -p` / `rm -rf` over this connection to create
+# and tear down repositories, so a borg-serve ForceCommand would break repo
+# creation outright (see the plan's cs-agent contract section).
+backup_server_user: cstacks
+# useradd gives the account a user-private group of the same name on
+# Debian/Ubuntu (v1 relied on this too).
+backup_server_group: "{{ backup_server_user }}"
+backup_server_shell: /bin/bash
+
+# Where repositories live. Attach mode MUST set backup_host_path to the
+# existing server's path (v1 default was /mnt) — the same value cs_agent
+# renders into backups.borg.ssh.host_path.
+backup_server_host_path: "{{ backup_host_path | default('/var/lib/computestacks/backups') }}"
+backup_server_host_path_mode: "0770"
+
+# --- borg ------------------------------------------------------------------
+# borg_version / borg_release_gpg_fingerprint / borg_binary_path are pinned in
+# playbooks/group_vars/all/versions.yml. The server binary and the client
+# container image (borg_image) MUST be the same borg version.
+#
+# No distro borgbackup package: Ubuntu 26.04 ships 1.4.3 while the client
+# image builds 1.4.4 from the upstream signed release, and the two halves of
+# every operation have to match. This installs the same GPG-verified upstream
+# binary the image does, into the layout the future computestacks-borg deb
+# will use.
+backup_server_prefix: /opt/computestacks
+backup_server_bin_dir: "{{ backup_server_prefix }}/bin"
+backup_server_borg_dir: "{{ backup_server_prefix }}/borg/{{ borg_version }}"
+backup_server_borg_binary: "{{ backup_server_borg_dir }}/borg"
+# The stable path nodes call (agent key backups.borg.ssh_borg_remote_path).
+backup_server_borg_wrapper: "{{ borg_binary_path }}"
+backup_server_tmp_dir: "{{ backup_server_prefix }}/tmp"
+
+# amd64-only asset — ComputeStacks is amd64-only, asserted by preflight.
+backup_server_borg_asset: borg-linux-glibc231-x86_64
+backup_server_borg_release_url: "https://github.com/borgbackup/borg/releases/download/{{ borg_version }}"
+backup_server_borg_keyservers:
+  - hkps://keys.openpgp.org
+  - hkps://keyserver.ubuntu.com
+  - hkps://pgp.mit.edu
+
+# Attach mode (existing_env: true) touches an existing, live backup server:
+# only the cstacks account, its authorized_keys directory and the repository
+# path are ensured. Set this true to also install v2's pinned borg alongside
+# the server's existing one — and then set backup_borg_remote_path on the
+# nodes to point at it.
+backup_server_install_borg: false

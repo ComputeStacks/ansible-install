@@ -1,0 +1,33 @@
+---
+# Runs in attach mode too — every task here is additive or idempotent on an
+# existing server.
+
+- name: Ensure the cstacks system account exists
+  ansible.builtin.user:
+    name: "{{ backup_server_user }}"
+    shell: "{{ backup_server_shell }}"
+    system: true
+    create_home: true
+    # Key auth only: '!' is a locked password, not a usable hash.
+    password: "!"
+    state: present
+  register: backup_server_account
+
+- name: Ensure the cstacks authorized_keys directory exists
+  ansible.builtin.file:
+    path: "{{ backup_server_account.home }}/.ssh"
+    state: directory
+    owner: "{{ backup_server_user }}"
+    group: "{{ backup_server_group }}"
+    mode: "0700"
+
+# cs_agent adds one authorized_keys entry per node (delegated here), so this
+# role never enumerates nodes — an attach-mode inventory only ever holds the
+# new region's node anyway.
+- name: Ensure the repository path exists and is owned by cstacks
+  ansible.builtin.file:
+    path: "{{ backup_server_host_path }}"
+    state: directory
+    owner: "{{ backup_server_user }}"
+    group: "{{ backup_server_group }}"
+    mode: "{{ backup_server_host_path_mode }}"

@@ -1,0 +1,139 @@
+---
+# Ports the verification steps from cs-docker-images/cs-docker-borg's
+# Dockerfile so the server binary and the client image are the same borg,
+# obtained the same way.
+
+- name: Create the ComputeStacks borg directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - path: "{{ backup_server_prefix }}"
+    - path: "{{ backup_server_bin_dir }}"
+    - path: "{{ backup_server_prefix }}/borg"
+    - path: "{{ backup_server_borg_dir }}"
+    # borg's own scratch space, written by the cstacks account over SSH (root
+    # can write it regardless of the mode).
+    - path: "{{ backup_server_tmp_dir }}"
+      owner: "{{ backup_server_user }}"
+      group: "{{ backup_server_group }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Check whether the pinned borg release is already installed
+  ansible.builtin.stat:
+    path: "{{ backup_server_borg_binary }}"
+  register: backup_server_borg_stat
+
+# Versioned directory: a borg_version bump installs alongside the old binary
+# and the wrapper below is what switches over, so a rollback is a wrapper
+# re-render rather than another download.
+- name: Fetch and verify the upstream borg release
+  when: not backup_server_borg_stat.stat.exists
+  block:
+    - name: Create a scratch directory for the borg download
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: borg
+      register: backup_server_borg_tmp
+
+    - name: Download the borg release binary and its signature
+      ansible.builtin.get_url:
+        url: "{{ backup_server_borg_release_url }}/{{ item }}"
+        dest: "{{ backup_server_borg_tmp.path }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0600"
+      loop:
+        - "{{ backup_server_borg_asset }}"
+        - "{{ backup_server_borg_asset }}.asc"
+
+    # Keyservers are individually unreliable, so try them in turn and fail
+    # only when none of them answers — same loop the image build uses.
+    - name: Import the borg release signing key
+      ansible.builtin.shell:
+        cmd: |
+          set -eu
+          for ks in {{ backup_server_borg_keyservers | join(' ') }}; do
+            if gpg --batch --keyserver "$ks" --recv-keys {{ borg_release_gpg_fingerprint }}; then
+              exit 0
+            fi
+          done
+          echo "no keyserver returned {{ borg_release_gpg_fingerprint }}" >&2
+          exit 1
+      environment:
+        GNUPGHOME: "{{ backup_server_borg_tmp.path }}"
+      changed_when: false
+
+    - name: Verify the borg release signature
+      ansible.builtin.command:
+        argv:
+          - gpg
+          - --batch
+          - --status-fd
+          - "1"
+          - --verify
+          - "{{ backup_server_borg_tmp.path }}/{{ backup_server_borg_asset }}.asc"
+          - "{{ backup_server_borg_tmp.path }}/{{ backup_server_borg_asset }}"
+      environment:
+        GNUPGHOME: "{{ backup_server_borg_tmp.path }}"
+      changed_when: false
+      register: backup_server_borg_verify
+
+    # gpg exits 0 for a good signature by ANY key it holds, so the fingerprint
+    # is checked explicitly against the machine-readable status output.
+    - name: Assert the signature is by the pinned borg release key
+      ansible.builtin.assert:
+        that:
+          - ('[GNUPG:] VALIDSIG ' ~ borg_release_gpg_fingerprint) in backup_server_borg_verify.stdout
+        fail_msg: >-
+          The downloaded borg {{ borg_version }} binary is not signed by
+          {{ borg_release_gpg_fingerprint }}. Refusing to install it.
+        success_msg: "borg {{ borg_version }} signature verified against the pinned release key"
+
+    - name: Install the verified borg binary
+      ansible.builtin.copy:
+        src: "{{ backup_server_borg_tmp.path }}/{{ backup_server_borg_asset }}"
+        dest: "{{ backup_server_borg_binary }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+
+  always:
+    - name: Remove the borg download scratch directory
+      ansible.builtin.file:
+        path: "{{ backup_server_borg_tmp.path }}"
+        state: absent
+      when: backup_server_borg_tmp.path is defined
+
+- name: Install the borg wrapper nodes call over SSH
+  ansible.builtin.template:
+    src: borg-wrapper.sh.j2
+    dest: "{{ backup_server_borg_wrapper }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Read the installed borg version
+  ansible.builtin.command:
+    argv:
+      - "{{ backup_server_borg_wrapper }}"
+      - --version
+  changed_when: false
+  register: backup_server_borg_installed_version
+
+- name: Assert the installed borg is the pinned version
+  ansible.builtin.assert:
+    that:
+      - borg_version in backup_server_borg_installed_version.stdout
+    fail_msg: >-
+      {{ backup_server_borg_wrapper }} reports
+      '{{ backup_server_borg_installed_version.stdout | trim }}', not the
+      pinned borg {{ borg_version }}. The server and the nodes' borg container
+      image must be the same version.
+    success_msg: "{{ backup_server_borg_installed_version.stdout | trim }} installed"
