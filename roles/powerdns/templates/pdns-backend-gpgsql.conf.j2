@@ -1,0 +1,7 @@
+# Managed by ansible (powerdns role). Local changes will be overwritten.
+gpgsql-host=127.0.0.1
+gpgsql-port={{ cs_ports.postgres }}
+gpgsql-dbname=pdns
+gpgsql-user=pdns
+gpgsql-password={{ pdns_db_password }}
+gpgsql-dnssec=yes

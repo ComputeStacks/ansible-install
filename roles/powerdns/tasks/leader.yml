@@ -1,0 +1,104 @@
+---
+# ns_primary only. Points postgres at its inventory address, opens
+# replication to every host in ns_followers (iterated -- never [0], since
+# more than one follower is a real, supported shape), and creates the pdns
+# database + schema exactly once.
+
+- name: Set postgres to listen on its inventory address
+  ansible.builtin.lineinfile:
+    path: "{{ powerdns_postgresql_conf }}"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = 'localhost,{{ primary_ip }}'"
+  notify: Restart postgres
+
+- name: Pin the postgres port to the ports contract
+  ansible.builtin.lineinfile:
+    path: "{{ powerdns_postgresql_conf }}"
+    regexp: "^#?port\\s*="
+    line: "port = {{ cs_ports.postgres }}"
+  notify: Restart postgres
+
+- name: Allow every follower to stream replication
+  community.postgresql.postgresql_pg_hba:
+    dest: "{{ powerdns_postgresql_hba_conf }}"
+    contype: host
+    users: "{{ powerdns_replication_user }}"
+    databases: replication
+    method: trust
+    address: "{{ hostvars[item].primary_ip }}/32"
+  loop: "{{ groups['ns_followers'] }}"
+  notify: Restart postgres
+
+- name: Apply listener/hba changes before touching database objects
+  ansible.builtin.meta: flush_handlers
+
+- name: Confirm postgres is reachable
+  community.postgresql.postgresql_ping:
+    login_db: postgres
+  become: true
+  become_user: postgres
+  register: powerdns_pg_up
+  until: powerdns_pg_up.is_available
+  retries: 3
+  delay: 5
+  failed_when: not powerdns_pg_up.is_available
+
+- name: Check whether the pdns database is already configured
+  community.postgresql.postgresql_ping:
+    login_db: pdns
+    login_host: 127.0.0.1
+    login_port: "{{ cs_ports.postgres }}"
+    login_user: pdns
+    login_password: "{{ pdns_db_password }}"
+  register: powerdns_db_ready
+  no_log: true
+
+- name: Create the pdns database and replication role
+  when: not powerdns_db_ready.is_available
+  block:
+    - name: Create the pdns postgres role
+      community.postgresql.postgresql_user:
+        name: pdns
+        role_attr_flags: "superuser,login"
+        password: "{{ pdns_db_password }}"
+        state: present
+      become: true
+      become_user: postgres
+      no_log: true
+
+    - name: Create the pdns database
+      community.postgresql.postgresql_db:
+        name: pdns
+        owner: pdns
+        encoding: UTF-8
+        template: template0
+        state: present
+      become: true
+      become_user: postgres
+
+    - name: Create the replication role
+      community.postgresql.postgresql_user:
+        name: "{{ powerdns_replication_user }}"
+        role_attr_flags: replication
+        state: present
+      become: true
+      become_user: postgres
+
+    - name: Load the pdns base schema
+      community.postgresql.postgresql_db:
+        name: pdns
+        state: restore
+        target: /usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql
+      become: true
+      become_user: postgres
+
+    - name: Verify the pdns database is reachable after creation
+      community.postgresql.postgresql_ping:
+        login_db: pdns
+        login_host: 127.0.0.1
+        login_port: "{{ cs_ports.postgres }}"
+        login_user: pdns
+        login_password: "{{ pdns_db_password }}"
+      register: powerdns_db_verify
+      failed_when: not powerdns_db_verify.is_available
+      no_log: true

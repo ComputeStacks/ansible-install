@@ -1,0 +1,28 @@
+# Managed by ansible (powerdns role). Local changes will be overwritten.
+{#
+  Rendered identically on ns_primary and ns_followers except for the
+  api/webserver block below, which only the leader runs -- followers serve
+  zone data replicated via postgres and never expose the HTTP API.
+#}
+local-port={{ cs_ports.dns }}
+local-address={{ powerdns_dns_address }}
+include-dir=/etc/powerdns/pdns.d
+launch=gpgsql
+config-dir=/etc/powerdns
+default-soa-edit=inception-increment
+default-ttl={{ powerdns_default_ttl }}
+default-soa-content={{ powerdns_default_soa }}
+query-cache-ttl={{ powerdns_query_cache_ttl }}
+{% if powerdns_enable_dnsupdate %}
+dnsupdate=yes
+allow-dnsupdate-from=
+{% endif %}
+{% if powerdns_is_leader %}
+api=yes
+api-key={{ pdns_api_key }}
+webserver=yes
+webserver-address={{ powerdns_web_address }}
+webserver-port={{ cs_ports.pdns_api }}
+webserver-allow-from={{ (groups['controller'] | map('extract', hostvars, 'primary_ip') | list + groups['controller'] | map('extract', hostvars, 'public_ip') | list) | unique | join(', ') }}
+webserver-password={{ pdns_web_key }}
+{% endif %}

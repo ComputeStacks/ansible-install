@@ -1,0 +1,16 @@
+---
+# Wave 3H syntax-check harness (powerdns). NOT a converge -- playbooks/site.yml
+# owns the real play ordering (docs/contracts.md).
+#
+#   ansible-playbook --syntax-check tests/wave3h.yml
+#
+# group_vars under playbooks/ are not auto-loaded for a playbook that lives
+# outside that directory, so the ports contract is loaded explicitly.
+
+- name: Nameservers
+  hosts: nameservers
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+  roles:
+    - powerdns

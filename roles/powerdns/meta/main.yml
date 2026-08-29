@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: powerdns
+  author: ComputeStacks
+  description: >-
+    PowerDNS authoritative server + PostgreSQL backend on the nameservers
+    hosts. ns_primary is the writable leader; ns_followers stream from it via
+    postgres physical replication. API/webserver/db credentials come from
+    vaulted inventory, never generated on the node.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

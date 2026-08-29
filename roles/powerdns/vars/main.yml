@@ -1,0 +1,18 @@
+---
+# Role-internal computed vars (not meant for override at group/host scope).
+#
+# ns_primary is expected to hold exactly one host -- the same single-node
+# assumption docs/contracts.md makes explicit for `controller` (and that the
+# `vault` role encodes as `vault_host: groups['controller'][0]`). Nothing in
+# preflight currently asserts ns_primary's size; this role trusts the
+# inventory shape and is delegation-flavoured, not a template index, so it
+# is consistent with contracts.md rule 2. Flagged in README for the manager
+# in case a hard assertion belongs in the preflight role instead.
+powerdns_is_leader: "{{ 'ns_primary' in group_names }}"
+powerdns_is_follower: "{{ 'ns_followers' in group_names }}"
+powerdns_primary_host: "{{ groups['ns_primary'][0] }}"
+powerdns_primary_ip: "{{ hostvars[powerdns_primary_host].primary_ip }}"
+
+# Postgres physical replication slot name for this host. Slot names are
+# restricted to [a-z0-9_]; inventory hostnames may contain '-' or '.'.
+powerdns_replication_slot: "{{ inventory_hostname | replace('-', '_') | replace('.', '_') }}"

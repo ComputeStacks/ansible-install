@@ -1,0 +1,43 @@
+---
+# Runs on every host in the `nameservers` group (ns_primary + ns_followers).
+# Convergent: no service-exists guards -- packages are always state=present,
+# config is always re-templated, and handlers restart on change. The one
+# intentional exception is the postgres replication bootstrap in follower.yml,
+# which is a one-time data operation, not an install guard (see its header).
+
+- name: Assert PowerDNS credentials come from the vaulted inventory
+  ansible.builtin.assert:
+    that:
+      - pdns_api_key is defined and (pdns_api_key | string | length > 0) and pdns_api_key != 'CHANGEME'
+      - pdns_web_key is defined and (pdns_web_key | string | length > 0) and pdns_web_key != 'CHANGEME'
+      - pdns_db_password is defined and (pdns_db_password | string | length > 0) and pdns_db_password != 'CHANGEME'
+    fail_msg: >-
+      pdns_api_key, pdns_web_key and pdns_db_password must be set to real
+      values in the vaulted inventory (see
+      inventories/example/group_vars/all/secrets.yml). This role never
+      generates or slurps them -- that is a deliberate deviation from v1.
+    quiet: true
+
+- name: Assert postgresql_version is set
+  ansible.builtin.assert:
+    that:
+      - postgresql_version is defined
+    fail_msg: "postgresql_version must be set (playbooks/group_vars/all/versions.yml)."
+
+- name: Install and start the distro PostgreSQL package
+  ansible.builtin.include_tasks: postgres.yml
+
+- name: Configure the leader (ns_primary)
+  ansible.builtin.include_tasks: leader.yml
+  when: powerdns_is_leader
+
+- name: Bootstrap/converge the follower replica
+  ansible.builtin.include_tasks: follower.yml
+  when: powerdns_is_follower
+
+- name: Install and configure the PowerDNS authoritative server
+  ansible.builtin.include_tasks: pdns.yml
+
+- name: Ensure the tenant zone exists on the leader
+  ansible.builtin.include_tasks: zone.yml
+  when: powerdns_is_leader and powerdns_manage_zone

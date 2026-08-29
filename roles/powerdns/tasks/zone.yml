@@ -1,0 +1,14 @@
+---
+# ns_primary only. `pdnsutil create-zone` is idempotent by contract: rc 0 =
+# created, rc 1 = already exists, rc 2+ = a real error.
+
+- name: Create the tenant zone if it does not already exist
+  ansible.builtin.command:
+    argv:
+      - pdnsutil
+      - create-zone
+      - "{{ cs_app_zone }}"
+      - "{{ powerdns_name }}"
+  register: powerdns_zone_create
+  changed_when: powerdns_zone_create.rc == 0
+  failed_when: powerdns_zone_create.rc > 1

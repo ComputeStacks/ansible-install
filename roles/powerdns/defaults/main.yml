@@ -1,0 +1,37 @@
+---
+# PowerDNS authoritative server + PostgreSQL backend on the `nameservers`
+# hosts (ns_primary = leader, ns_followers = streaming replicas). See
+# README.md for the leader/follower mechanism and the deviations from v1.
+
+# SOA identity used for zones the leader creates. Override this per
+# environment (e.g. group_vars/nameservers/main.yml in your inventory) to
+# your real primary nameserver hostname -- the sample value below is a
+# placeholder, not something to ship.
+powerdns_name: "ns1.example.com"
+powerdns_default_soa: "{{ powerdns_name }} hostmaster.@ 0 10800 3600 604800 3600"
+powerdns_default_ttl: 14400
+powerdns_query_cache_ttl: 20
+
+# Dual-stack listener (v1 parity: PowerDNS binds both families from one
+# comma-separated local-address list).
+powerdns_dns_address: "0.0.0.0, ::"
+powerdns_web_address: "0.0.0.0"
+
+powerdns_replication_user: repuser
+
+# Run `pdnsutil create-zone` for cs_app_zone on the leader. Set false if the
+# zone is managed by hand or by another tool.
+powerdns_manage_zone: true
+
+# Per-zone dynamic updates are still fenced by tsig + allow-dnsupdate-from
+# metadata (unset here) -- see https://doc.powerdns.com/authoritative/dnsupdate.html
+powerdns_enable_dnsupdate: true
+
+# Distro postgresql package paths. postgresql_version is the global pin from
+# playbooks/group_vars/all/versions.yml (currently 17) -- the same value the
+# controller's geerlingguy.postgresql instance uses; both just mean "major
+# version 17", they are unrelated running instances on different hosts.
+powerdns_postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}"
+powerdns_postgresql_main_dir: "{{ powerdns_postgresql_data_dir }}/main"
+powerdns_postgresql_conf: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+powerdns_postgresql_hba_conf: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"

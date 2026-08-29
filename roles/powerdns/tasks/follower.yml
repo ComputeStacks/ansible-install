@@ -1,0 +1,66 @@
+---
+# ns_followers only. Streams from the leader via pg_basebackup on first
+# converge -- v1's exact mechanism: -R writes standby.signal + primary_conninfo
+# so postgres keeps fetching WAL on its own afterwards, -C creates a physical
+# replication slot unique to this host. This block is gated on "not yet
+# replicated" because base-backup is a one-time, destructive data bootstrap,
+# not a service-install guard (docs/contracts.md rule 3 targets the latter);
+# re-running pg_basebackup against a live replica every converge would wipe
+# and re-sync it for no reason.
+
+- name: Check whether the pdns database is already replicated here
+  community.postgresql.postgresql_ping:
+    login_db: pdns
+    login_host: 127.0.0.1
+    login_port: "{{ cs_ports.postgres }}"
+    login_user: pdns
+    login_password: "{{ pdns_db_password }}"
+  register: powerdns_follower_db_ready
+  no_log: true
+
+- name: Bootstrap the replica from the leader
+  when: not powerdns_follower_db_ready.is_available
+  become: true
+  block:
+    - name: Stop postgres before replacing its data directory
+      ansible.builtin.systemd_service:
+        name: postgresql
+        state: stopped
+
+    - name: Wipe the follower's postgres data directory
+      ansible.builtin.file:
+        path: "{{ powerdns_postgresql_main_dir }}"
+        state: absent
+
+    - name: Take a base backup from the leader
+      ansible.builtin.command:
+        argv:
+          - pg_basebackup
+          - -h
+          - "{{ powerdns_primary_ip }}"
+          - -p
+          - "{{ cs_ports.postgres | string }}"
+          - -U
+          - "{{ powerdns_replication_user }}"
+          - --checkpoint=fast
+          - -D
+          - "{{ powerdns_postgresql_main_dir }}"
+          - -R
+          - "--slot={{ powerdns_replication_slot }}"
+          - -C
+      become: true
+      become_user: postgres
+      changed_when: true
+
+    - name: Fix ownership of the restored data directory
+      ansible.builtin.file:
+        path: "{{ powerdns_postgresql_main_dir }}"
+        owner: postgres
+        group: postgres
+        recurse: true
+
+    - name: Start postgres
+      ansible.builtin.systemd_service:
+        name: postgresql
+        state: started
+        enabled: true

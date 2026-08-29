@@ -1,0 +1,69 @@
+---
+# Runs on both ns_primary and ns_followers.
+
+- name: Gather service facts to detect systemd-resolved
+  ansible.builtin.service_facts:
+
+- name: Stop and disable systemd-resolved (it holds port 53)
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    state: stopped
+    enabled: false
+  when: "'systemd-resolved.service' in ansible_facts.services"
+
+- name: Install PowerDNS packages
+  ansible.builtin.apt:
+    name:
+      - pdns-server
+      - pdns-backend-pgsql
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Remove the default bind backend files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/powerdns/named.conf
+    - /etc/powerdns/pdns.d/bind.conf
+
+- name: Configure the postgres backend
+  ansible.builtin.template:
+    src: pdns-backend-gpgsql.conf.j2
+    dest: /etc/powerdns/pdns.d/pdns.local.gpgsql.conf
+    owner: root
+    group: pdns
+    mode: "0640"
+  no_log: true
+  notify: Restart pdns
+
+- name: Render pdns.conf
+  ansible.builtin.template:
+    src: pdns.conf.j2
+    dest: /etc/powerdns/pdns.conf
+    owner: root
+    group: pdns
+    mode: "0640"
+  no_log: true
+  notify: Restart pdns
+
+- name: Ensure PowerDNS is enabled and running
+  ansible.builtin.systemd_service:
+    name: pdns
+    state: started
+    enabled: true
+
+- name: Verify PowerDNS can reach its database
+  community.postgresql.postgresql_ping:
+    login_db: pdns
+    login_host: 127.0.0.1
+    login_port: "{{ cs_ports.postgres }}"
+    login_user: pdns
+    login_password: "{{ pdns_db_password }}"
+  register: powerdns_service_db_check
+  until: powerdns_service_db_check.is_available
+  retries: 3
+  delay: 5
+  failed_when: not powerdns_service_db_check.is_available
+  no_log: true
