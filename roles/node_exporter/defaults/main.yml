@@ -1,0 +1,13 @@
+---
+# The distro prometheus-node-exporter package, on every host. Wave 4J.
+node_exporter_package: prometheus-node-exporter
+node_exporter_service: prometheus-node-exporter
+
+# Empty installs whatever the archive offers; a value pins the apt version.
+# Lives in playbooks/group_vars/all/versions.yml (contracts rule 4).
+node_exporter_apt_version: ""
+
+# Hold the package once installed, so an unattended upgrade cannot swap the
+# exporter under a live scrape. Released before each install so a version
+# change still rolls through (contracts rule 3).
+node_exporter_hold_package: true

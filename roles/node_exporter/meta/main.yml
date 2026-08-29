@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: node_exporter
+  author: ComputeStacks
+  description: >-
+    Installs, holds, and enables the distro prometheus-node-exporter package
+    on every host in the install.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

@@ -77,7 +77,43 @@ vault_image: "hashicorp/vault:1.21.4"
 # a converge cannot silently move the TLS terminator under the fleet.
 nginx_image: "nginx:1.30.4"
 
+# Docker engine. Installed by geerlingguy.docker (requirements.yml) and then
+# HELD by playbooks/site.yml, so an unattended apt upgrade can never restart
+# every container on a node under a live region (v1 did the same with
+# `apt-mark hold`). The hold is released before each install, so editing this
+# list still rolls through on a rerun (contracts rule 3).
+#
+# VERIFY (wave 4J, 2026-08-28): download.docker.com/linux/ubuntu publishes no
+# suite for Ubuntu 26.04 yet -- the newest is `resolute` (25.10) -- so there
+# is no apt version string that can honestly be pinned here today, and the
+# geerlingguy repo line (built from `ansible_distribution_release`) will not
+# resolve until Docker ships that suite. Until then the entries are bare
+# package names: the first converge installs whatever the repository offers
+# and the hold freezes it there. Add an exact apt version per entry to make
+# every host reproducible, e.g.
+#   - "docker-ce=5:28.5.2-1~ubuntu.26.04~<codename>"
+# (each package has its own version scheme -- containerd.io and the buildx
+# plugin do NOT share docker-ce's, so one shared version variable would be
+# wrong).
+docker_apt_packages:
+  - docker-ce
+  - docker-ce-cli
+  - docker-ce-rootless-extras
+  - containerd.io
+  - docker-buildx-plugin
+
+# node_exporter is the distro package on every host (the plan keeps it that
+# way), installed and held by roles/node_exporter. Empty means "whatever
+# 26.04 currently ships, then held"; set an exact apt version to pin it.
+# VERIFY (wave 4J): no Ubuntu 26.04 archive is available to read a real
+# version string from yet.
+node_exporter_apt_version: ""
+
 # Packages
+# VERIFY (wave 4J): 17 is the major line the controller's DATABASE_URL and
+# roles/powerdns both assume. Confirm Ubuntu 26.04 actually ships
+# postgresql-17 on the first real converge; if it ships a newer default,
+# bump this and playbooks/vars/Ubuntu-26.yml together.
 postgresql_version: 17
 # acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED.
 # Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release

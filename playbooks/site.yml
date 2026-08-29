@@ -1,8 +1,20 @@
 ---
-# Greenfield full converge. Play ORDER is a frozen contract (docs/contracts.md
-# §Play ordering) — enrollment and backfills depend on it:
-#   seed creates Node rows (mints agent tokens) -> nodes enroll -> backfills.
-# Wave J finalizes wiring; roles land per the wave plan.
+# Greenfield full converge: a complete ComputeStacks environment from bare
+# Ubuntu 26.04 hosts.
+#
+#   ansible-playbook -i inventories/<env> playbooks/site.yml --ask-vault-pass
+#
+# Play ORDER is a frozen contract (docs/contracts.md §Play ordering) —
+# enrollment and the backfills depend on it:
+#
+#   seed creates Node rows (minting agent tokens)
+#     -> the nodes install cs-agent and ENROL
+#       -> controller_post_enroll runs the backfills
+#         -> validate asserts the whole graph
+#
+# Attach mode (a new region against an EXISTING v1-built environment) is a
+# different playbook: playbooks/add-region.yml. Do not run this one against
+# hosts flagged `existing_env: true`.
 
 - name: Preflight validation
   hosts: all
@@ -13,52 +25,136 @@
 - name: Base system
   hosts: all
   roles:
-    - common          # packages, sshd, chrony, motd fragment, root keypair (controller)
+    # packages, sshd, chrony, motd fragment, reboot-if-required, root keypair
+    - common
+    # distro prometheus-node-exporter on every host; roles/metrics scrapes
+    # nodes via per-AZ file_sd and the infrastructure groups statically.
+    - node_exporter
 
-- name: Tailscale mesh
+# Membership is the pure-inventory predicate every consumer uses (firewall,
+# cs_agent, metrics file_sd, controller_seed): an auth key in the vaulted
+# secrets, minus per-host/group opt-outs for same-L2 regions.
+- name: Tailscale mesh and Ubuntu Pro
   hosts: all
   roles:
     - role: tailscale
-      when: tailscale_authkey is defined and (tailscale_enabled | default(true))
+      when:
+        - (tailscale_authkey | default('')) | length > 0
+        - tailscale_enabled | default(true) | bool
     - role: ubuntu_pro
-      when: ubuntu_pro_token is defined
+      when: (ubuntu_pro_token | default('')) | length > 0
 
 - name: Nameservers
   hosts: nameservers
   roles:
     - powerdns
 
+# geerlingguy.docker installs the engine only. /etc/docker/daemon.json belongs
+# to docker_config and the node TCP/TLS listener to docker_tls; docker
+# hard-errors when an option is set in two places, so `docker_daemon_options`
+# must stay empty here (roles/docker_config/README.md).
+#
+# The engine packages are HELD around the install, as v1 did: an unattended
+# apt upgrade that moves dockerd restarts every container on the node. The
+# hold is released first, so editing `docker_apt_packages` in versions.yml
+# still rolls through on a rerun (contracts rule 3).
 - name: Docker hosts
   hosts: controller:metrics:registry:nodes
-  roles:
-    - geerlingguy.docker
-    - docker_config   # daemon.json (live-restore), TLS drop-ins on nodes (certs from vault)
+  pre_tasks:
+    - name: Gather installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
 
+    - name: Release the docker apt holds before installing
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: install
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+  roles:
+    - role: geerlingguy.docker
+      vars:
+        docker_packages: "{{ docker_apt_packages }}"
+        docker_packages_state: present
+        docker_daemon_options: {}       # daemon.json is docker_config's
+        docker_install_compose: false   # the standalone binary is unused
+        docker_users: []                # no non-root docker access anywhere
+    - docker_config
+  post_tasks:
+    - name: Re-gather installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Hold the docker packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: hold
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+
+# geerlingguy.postgresql's platform values come from playbooks/vars/
+# Ubuntu-26.yml (it ships no Ubuntu-26 vars file of its own — see the header
+# there). What this play sets is the ComputeStacks half, per
+# roles/controller/README.md §Postgres:
+#
+#   * listen_addresses 127.0.0.1 — geerlingguy defaults to '*', and nothing
+#     outside this host may reach the controller database;
+#   * the application role and database DATABASE_URL points at.
+#
+# geerlingguy's default pg_hba (peer for local, md5 for 127.0.0.1/32) is
+# already what DATABASE_URL and `cstacks database-backup` respectively need,
+# so it is left alone. The peer-auth `root` SUPERUSER role that
+# `database-backup` connects as is created by roles/controller — geerlingguy
+# does not make it, and without it `cstacks upgrade` dies at pg_dump.
+#
+# Redis stays loopback-bound with NO requirepass: REDIS_HOST is interpolated
+# bare into `redis://` URLs and the application has no password path. Both
+# values are geerlingguy's defaults; they are restated because they are load
+# bearing, not incidental.
 - name: Controller infrastructure
   hosts: controller
+  vars:
+    postgresql_global_config_options:
+      - option: unix_socket_directories
+        value: "{{ postgresql_unix_socket_directories | join(',') }}"
+      - option: log_directory
+        value: log
+      - option: listen_addresses
+        value: 127.0.0.1
+    postgresql_databases:
+      - name: "{{ controller_postgres_database | default('cloudportal') }}"
+        owner: "{{ controller_postgres_user | default('computestacks') }}"
+    postgresql_users:
+      - name: "{{ controller_postgres_user | default('computestacks') }}"
+        password: "{{ postgres_password }}"
+        role_attr_flags: SUPERUSER
+    redis_port: "{{ cs_ports.redis }}"
+    redis_bind_interface: 127.0.0.1
+    redis_requirepass: ""
   roles:
-    - vault           # init/unseal + pki/docker mount
+    - vault                     # init/unseal + pki/docker mount + client cert
     - geerlingguy.postgresql
     - geerlingguy.redis
-    - acme_web        # nginx TLS terminator + acme.sh
-    - controller      # cstacks CLI, env file, portal container, wildcard cert
+    - acme_web                  # nginx TLS terminator + acme.sh, before the
+                                # portal: it owns 443 and proxies :3000
+    - controller                # cstacks CLI, env file, portal container
 
 - name: Node docker TLS
   hosts: nodes
   roles:
-    - docker_tls      # vault-issued daemon certs (needs vault up)
+    - docker_tls                # vault-issued daemon certs (needs vault up)
 
 - name: Metrics host
   hosts: metrics
   roles:
-    - acme_web
-    - metrics         # prometheus + alertmanager + ops network (owner)
-    - loki
+    - acme_web                  # the 3101/3102 vhosts prometheus/loki sit behind
+    - metrics                   # prometheus + alertmanager + `ops` network (owner)
+    - loki                      # joins `ops`, never creates it
 
 - name: Registry host
   hosts: registry
   roles:
-    - acme_web
+    - acme_web                  # writes /opt/container_registry/ssl
     - registry
 
 - name: Backup server
@@ -69,34 +165,37 @@
 - name: Node base stack
   hosts: nodes
   roles:
-    - node_kernel     # sysctls, modules, BBR, inotify, accept_ra
-    - haproxy         # apt + certs/errors dirs (config deployed by controller at runtime)
-    - node_observability  # cadvisor + fluentd containers, image preloads
+    - node_kernel               # sysctls, modules, BBR, inotify, accept_ra
+    - haproxy                   # apt + certs/errors dirs (config comes from
+                                # the controller at runtime)
+    - node_observability        # cadvisor + fluentd containers, image preloads
 
 - name: Host firewalls
   hosts: all
   roles:
-    - firewall        # own nftables table; never flush ruleset
+    - firewall                  # own nftables table; never flush ruleset
 
+# After the controller play, so the application keypair exists and both keys
+# land in one pass.
 - name: SSH trust
-  hosts: all
+  hosts: controller:nodes:registry
   roles:
-    - ssh_trust       # controller keys -> nodes AND registry root authorized_keys
+    - ssh_trust                 # controller keys -> node and registry root
 
 - name: Seed controller
   hosts: controller
   roles:
-    - controller_seed # render manifest -> cstacks seed (bootstrap:apply)
+    - controller_seed           # render manifest -> cstacks seed
 
 - name: Node agents (requires seeded Node rows)
   hosts: nodes
   roles:
-    - cs_agent        # apt install, agent.yml, enroll (rails-runner hash fetch), borg key
+    - cs_agent                  # apt install, agent.yml, enrol, borg key
 
 - name: Post-enrollment controller tasks
   hosts: controller
   roles:
-    - controller_post_enroll  # datachannel + metadata backfills, test_connection
+    - controller_post_enroll    # datachannel + metadata backfills, test_connection
 
 - name: Validate
   hosts: all

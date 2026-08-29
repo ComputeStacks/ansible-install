@@ -1,0 +1,43 @@
+---
+# prometheus-node-exporter on every host. The metrics host scrapes 9100 on
+# nodes (per-AZ file_sd fragments) and on the infrastructure groups (static
+# targets) -- roles/metrics owns both -- and roles/firewall opens
+# cs_ports.node_exporter for the metrics host's addresses only.
+#
+# The package binds :9100 on all interfaces by default, which is what the
+# pairwise scrape rule needs: prometheus dials a node's tailnet address when
+# the metrics host is itself tailnet-joined, and its primary_ip otherwise, so
+# a single-address bind would refuse one of the two paths (the same reasoning
+# roles/node_observability documents for cadvisor). The firewall input chain
+# is the access control.
+
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: apt
+
+# A held package cannot be moved to a new version, so the hold is released
+# first and re-applied afterwards (the idiom roles/cs_agent uses).
+- name: Release the node_exporter apt hold before installing
+  ansible.builtin.dpkg_selections:
+    name: "{{ node_exporter_package }}"
+    selection: install
+  when: node_exporter_package in ansible_facts.packages
+
+- name: Install the node_exporter package
+  ansible.builtin.apt:
+    name: "{{ node_exporter_package }}{{ ('=' + node_exporter_apt_version) if node_exporter_apt_version | length > 0 else '' }}"
+    state: present
+    allow_downgrade: true
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Hold the node_exporter package
+  ansible.builtin.dpkg_selections:
+    name: "{{ node_exporter_package }}"
+    selection: "{{ 'hold' if (node_exporter_hold_package | bool) else 'install' }}"
+
+- name: Ensure node_exporter is enabled and running
+  ansible.builtin.systemd_service:
+    name: "{{ node_exporter_service }}"
+    state: started
+    enabled: true

@@ -1,0 +1,25 @@
+---
+# geerlingguy.postgresql 4.0.0 opens its run with
+#
+#   include_vars: "{{ ansible_distribution }}-{{ ansible_distribution_version.split('.')[0] }}.yml"
+#
+# and ships no `Ubuntu-26.yml`, so on Ubuntu 26.04 the role fails on its very
+# first task. `include_vars` falls back to `<playbook_dir>/vars/` when the
+# file is not in the role's own `vars/`, so this file supplies the missing
+# platform values without forking or patching the pinned galaxy role.
+#
+# Everything here is `__`-prefixed: the role promotes each one to its public
+# name only when the play has not already set it, so an inventory or play
+# override still wins. `postgresql_version` itself comes from
+# group_vars/all/versions.yml and is therefore never taken from here -- keep
+# the paths and package names below in step with it.
+__postgresql_version: "{{ postgresql_version }}"
+__postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+__postgresql_bin_path: "/usr/lib/postgresql/{{ postgresql_version }}/bin"
+__postgresql_config_path: "/etc/postgresql/{{ postgresql_version }}/main"
+__postgresql_daemon: postgresql
+__postgresql_packages:
+  - "postgresql-{{ postgresql_version }}"
+  - "postgresql-client-{{ postgresql_version }}"
+  - libpq-dev
+postgresql_python_library: python3-psycopg2
