@@ -1,0 +1,14 @@
+---
+# Registry host. Deliberately thin: the CONTROLLER creates, starts and
+# configures every tenant registry container over DockerSSH. This role only
+# prepares the filesystem those containers bind-mount. See README.md.
+
+# Bind-mount root. The controller hard-codes it — /computestacks-mnt/<name>/
+# {auth,data} in app/models/container_registry.rb — so it is not configurable
+# in any meaningful sense; the variable exists to keep it out of the tasks.
+registry_data_dir: /computestacks-mnt
+
+# Certificate tree. roles/acme_web writes fullchain.pem / privkey.pem into
+# ssl/ through acme.sh's --install-cert and refreshes them on renewal.
+registry_home_dir: /opt/container_registry
+registry_ssl_dir: "{{ registry_home_dir }}/ssl"

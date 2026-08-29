@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: registry
+  author: ComputeStacks
+  description: >-
+    Container registry host. Prepares the bind-mount and certificate trees the
+    controller's DockerSSH-provisioned registry containers use; runs no
+    registry itself.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

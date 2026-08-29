@@ -1,0 +1,54 @@
+---
+# Everything a tenant registry container needs to exist on this host before
+# the controller creates it over DockerSSH. Nothing runs a registry here —
+# that is the controller's job, driven by the manifest's
+# settings.registry_node / registry_base_url / registry_ssh_port.
+
+- name: Create the container registry data root
+  ansible.builtin.file:
+    path: "{{ registry_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create the container registry certificate tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ registry_home_dir }}"
+    - "{{ registry_ssl_dir }}"
+
+# The registry containers read the certificate at start. Without it they come
+# up, fail their TLS handshake, and the controller reports a healthy container
+# that no docker client can log in to.
+- name: Check that acme_web has installed the registry certificate
+  ansible.builtin.stat:
+    path: "{{ registry_ssl_dir }}/fullchain.pem"
+  register: registry_cert_stat
+
+- name: Warn when the registry certificate is not in place yet
+  ansible.builtin.debug:
+    msg: >-
+      {{ registry_ssl_dir }}/fullchain.pem does not exist. roles/acme_web
+      installs it (and refreshes it on renewal through its --reloadcmd hook);
+      it runs before this role in playbooks/site.yml. Tenant registries
+      created before it lands will serve a broken TLS endpoint. Check the
+      acme_web output on this host.
+  when: not registry_cert_stat.stat.exists
+
+- name: Assert the controller can reach this host over ssh
+  ansible.builtin.assert:
+    that:
+      - groups['controller'] | default([]) | length > 0
+    fail_msg: >-
+      No host is in groups['controller']. The registry host is provisioned
+      entirely by the controller over ssh (DockerSSH), so a registry without a
+      controller in the inventory can never be used. roles/ssh_trust installs
+      the controller's application key into root's authorized_keys here.
+    success_msg: "controller present; ssh_trust owns the authorized_keys entry"
+  run_once: true
