@@ -1,64 +1,237 @@
 ---
-# Attach mode: provision a NEW region/az/node against an EXISTING v1-built
-# environment. Existing shared hosts carry `existing_env: true` in inventory
-# and receive ONLY the enumerated additive write set (docs/contracts.md
-# §Attach mode). Wave J implements; ordering mirrors site.yml's seed -> enroll
-# -> backfill contract.
+# Attach mode: provision a NEW region/az/node against an EXISTING, v1-built
+# environment.
 #
-# Prerequisites (documented in docs/attach-mode.md):
-# - Existing controller upgraded to the release carrying `rake bootstrap:apply`
-# - Required inventory inputs: backup_host_path, backup_borg_remote_path,
-#   backups_key (existing values), pdns keys if DNS seeding is needed
-# - Tailscale defaults OFF (existing hosts are not on a tailnet)
+#   ansible-playbook -i inventories/<env> playbooks/add-region.yml --ask-vault-pass
+#
+# The existing shared hosts (controller, metrics, backup, registry) carry
+# `existing_env: true` in the inventory and receive ONLY the enumerated
+# additive write set from docs/contracts.md §Attach mode. The new node is
+# built in full, exactly as site.yml builds one.
+#
+# Read docs/attach-mode.md before running this. In short:
+#   * the existing controller must already be upgraded to a release carrying
+#     `rake bootstrap:apply`;
+#   * `secret_key_base` in your vaulted secrets must be the EXISTING
+#     controller's value, byte for byte (the controller prep play aborts
+#     otherwise);
+#   * `backup_host_path`, `backup_borg_remote_path` and `backups_key` describe
+#     the EXISTING backup server (v1 defaults: /mnt and /usr/bin/borg) and have
+#     no safe fallback;
+#   * tailscale is OFF unless every host in the run says otherwise explicitly;
+#   * the controller prep play restarts the portal (~30s of downtime).
+#
+# Why `include_role` and not `roles:` here. Four of these steps run a role's
+# alternate entry point (`tasks_from:`), which is a parameter of
+# include_role/import_role and NOT of a play's `roles:` keyword — ansible
+# silently ignores it there and runs `tasks/main.yml` instead. That is a
+# greenfield converge against a live production controller. The earlier
+# skeleton of this file had exactly that bug; roles/controller/README.md
+# documents it. Every alternate entry point below is therefore a task.
 
-- name: Preflight (new hosts full; existing hosts partial)
+- name: Preflight validation and attach-mode inventory checks
   hosts: all
+  gather_facts: true
   roles:
     - preflight
+  tasks:
+    # add-region.yml is for extending an EXISTING environment. A shared host
+    # that is not flagged would otherwise get whole-file renders built from a
+    # partial view of the fleet (contracts rule 9) — the failure mode is a
+    # prometheus config or firewall table that silently drops every region
+    # this inventory does not list.
+    - name: Assert every shared host is flagged as an existing environment
+      ansible.builtin.assert:
+        that:
+          - existing_env | default(false) | bool
+        fail_msg: >-
+          {{ inventory_hostname }} is in a shared-host group
+          ({{ group_names | intersect(['controller', 'metrics', 'backup', 'registry']) | join(', ') }})
+          but is not flagged `existing_env: true`. add-region.yml only ever
+          adds a region to an environment that already exists. To build a
+          whole environment, run playbooks/site.yml instead.
+      when: group_names | intersect(['controller', 'metrics', 'backup', 'registry']) | length > 0
 
-- name: Controller prep (gated — pg_dump, env append-only, v2 cstacks, portal restart)
+    - name: Assert the new nodes are not flagged as an existing environment
+      ansible.builtin.assert:
+        that:
+          - not (existing_env | default(false) | bool)
+        fail_msg: >-
+          {{ inventory_hostname }} is in `nodes` and flagged
+          `existing_env: true`. Attach mode builds the new node from bare
+          metal; an already-provisioned node does not belong in this run.
+      when: "'nodes' in group_names"
+
+    # Attach mode defaults tailscale OFF (docs/contracts.md §attach): the
+    # existing controller and metrics host are not on a tailnet, and joining
+    # them is an operator action taken BEFORE this playbook runs. Every
+    # consumer of the pairwise derivations (firewall, metrics file_sd,
+    # cs_agent, controller_seed) reads `tailscale_enabled | default(true)`,
+    # so leaving it unset while an auth key is present would tell those roles
+    # the fleet is on a tailnet that this playbook never joined.
+    - name: Assert tailnet membership is explicit on every host
+      ansible.builtin.assert:
+        that:
+          - tailscale_enabled is defined
+        fail_msg: >-
+          `tailscale_authkey` is set, so every host in an attach run must
+          declare `tailscale_enabled` explicitly — {{ inventory_hostname }}
+          does not. Attach mode defaults tailscale OFF: the existing hosts are
+          not on a tailnet unless you joined them yourself first. Set
+          `tailscale_enabled: false` on the existing hosts (and on the new node
+          unless you really are extending a tailnet), or drop
+          `tailscale_authkey` from this inventory's secrets.
+      when: (tailscale_authkey | default('')) | length > 0
+
+# Gate for everything downstream: takes a pg_dump first, asserts the
+# secret_key_base match, appends the two new environment keys (never
+# rewrites), installs the v2 cstacks script, and recreates the portal.
+- name: Controller prep (gated — pg_dump, append-only env, v2 cstacks, portal restart)
   hosts: controller
-  roles:
-    - role: controller
-      tasks_from: attach_prep
+  tasks:
+    - name: Prepare the existing controller for a new region
+      ansible.builtin.include_role:
+        name: controller
+        tasks_from: attach_prep
 
-- name: New node build
+- name: New node base system
   hosts: nodes
   roles:
     - common
+    - node_exporter
+    - role: tailscale
+      when:
+        - (tailscale_authkey | default('')) | length > 0
+        - tailscale_enabled | default(false) | bool
+    - role: ubuntu_pro
+      when: (ubuntu_pro_token | default('')) | length > 0
     - node_kernel
     - haproxy
     - node_observability
-    - firewall
 
-- name: Node docker + TLS from existing Vault
+- name: New node docker
+  hosts: nodes
+  pre_tasks:
+    - name: Gather installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Release the docker apt holds before installing
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: install
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+  roles:
+    - role: geerlingguy.docker
+      vars:
+        docker_packages: "{{ docker_apt_packages }}"
+        docker_packages_state: present
+        docker_daemon_options: {}
+        docker_install_compose: false
+        docker_users: []
+    - docker_config
+  post_tasks:
+    - name: Re-gather installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Hold the docker packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: hold
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+
+# The whole role, not `tasks_from: issue`. Its main.yml routes through
+# issue.yml, which is the piece that reaches the EXISTING controller: it
+# unseals that vault first (a v1 controller that ever rebooted is sealed and
+# nobody notices, because certificates are static files), clamps the TTL to
+# the CA's remaining lifetime, and writes nothing on the controller. The rest
+# of main.yml — the listener drop-in on primary_ip:2376 — is what makes the
+# new node dialable at all, so including only the issuance half would leave
+# the certificate on disk and no listener for the controller to reach.
+- name: New node docker TLS, issued from the existing Vault
   hosts: nodes
   roles:
-    - geerlingguy.docker
-    - docker_config
-    - docker_tls      # unseal-if-sealed on existing controller, then issue
+    - docker_tls
 
-- name: Existing shared hosts — additive writes only
-  hosts: metrics:backup:controller
+- name: New node firewall
+  hosts: nodes
   roles:
-    - role: attach_fragments   # file_sd fragments, iptables appends, borg user/key
+    - firewall                  # nftables; the new node is not `existing_env`
 
-- name: Seed new region (omittable-section manifest, DRY_RUN gated)
+# The additive write set on the existing shared hosts, and nothing else.
+# Each of these is a role's own attach entry point — see the role READMEs.
+- name: Existing metrics host — prometheus file_sd fragments only
+  hosts: metrics
+  tasks:
+    # Whole-file writes keyed by az, into v1's own paths
+    # (/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml). Prometheus
+    # picks them up within one scrape interval on its own, so nothing is
+    # restarted or reloaded here.
+    - name: Render this new region's prometheus file_sd fragments
+      ansible.builtin.include_role:
+        name: metrics
+        tasks_from: file_sd
+
+    # v1's INPUT-policy-DROP script blocks the new node's loki ingest and the
+    # exporter scrape return path until its addresses are allowed.
+    - name: Append the new node addresses to the v1 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v1_append
+
+- name: Existing controller — firewall appends only
+  hosts: controller
+  tasks:
+    # :3000 (the node's haproxy ACME backend), :2376 return traffic, the
+    # enrolment path — v1 grants a peer its whole inbound set with one
+    # blanket accept per address, which is what this appends.
+    - name: Append the new node addresses to the v1 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v1_append
+
+# roles/backup_server gates itself on `existing_env`: only tasks/account.yml
+# runs, so v2's borg is never installed over the server's existing one and
+# only the cstacks account, its ~/.ssh and the repository path's ownership are
+# touched. The per-node authorized_keys entry is added later, by cs_agent.
+- name: Existing backup server — account and repository path only
+  hosts: backup
+  roles:
+    - backup_server
+
+# The controller trusts the new node over SSH (control-plane row #4: volumes,
+# haproxy certificate deploy, LB reload). ssh_trust skips the controller's
+# whole-file /root/.ssh/config render on an `existing_env` controller.
+- name: SSH trust for the new node
+  hosts: controller:nodes
+  roles:
+    - ssh_trust
+
+# The attach manifest carries topology only — locations/regions/nodes/
+# networks/load balancers plus the user-group region link. No settings, no
+# DNS driver, no products. DRY_RUN=1 runs first and pauses for the operator.
+- name: Seed the new region
   hosts: controller
   roles:
     - controller_seed
 
-- name: New node agent
+- name: New node agent (requires the seeded Node row)
   hosts: nodes
   roles:
     - cs_agent
 
-- name: Post-enrollment (scoped to the new node)
+# Scoped per new node (NODE=<hostname>) rather than fleet-wide: a fleet pass
+# would re-PUT desired state to every existing node, and one unrelated
+# failure would mask the result for the node being attached.
+- name: Post-enrollment controller tasks
   hosts: controller
   roles:
     - controller_post_enroll
 
-- name: Validate new region
-  hosts: nodes:controller
+- name: Validate the new region
+  hosts: controller:nodes
   roles:
     - validate
