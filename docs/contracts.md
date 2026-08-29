@@ -83,6 +83,24 @@ tagged task and note it in its report.
 - borg ssh keyfile MUST live under `/etc/computestacks/` (only dir bind-mounted
   into the borg container).
 
+### Facts exception (blessed): tailscale_ip
+The ONE sanctioned use of non-inventory data in cross-host templates:
+`hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`
+(both defaults mandatory). The tailscale role owns the `tailscale_ip` key in
+`/etc/ansible/facts.d/computestacks.fact` and MERGES into that file, never
+overwrites. Tailnet MEMBERSHIP remains a pure-inventory predicate
+(`tailscale_authkey` set and `tailscale_enabled | default(true)`) — only the
+address VALUE uses this exception.
+
+### Container network placement (input-chain enforceability)
+Node-side containers (cadvisor, fluentd) run with --network=host, listeners
+bound to primary_ip (cadvisor) / 127.0.0.1 (fluentd's docker-log-driver port) —
+published-port DNAT bypasses the input chain, host networking doesn't, and the
+fleet already runs these host-net. Metrics-host containers bind 127.0.0.1
+behind nginx. Galaxy roles install to galaxy_roles/ (gitignored):
+`ansible-galaxy role install -r requirements.yml -p galaxy_roles` and
+`ansible-galaxy collection install -r requirements.yml -p collections`.
+
 ### Tailscale address derivation (PAIRWISE — never per-node)
 - Manifest `node.agent_host` = node tailscale IP ONLY if the CONTROLLER is
   tailnet-joined; else omit (controller dials primary_ip).
