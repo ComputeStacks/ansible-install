@@ -47,6 +47,7 @@
 - name: Nameservers
   hosts: nameservers
   roles:
+    - postgres_repo              # PGDG: 26.04 carries no postgresql-17
     - powerdns
 
 # geerlingguy.docker installs the engine only. /etc/docker/daemon.json belongs
@@ -133,6 +134,10 @@
     redis_requirepass: ""
   roles:
     - vault                     # init/unseal + pki/docker mount + client cert
+    - postgres_repo             # PGDG apt repo + pin: Ubuntu 26.04's archive
+                                # ships 18 and has no postgresql-17 at all,
+                                # and the controller's schema/CI are 17-only.
+                                # MUST precede geerlingguy.postgresql.
     - geerlingguy.postgresql
     - geerlingguy.redis
     - acme_web                  # nginx TLS terminator + acme.sh, before the

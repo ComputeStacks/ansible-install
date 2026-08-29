@@ -110,11 +110,23 @@ docker_apt_packages:
 node_exporter_apt_version: ""
 
 # Packages
-# VERIFY (wave 4J): 17 is the major line the controller's DATABASE_URL and
-# roles/powerdns both assume. Confirm Ubuntu 26.04 actually ships
-# postgresql-17 on the first real converge; if it ships a newer default,
-# bump this and playbooks/vars/Ubuntu-26.yml together.
+# Verified 2026-08-28 (wave 4J): Ubuntu 26.04 'resolute' ships PostgreSQL 18
+# (its `postgresql` metapackage is 18+290ubuntu1) and carries NO postgresql-17
+# in resolute, resolute-updates or resolute-backports. 17 is the major the
+# controller's schema and CI are validated against, so the fleet takes it from
+# PGDG instead: roles/postgres_repo configures apt.postgresql.org's
+# resolute-pgdg suite (postgresql-17 is 17.11-1.pgdg26.04+2 there) and pins
+# apt to it. That role runs before geerlingguy.postgresql on the controller
+# and before roles/powerdns on the nameservers -- the only two places a
+# postgres package is installed. Changing this major means changing
+# playbooks/vars/Ubuntu-26.yml with it, and re-validating the controller repo.
 postgresql_version: 17
+# PGDG's long-lived signing key, checksum-pinned: roles/postgres_repo fetches
+# it and refuses anything else. Verified 2026-08-28. A deliberate upstream
+# rotation means updating this checksum (and the URL if it moves) in one
+# commit; any other change is a fetch failure, which is the intent.
+pgdg_key_url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+pgdg_key_checksum: "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76"
 # acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED.
 # Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release
 # (acmesh-official/acme.sh releases/latest). Note the tag carries NO leading

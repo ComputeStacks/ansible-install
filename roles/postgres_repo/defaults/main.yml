@@ -1,0 +1,35 @@
+---
+# The PGDG apt repository. `pgdg_key_url`, `pgdg_key_checksum` and
+# `postgresql_version` are pinned in playbooks/group_vars/all/versions.yml
+# (docs/contracts.md rule 4); everything here is layout.
+postgres_repo_uri: https://apt.postgresql.org/pub/repos/apt
+# PGDG names its suites <ubuntu codename>-pgdg. Ubuntu 26.04 is 'resolute'.
+postgres_repo_suite: resolute-pgdg
+postgres_repo_components: [main]
+# The fleet is amd64 (README, Requirements). Narrowing the architectures keeps
+# apt from fetching index files it can never use.
+postgres_repo_architectures: [amd64]
+
+postgres_repo_name: pgdg
+postgres_repo_keyring_dir: /etc/apt/keyrings
+postgres_repo_keyring_asc: "{{ postgres_repo_keyring_dir }}/pgdg.asc"
+postgres_repo_keyring: "{{ postgres_repo_keyring_dir }}/pgdg.gpg"
+postgres_repo_preferences_file: /etc/apt/preferences.d/pgdg.pref
+
+# Preference priorities, both deliberate:
+#   * PGDG wins for every postgresql/libpq package, including a downgrade of
+#     something the archive already installed (>1000 is what allows that).
+#   * The UNVERSIONED metapackages are refused outright (<0 means "never"):
+#     `postgresql`, `postgresql-client` and `postgresql-contrib` track the
+#     archive's DEFAULT major, which is 18 on Ubuntu 26.04. Nothing in this
+#     repo installs them -- every consumer names postgresql-<major> -- so a
+#     negative pin turns "something pulled the metapackage" from a silent
+#     major upgrade into an apt error naming the package.
+postgres_repo_pin_priority: 1001
+postgres_repo_metapackage_pin_priority: -1
+postgres_repo_blocked_metapackages:
+  - postgresql
+  - postgresql-client
+  - postgresql-contrib
+  - postgresql-all
+  - postgresql-doc

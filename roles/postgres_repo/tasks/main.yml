@@ -1,0 +1,137 @@
+---
+# The PGDG apt repository, plus the apt preferences that keep this host on the
+# pinned major. Runs BEFORE anything that installs a postgres package:
+# geerlingguy.postgresql on the controller, roles/powerdns on the nameservers.
+#
+# Ubuntu 26.04's own archive ships PostgreSQL 18 and carries no
+# postgresql-17 at all (verified 2026-08-28), while the controller's schema
+# and CI are 17. Without this role, `postgresql-17` simply does not resolve
+# and the controller play dies in geerlingguy.postgresql's apt task.
+
+- name: Assert the pinned major and key inputs are present
+  ansible.builtin.assert:
+    that:
+      - postgresql_version is defined
+      - (postgresql_version | string) | length > 0
+      - (pgdg_key_url | default('')) | length > 0
+      - (pgdg_key_checksum | default('')) | length > 0
+    fail_msg: >-
+      postgresql_version, pgdg_key_url and pgdg_key_checksum must all be set
+      in playbooks/group_vars/all/versions.yml. The signing key is fetched
+      over the network and verified against the checksum -- an unpinned key
+      would let a compromised or swapped key install packages silently.
+    quiet: true
+
+# ansible.builtin.deb822_repository parses and writes the .sources file with
+# python-debian, on the TARGET host.
+- name: Install the apt tooling this role needs
+  ansible.builtin.apt:
+    name:
+      - python3-debian      # ansible.builtin.deb822_repository
+      - gnupg               # dearmoring the signing key
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: "{{ postgres_repo_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Checksum-pinned: PGDG's key is long-lived, so a content change is either a
+# deliberate rotation (update pgdg_key_checksum in versions.yml, in the same
+# commit as the new URL if it moves) or something that must not be installed
+# either way. The failure is a loud get_url checksum mismatch.
+- name: Fetch the PGDG apt signing key
+  ansible.builtin.get_url:
+    url: "{{ pgdg_key_url }}"
+    dest: "{{ postgres_repo_keyring_asc }}"
+    checksum: "sha256:{{ pgdg_key_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: postgres_repo_key_download
+
+- name: Check whether the dearmored keyring exists
+  ansible.builtin.stat:
+    path: "{{ postgres_repo_keyring }}"
+  register: postgres_repo_keyring_stat
+
+# Same idiom as roles/cs_agent: the fetched .asc is dearmored to a binary
+# keyring, and the sources file points Signed-By at that. Re-runs only when
+# the upstream key changed or the keyring is missing.
+- name: Dearmor the PGDG apt signing key
+  ansible.builtin.command:
+    cmd: >-
+      gpg --batch --yes --dearmor
+      --output {{ postgres_repo_keyring }}
+      {{ postgres_repo_keyring_asc }}
+  when: postgres_repo_key_download is changed or not postgres_repo_keyring_stat.stat.exists
+  changed_when: true
+
+- name: Ensure the dearmored keyring is world readable
+  ansible.builtin.file:
+    path: "{{ postgres_repo_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the PGDG apt repository
+  ansible.builtin.deb822_repository:
+    name: "{{ postgres_repo_name }}"
+    types: [deb]
+    # uris/suites are list-typed: passed as lists so a value is never
+    # comma-split into two sources.
+    uris: ["{{ postgres_repo_uri }}"]
+    suites: ["{{ postgres_repo_suite }}"]
+    components: "{{ postgres_repo_components }}"
+    architectures: "{{ postgres_repo_architectures }}"
+    signed_by: "{{ postgres_repo_keyring }}"
+    enabled: true
+    state: present
+  register: postgres_repo_source
+
+- name: Install the apt preferences that hold this host on the pinned major
+  ansible.builtin.template:
+    src: pgdg.pref.j2
+    dest: "{{ postgres_repo_preferences_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: postgres_repo_preferences
+
+- name: Update the apt cache after a repository or preferences change
+  ansible.builtin.apt:
+    update_cache: true
+  when: postgres_repo_source is changed or postgres_repo_preferences is changed
+
+# Cheap, and it converts the failure mode from "geerlingguy.postgresql's apt
+# task says No package matching postgresql-17" (or powerdns's) into a message
+# that names the repository as the cause.
+- name: Check that the pinned postgres major resolves
+  ansible.builtin.command:
+    argv:
+      - apt-cache
+      - policy
+      - "postgresql-{{ postgresql_version }}"
+  register: postgres_repo_policy
+  changed_when: false
+  check_mode: false
+
+- name: Assert the pinned postgres major is installable from PGDG
+  ansible.builtin.assert:
+    that:
+      - "postgres_repo_policy.stdout is search('Candidate:')"
+      - "postgres_repo_policy.stdout is not search('Candidate: *[(]none[)]')"
+    fail_msg: >-
+      postgresql-{{ postgresql_version }} has no installation candidate on
+      {{ inventory_hostname }} after configuring {{ postgres_repo_uri }}
+      {{ postgres_repo_suite }}. Check that PGDG publishes that major for
+      this suite, that the host can reach {{ postgres_repo_uri }}, and that
+      {{ postgres_repo_preferences_file }} has not pinned it out.
+      Ubuntu 26.04's own archive carries no postgresql-{{ postgresql_version }},
+      so this repository is the only source for it.
+    quiet: true

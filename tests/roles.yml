@@ -44,6 +44,7 @@
   roles:
     - docker_config
     - vault
+    - postgres_repo
     - acme_web
     - controller
     - controller_seed
@@ -100,6 +101,7 @@
     - ../playbooks/group_vars/all/ports.yml
     - ../playbooks/group_vars/all/versions.yml
   roles:
+    - postgres_repo
     - powerdns
 
 # The alternate entry points. Four of these are what add-region.yml calls;

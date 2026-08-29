@@ -177,7 +177,14 @@ delta.
    is an `include_vars` that would otherwise fail outright. `include_vars`
    falls back to the playbook directory, so this needs no fork of the pinned
    role.
-8. **The eight per-wave syntax harnesses are one file**, `tests/roles.yml`.
+8. **`postgres_repo` is a new role** (`roles/postgres_repo`, Wave 4J), on the
+   controller and the nameservers, before `geerlingguy.postgresql` and
+   `powerdns` respectively. Ubuntu 26.04 ships PostgreSQL 18 and carries no
+   `postgresql-17`, which is the major the controller's schema and CI are
+   validated against, so the pinned major comes from PGDG with an apt
+   preferences pin. `add-region.yml` does not run it: attach mode installs no
+   postgres package anywhere. Resolves the `postgresql_version` VERIFY.
+9. **The eight per-wave syntax harnesses are one file**, `tests/roles.yml`.
    They existed because `site.yml` did not parse yet. It does now, so the
    harness keeps only what the two playbooks cannot cover: every role in
    isolation and every reusable `tasks_from:` entry point.

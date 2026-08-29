@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+# roles/postgres_repo. Keeps this host on PostgreSQL {{ postgresql_version }},
+# which Ubuntu 26.04's own archive does not carry (it ships 18).
+#
+# Order matters: apt takes the FIRST stanza that matches a given package
+# version, so the outright refusals come before the blanket PGDG preference.
+
+# 1. The UNVERSIONED metapackages are refused, from EVERY origin -- the
+#    Ubuntu archive's copies track its default major (18), and PGDG publishes
+#    its own copies tracking the newest major it ships. Both would install a
+#    second cluster beside the pinned one. Every consumer in this repository
+#    names postgresql-<major> explicitly, so nothing legitimate wants these;
+#    an apt error naming the package is exactly the point.
+{% for pkg in postgres_repo_blocked_metapackages %}
+Package: {{ pkg }}
+Pin: release *
+Pin-Priority: {{ postgres_repo_metapackage_pin_priority }}
+
+{% endfor %}
+# 2. Otherwise PGDG wins for every postgresql/libpq package, including over a
+#    version the Ubuntu archive already installed. A priority above 1000 is
+#    what permits that downgrade; anything lower would leave an
+#    archive-installed postgresql-common in place, and postgresql-common is
+#    the package whose default-version logic decides what an unversioned
+#    request resolves to.
+Package: postgresql* libpq* pgdg-keyring
+Pin: origin apt.postgresql.org
+Pin-Priority: {{ postgres_repo_pin_priority }}

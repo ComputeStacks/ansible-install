@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: postgres_repo
+  author: ComputeStacks
+  description: >-
+    Configures the PostgreSQL Global Development Group (PGDG) apt repository
+    and the apt preferences that keep the fleet on the pinned major, so
+    postgresql-{{ postgresql_version }} resolves on Ubuntu 26.04 (whose own
+    archive ships 18 only).
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []
