@@ -21,8 +21,22 @@ acme_account_email: admin@example.com
 
 # Tailscale: enabled globally when tailscale_authkey is set in secrets.yml.
 # Opt out per host/group with `tailscale_enabled: false` (same-L2 regions).
+# In ATTACH mode the default flips: add-region.yml requires every host to
+# declare `tailscale_enabled` explicitly when an auth key is present, because
+# an existing v1 controller and metrics host are not on a tailnet until you
+# join them yourself.
 
 # Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
+
+# Post-install checks (roles/validate). Names: services, containers, agent,
+# backfill, prometheus, borg, ssh, portal, dns.
+# validate_skip: []
+# validate_tls_verify: true    # false while the portal is self-signed
+
+# Docker's apt repository is keyed on the release codename. If
+# download.docker.com has no suite for your Ubuntu release yet, point
+# geerlingguy.docker at the newest one it does publish:
+# docker_apt_repository: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu <codename> stable"
 
 # Attach mode (add-region.yml): set on EXISTING shared hosts in the inventory.
 # existing_env: true
