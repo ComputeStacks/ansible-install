@@ -2,6 +2,9 @@
 - name: Install base packages
   ansible.builtin.import_tasks: packages.yml
 
+- name: Reboot if a kernel/module update requires it
+  ansible.builtin.import_tasks: reboot_if_required.yml
+
 - name: Harden sshd
   ansible.builtin.import_tasks: sshd.yml
 

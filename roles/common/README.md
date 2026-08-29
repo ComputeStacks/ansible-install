@@ -9,6 +9,11 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
 
 - Removes packages that conflict with the rest of the stack (`ufw`, `ntp`),
   installs a curated base package set (`common_packages`).
+- Reboots the host when `/var/run/reboot-required` exists (a kernel/module
+  update pulled in by package install), unless `common_allow_reboot` is set
+  false or the host is flagged `existing_env: true` — attach mode must never
+  reboot a live v1 controller/metrics/backup host. Runs right after package
+  install (see "Deviations from v1" for why).
 - Hardens sshd: `PasswordAuthentication no` (restarts `ssh` on change).
 - Ensures `chrony` is installed, enabled, and running.
 - Installs and enables `unattended-upgrades` (periodic + unattended apt
@@ -35,6 +40,7 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
 |---|---|---|
 | `common_packages` | see `defaults/main.yml` | Base package set installed on every host. |
 | `common_conflicting_packages` | `[ufw, ntp]` | Packages removed before install. |
+| `common_allow_reboot` | `true` | Reboot when `/var/run/reboot-required` exists. Never fires on `existing_env` hosts regardless of this setting. |
 
 Consumed, not owned: `hostname`, `primary_ip`, `region`, `az` (node inventory
 vars, asserted present by `preflight`).
@@ -60,3 +66,16 @@ vars, asserted present by `preflight`).
 - Does not port v1's `/etc/hosts` localhost line or DNS/admin-credential
   preflight checks — out of this role's scope for Wave 1A (see `preflight`
   and, later, `validate`).
+- **Replaces v1's unconditional post-docker-install reboot hack** (v1
+  rebooted every host, unconditionally, right after installing docker) with
+  a targeted, convergent check: reboot only when
+  `/var/run/reboot-required` actually exists, and never on `existing_env`
+  hosts. Root cause (found by Wave 1B while investigating the docker role):
+  the initial package install can pull in a new kernel and remove the
+  running kernel's `/lib/modules`, after which `modprobe` of
+  `br_netfilter`/`nf_nat`/etc. fails and dockerd cannot build its firewall
+  chains — so the fix belongs here, before docker is ever installed, not in
+  the docker roles. `common` has no distinct "apt upgrade" task (package
+  install uses `state: present`, not `state: latest`), so this task runs
+  immediately after package install rather than after a separate upgrade
+  step.

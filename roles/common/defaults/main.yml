@@ -40,3 +40,10 @@ common_packages:
 common_conflicting_packages:
   - ufw
   - ntp
+
+# Reboot the host when /var/run/reboot-required exists (e.g. a kernel update
+# pulled in by package install removed the running kernel's /lib/modules,
+# which then breaks dockerd's modprobe of br_netfilter/nf_nat/etc — see
+# README.md "Deviations from v1"). Set false to disable entirely; either way
+# this NEVER fires on existing_env hosts.
+common_allow_reboot: true

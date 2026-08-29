@@ -1,0 +1,22 @@
+---
+# Package install (above) can pull in a new kernel and remove the running
+# kernel's /lib/modules; after that, modprobe of br_netfilter/nf_nat/etc.
+# fails and dockerd cannot build its firewall chains until the host reboots
+# onto the new kernel. See README.md "Deviations from v1" — this replaces
+# v1's unconditional post-docker-install reboot hack.
+#
+# NEVER fires on existing_env hosts: attach mode must never reboot a live
+# v1 controller/metrics/backup host.
+
+- name: Check whether a reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: common_reboot_required_stat
+
+- name: Reboot when required
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when:
+    - common_reboot_required_stat.stat.exists
+    - common_allow_reboot | default(true) | bool
+    - not (existing_env | default(false))
