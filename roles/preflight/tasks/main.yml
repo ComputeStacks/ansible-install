@@ -1,0 +1,116 @@
+---
+# Assert-only role: no host is ever changed by this role. Every task below is
+# a hard assertion (or, for the tailscale opt-out case, a loud warning) run
+# before any other role touches a host. See docs/contracts.md for the rules
+# this role enforces.
+
+- name: Assert Ubuntu 26.04 amd64 (skipped on existing_env hosts, which are Debian)
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version == '26.04'
+      - ansible_architecture == 'x86_64'
+    fail_msg: >-
+      {{ inventory_hostname }} must be running Ubuntu 26.04 LTS (amd64/x86_64);
+      found {{ ansible_distribution }} {{ ansible_distribution_version }}
+      {{ ansible_architecture }}. Reinstall this host with Ubuntu 26.04 LTS
+      server (amd64), or, if this host is part of a pre-existing v1
+      (Debian) environment being attached to, set 'existing_env: true' on it
+      in the inventory.
+    success_msg: "{{ inventory_hostname }}: Ubuntu 26.04 amd64 confirmed"
+  when: not (existing_env | default(false))
+
+- name: Assert every node in groups['nodes'] defines the required inventory vars
+  ansible.builtin.assert:
+    that:
+      - hostvars[item.0][item.1] is defined
+    fail_msg: >-
+      Node '{{ item.0 }}' is missing required host var '{{ item.1 }}'. Set
+      '{{ item.1 }}' as a host var for {{ item.0 }} in the inventory (see
+      inventories/example/hosts.yml for the full required set: hostname,
+      primary_ip, public_ip, region, az, container_network,
+      container_network_name).
+    success_msg: "{{ item.0 }}: {{ item.1 }} is defined"
+  loop: "{{ groups['nodes'] | product(preflight_required_node_vars) | list }}"
+  loop_control:
+    label: "{{ item.0 }}.{{ item.1 }}"
+  run_once: true
+
+- name: Assert exactly one node per availability zone
+  ansible.builtin.assert:
+    that:
+      - (groups['nodes'] | map('extract', hostvars, 'az') | list | unique | length) == (groups['nodes'] | length)
+    fail_msg: >-
+      'az' values must be unique across groups['nodes'] (exactly one node per
+      availability zone) but are not: {{ groups['nodes'] | map('extract', hostvars, 'az') | list }}.
+      Fix the 'az' host var on the affected nodes so each az appears exactly
+      once.
+    success_msg: "az values are unique across all {{ groups['nodes'] | length }} node(s)"
+  run_once: true
+
+- name: Assert hostnames (where defined) are a single lowercase word, not an FQDN
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].hostname is match('^[a-z][a-z0-9-]*$')
+    fail_msg: >-
+      hostname '{{ hostvars[item].hostname }}' for host '{{ item }}' must be a
+      single lowercase word (letters, digits, hyphens only) — not an FQDN and
+      no uppercase. Fix the 'hostname' host var for {{ item }} in the
+      inventory.
+    success_msg: "{{ item }}: hostname '{{ hostvars[item].hostname }}' is valid"
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: hostvars[item].hostname is defined
+  run_once: true
+
+- name: Assert secret_key_base is present, long enough, and not the placeholder
+  ansible.builtin.assert:
+    that:
+      - (secret_key_base | default('')) | length >= 128
+      - "'CHANGEME' not in (secret_key_base | default(''))"
+    fail_msg: >-
+      secret_key_base is missing, shorter than 128 characters, or still the
+      CHANGEME sample placeholder. Generate it ONCE with `openssl rand -hex
+      64` and set it in the vaulted secrets file — the provisioner NEVER
+      generates this value, and rotating it later destroys every encrypted
+      credential in the controller (agent tokens, DNS keys, LB certificates).
+    success_msg: "secret_key_base is present and >= 128 characters"
+  run_once: true
+
+- name: Assert user_auth_secret is present, long enough, and not the placeholder
+  ansible.builtin.assert:
+    that:
+      - (user_auth_secret | default('')) | length >= 128
+      - "'CHANGEME' not in (user_auth_secret | default(''))"
+    fail_msg: >-
+      user_auth_secret is missing, shorter than 128 characters, or still the
+      CHANGEME sample placeholder. Generate it ONCE with `openssl rand -hex
+      64` and set it in the vaulted secrets file — the provisioner NEVER
+      generates this value.
+    success_msg: "user_auth_secret is present and >= 128 characters"
+  run_once: true
+
+- name: Determine hosts with tailscale explicitly disabled
+  ansible.builtin.set_fact:
+    preflight_tailscale_disabled_hosts: "{{ preflight_tailscale_disabled_hosts | default([]) + [item] }}"
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: not (hostvars[item].tailscale_enabled | default(true) | bool)
+  run_once: true
+
+- name: Warn when tailscale_authkey is set but some hosts opt out
+  ansible.builtin.debug:
+    msg: >-
+      tailscale_authkey is set, but these hosts have 'tailscale_enabled:
+      false' and will NOT join the tailnet:
+      {{ preflight_tailscale_disabled_hosts | default([]) | join(', ') }}.
+      Control-plane traffic to/from them (controller -> agent Bearer,
+      metrics scrape) will ride the LAN/public network in cleartext instead
+      of the tailnet. Confirm this is intentional (documented same-L2
+      opt-out) before proceeding.
+  when:
+    - tailscale_authkey is defined
+    - (preflight_tailscale_disabled_hosts | default([])) | length > 0
+  run_once: true

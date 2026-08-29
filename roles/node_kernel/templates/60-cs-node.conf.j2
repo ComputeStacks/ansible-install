@@ -1,0 +1,4 @@
+# Managed by the ComputeStacks 'node_kernel' role. Do not edit by hand.
+{% for key, value in node_kernel_sysctls.items() %}
+{{ key }} = {{ value }}
+{% endfor %}

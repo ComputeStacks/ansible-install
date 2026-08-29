@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: node_kernel
+  author: ComputeStacks
+  description: >-
+    Node kernel tuning: sysctls for container density and BBR, conntrack
+    module sizing, boot-time netfilter module loading, and the IPv6
+    accept_ra=2 uplink fix.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

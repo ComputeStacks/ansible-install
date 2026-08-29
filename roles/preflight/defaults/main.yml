@@ -1,0 +1,11 @@
+---
+# Inventory vars every node in groups['nodes'] must define (docs/contracts.md
+# rule 1). Templates elsewhere in the provisioner assume these are present.
+preflight_required_node_vars:
+  - hostname
+  - primary_ip
+  - public_ip
+  - region
+  - az
+  - container_network
+  - container_network_name

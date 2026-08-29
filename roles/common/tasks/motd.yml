@@ -1,0 +1,37 @@
+---
+# common is the SOLE owner of /etc/update-motd.d/50-computestacks
+# (docs/contracts.md ownership map). Rendered from inventory vars only —
+# groups['nodes'] and hostvars are populated from the full inventory
+# regardless of --limit, so this is safe under partial runs.
+
+- name: Compute the MOTD role label for this host
+  ansible.builtin.set_fact:
+    common_motd_role: >-
+      {{ group_names
+         | reject('equalto', 'ungrouped')
+         | reject('match', '^region_.*')
+         | reject('match', '^az_.*')
+         | list | join(', ') }}
+
+- name: Compute the list of regions served, for shared hosts
+  ansible.builtin.set_fact:
+    common_motd_regions: >-
+      {{ (groups['nodes'] | map('extract', hostvars, 'region')
+          | zip(groups['nodes'] | map('extract', hostvars, 'az'))
+          | map('join', ' / ') | list) | unique | sort }}
+
+- name: Empty the static /etc/motd (the dynamic fragment below is authoritative)
+  ansible.builtin.copy:
+    dest: /etc/motd
+    content: ""
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the ComputeStacks MOTD fragment
+  ansible.builtin.template:
+    src: motd.sh.j2
+    dest: /etc/update-motd.d/50-computestacks
+    owner: root
+    group: root
+    mode: "0755"

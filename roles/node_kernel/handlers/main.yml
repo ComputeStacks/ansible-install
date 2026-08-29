@@ -1,0 +1,8 @@
+---
+- name: Load node kernel modules
+  ansible.builtin.command: modprobe -a nf_conntrack br_netfilter
+  changed_when: false
+
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false

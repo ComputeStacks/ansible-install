@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: ssh_trust
+  author: ComputeStacks
+  description: >-
+    Installs the controller's root and app SSH pubkeys into root's
+    authorized_keys on every node and the registry host, and renders the
+    controller's root SSH client config (greenfield only).
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

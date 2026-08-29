@@ -1,0 +1,48 @@
+---
+- name: Install base packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Harden sshd
+  ansible.builtin.import_tasks: sshd.yml
+
+- name: Ensure chrony is enabled and running
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: Enable unattended and periodic apt upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the ComputeStacks MOTD
+  ansible.builtin.import_tasks: motd.yml
+
+- name: Ensure /root/.ssh exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate the controller root ed25519 keypair (consumed by ssh_trust)
+  community.crypto.openssh_keypair:
+    path: /root/.ssh/id_ed25519
+    type: ed25519
+    owner: root
+    group: root
+    mode: "0600"
+    regenerate: never
+  when: "'controller' in group_names"

@@ -1,0 +1,15 @@
+---
+# Minimal syntax-check exercise for Wave 1A (preflight, common, ssh_trust,
+# node_kernel). Not a real converge target and not wired into site.yml —
+# playbooks/site.yml (owned by Wave 4J) has the frozen play order these
+# roles are actually run under.
+#
+#   ansible-playbook --syntax-check tests/wave1a.yml
+- name: Wave 1A syntax check
+  hosts: all
+  gather_facts: true
+  roles:
+    - preflight
+    - common
+    - ssh_trust
+    - node_kernel

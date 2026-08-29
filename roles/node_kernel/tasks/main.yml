@@ -1,0 +1,66 @@
+---
+# node_kernel owns /etc/modules-load.d/cs-node.conf. Do NOT touch
+# /etc/modules-load.d/cs-firewall.conf (owned by the firewall role, Wave 2F)
+# — docs/contracts.md ownership map.
+
+- name: Load node kernel modules on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/cs-node.conf
+    content: |
+      nf_conntrack
+      br_netfilter
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Load node kernel modules
+
+- name: Size the conntrack hash table (module option; needs a reload/reboot to apply)
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/nf_conntrack.conf
+    content: "options nf_conntrack hashsize={{ node_kernel_conntrack_hashsize }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure kernel/network sysctls for container density and BBR
+  ansible.builtin.template:
+    src: 60-cs-node.conf.j2
+    dest: /etc/sysctl.d/60-cs-node.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
+
+- name: Determine whether this node has a global IPv6 address
+  ansible.builtin.set_fact:
+    node_kernel_has_global_ipv6: >-
+      {{ (ansible_all_ipv6_addresses | default([]) | reject('match', '^fe80') | list | length) > 0 }}
+
+- name: Configure IPv6 accept_ra=2 on the uplink interface
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/61-cs-node-ipv6.conf
+    content: |
+      # Docker sets net.ipv6.conf.all.forwarding=1 when it creates an
+      # IPv6-enabled network, which silently withdraws the RA-learned IPv6
+      # default route ~30 minutes later unless accept_ra is forced to 2
+      # (accept RAs even while forwarding) on the uplink interface.
+      net.ipv6.conf.{{ uplink_interface }}.accept_ra = 2
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+  notify: Reload sysctl
+
+- name: Note that the IPv6 accept_ra fix is skipped without uplink_interface
+  ansible.builtin.debug:
+    msg: >-
+      This node has a global IPv6 address but no 'uplink_interface' inventory
+      var is set, so the accept_ra=2 fix is SKIPPED (see README.md). Docker
+      creating an IPv6-enabled network will silently withdraw the RA-learned
+      default route about 30 minutes after boot until 'uplink_interface'
+      (e.g. eth0) is set as a host var for {{ inventory_hostname }}.
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is not defined

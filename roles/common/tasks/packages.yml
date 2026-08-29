@@ -1,0 +1,12 @@
+---
+- name: Remove conflicting packages
+  ansible.builtin.apt:
+    name: "{{ common_conflicting_packages }}"
+    state: absent
+
+- name: Install base system packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

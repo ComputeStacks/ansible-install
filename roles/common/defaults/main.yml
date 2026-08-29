@@ -1,0 +1,42 @@
+---
+# Curated from v1 roles/base/tasks/debian/packages.yml. Distro packages ride
+# unattended-upgrades (below) — nothing here is version-pinned.
+#
+# Dropped from v1's list (see README.md "Deviations from v1" for why):
+#   linux-headers-amd64 (Debian-specific package name), apt-transport-https
+#   (no-op since APT 1.5+), gnupg-agent (merged into gnupg), pass (unrelated
+#   to server operations), nfs-common (NFS backend stripped from v2 — SSH
+#   borg only).
+# Renamed: gnupg2 -> gnupg (gnupg2 is a transitional/dummy package name).
+common_packages:
+  - apparmor
+  - openssl
+  - ca-certificates
+  - gnupg
+  - curl
+  - wget
+  - git
+  - rsync
+  - sudo
+  - chrony
+  - jq
+  - whois
+  - socat
+  - dnsutils
+  - net-tools
+  - traceroute
+  - sysstat
+  - tree
+  - vim
+  - man
+  - tmux
+  - iptables
+  - python3-pip
+  - python3-docker
+  - python3-openssl
+
+# Packages that conflict with our stack (ufw fights the nftables firewall
+# role; ntp fights chrony) and are removed if present.
+common_conflicting_packages:
+  - ufw
+  - ntp

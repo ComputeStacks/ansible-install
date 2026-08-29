@@ -1,0 +1,64 @@
+---
+# Installs the controller's root and app ed25519 pubkeys into root's
+# authorized_keys on every host in groups['nodes'] and groups['registry']
+# (docs/contracts.md control-plane rows #4 and #19). Additive
+# authorized_key entries only — never exclusive.
+
+- name: Stat the controller app pubkey (created later by Wave 3G's controller role)
+  ansible.builtin.stat:
+    path: /etc/computestacks/.ssh/id_ed25519.pub
+  register: ssh_trust_app_pubkey_stat
+  delegate_to: "{{ groups['controller'] | first }}"
+  run_once: true
+
+- name: Warn when the controller app pubkey does not exist yet
+  ansible.builtin.debug:
+    msg: >-
+      /etc/computestacks/.ssh/id_ed25519.pub does not exist on the controller
+      yet (created by the controller role, Wave 3G). Only the controller's
+      root pubkey is being trusted this run — rerun ssh_trust once the app
+      key exists.
+  when: not ssh_trust_app_pubkey_stat.stat.exists
+  run_once: true
+
+- name: Slurp the controller root pubkey
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_ed25519.pub
+  register: ssh_trust_root_pubkey_raw
+  delegate_to: "{{ groups['controller'] | first }}"
+  run_once: true
+
+- name: Slurp the controller app pubkey
+  ansible.builtin.slurp:
+    src: /etc/computestacks/.ssh/id_ed25519.pub
+  register: ssh_trust_app_pubkey_raw
+  delegate_to: "{{ groups['controller'] | first }}"
+  run_once: true
+  when: ssh_trust_app_pubkey_stat.stat.exists
+
+- name: Trust the controller root key in root's authorized_keys
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ ssh_trust_root_pubkey_raw.content | b64decode }}"
+  when: "'nodes' in group_names or 'registry' in group_names"
+
+- name: Trust the controller app key in root's authorized_keys
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ ssh_trust_app_pubkey_raw.content | b64decode }}"
+  when:
+    - "'nodes' in group_names or 'registry' in group_names"
+    - ssh_trust_app_pubkey_stat.stat.exists
+
+- name: Render the controller's /root/.ssh/config (greenfield only)
+  ansible.builtin.template:
+    src: ssh_config.j2
+    dest: /root/.ssh/config
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - "'controller' in group_names"
+    - not (existing_env | default(false))

@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: common
+  author: ComputeStacks
+  description: >-
+    Base system convergence for every host: packages, sshd hardening, chrony,
+    unattended-upgrades, the ComputeStacks MOTD, and the controller's root
+    ed25519 keypair.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

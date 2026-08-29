@@ -1,0 +1,13 @@
+{# Whole-file render, controller only, skipped when existing_env: true.
+   Inventory vars only (hostname/primary_ip) — never gathered facts, so this
+   renders the full node list regardless of --limit. #}
+{% for n in groups['nodes'] -%}
+Host {{ hostvars[n].hostname }}
+  User root
+  HostName {{ hostvars[n].primary_ip }}
+  Port {{ cs_ports.ssh }}
+
+{% endfor -%}
+Host *
+  ServerAliveInterval 60
+  TCPKeepAlive no

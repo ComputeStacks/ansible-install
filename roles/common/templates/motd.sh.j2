@@ -1,0 +1,37 @@
+#!/bin/sh
+# Managed by the ComputeStacks 'common' role. Do not edit by hand.
+
+cat <<'BANNER'
+   ______                            __      _____ __             __
+  / ____/___  ____ ___  ____  __  __/ /____ / ___// /_____ ______/ /_______
+ / /   / __ \/ __ `__ \/ __ \/ / / / __/ _ \\__ \/ __/ __ `/ ___/ //_/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/  __/__/ / /_/ /_/ / /__/ ,< (__  )
+\____/\____/_/ /_/ /_/ .___/\__,_/\__/\___/____/\__/\__,_/\___/_/|_/____/
+                    /_/
+BANNER
+echo
+{% if 'nodes' in group_names %}
+cat <<'INFO'
+    Hostname: {{ hostname }}
+    IP:       {{ primary_ip }}
+    Region:   {{ region }}
+    AZ:       {{ az }}
+INFO
+{% elif 'controller' in group_names %}
+cat <<'INFO'
+    Hostname: {{ hostname }}
+    IP:       {{ primary_ip }}
+    Role:     controller
+INFO
+{% else %}
+cat <<'INFO'
+    Hostname: {{ hostname }}
+    IP:       {{ primary_ip }}
+    Role:     {{ common_motd_role }}
+    Regions served:
+{% for r in common_motd_regions %}
+      - {{ r }}
+{% endfor %}
+INFO
+{% endif %}
+echo
