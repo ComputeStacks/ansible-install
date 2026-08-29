@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: cs_agent
+  author: ComputeStacks
+  description: >-
+    Installs the cs-agent node agent from the ComputeStacks apt repository,
+    renders /etc/computestacks/agent.yml, enrolls the node against the
+    controller, and authorizes its borg key on the backup server.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

@@ -1,0 +1,72 @@
+---
+# {{ ansible_managed }}
+# cs-agent v3.3.0 configuration. Schema: cs-agent config/config.go.
+#
+# Only installer-owned keys are written here; everything else keeps the
+# agent's own compiled-in default (backups.prune_freq, backups.compact_freq,
+# the borg lock waits, changelog/tasks retention, metadata.max_body_bytes...).
+# Adding a key here means this role now owns it forever, so don't.
+host:
+  iptables-cmd: "{{ cs_agent_iptables_cmd }}"
+  ip6tables-cmd: "{{ cs_agent_ip6tables_cmd }}"
+
+store:
+  data_dir: "{{ cs_agent_store_data_dir }}"
+{% if cs_agent_controller_host | length > 0 %}
+
+computestacks:
+  host: "{{ cs_agent_controller_host }}"
+{% endif %}
+
+metadata:
+  # Port 8500 is baked into customer containers via metadata.internal:8500 and
+  # cannot move; only the bind address varies (see defaults/main.yml).
+  listen_addr: "{{ cs_agent_listen_addr | trim }}"
+  admin_token_hash: "{{ cs_agent_admin_token_hash }}"
+
+queue:
+  numworkers: {{ cs_agent_queue_numworkers | int }}
+
+backups:
+  enabled: {{ cs_agent_backups_enabled | bool | lower }}
+  key: "{{ backups_key }}"
+  borg:
+    image: "{{ borg_image }}"
+    # `compression`, not the sample's `compress`.
+    compression: "{{ cs_agent_borg_compression }}"
+    ssh:
+      enabled: true
+      user: "{{ cs_agent_backup_ssh_user }}"
+      host: "{{ cs_agent_backup_ssh_host }}"
+      port: "{{ cs_ports.ssh }}"
+      host_path: "{{ cs_agent_backup_host_path }}"
+      # Must stay under /etc/computestacks — the only host directory bind
+      # mounted into the borg container.
+      keyfile: "{{ cs_agent_backup_keyfile }}"
+    # Borg on the BACKUP SERVER, used for the remote half of every operation.
+    ssh_borg_remote_path: "{{ cs_agent_borg_remote_path }}"
+{% if cs_agent_s3_export_enabled | bool %}
+  export:
+    s3:
+      endpoint: "{{ cs_agent_s3_export_endpoint }}"
+      region: "{{ cs_agent_s3_export_region }}"
+      bucket: "{{ cs_agent_s3_export_bucket }}"
+      prefix: "{{ cs_agent_s3_export_prefix }}"
+      access_key: "{{ s3_export_access_key }}"
+      secret_key: "{{ s3_export_secret_key }}"
+      force_path_style: {{ cs_agent_s3_export_force_path_style | bool | lower }}
+{% endif %}
+
+# TOP-LEVEL, not nested under backups: the agent reads `mariadb.*`.
+mariadb:
+  lock_wait:
+    query_type: "{{ cs_agent_mariadb_lock_wait_query_type }}"
+    timeout: "{{ cs_agent_mariadb_lock_wait_timeout }}"
+  long_queries:
+    query_type: "{{ cs_agent_mariadb_long_queries_query_type }}"
+    timeout: "{{ cs_agent_mariadb_long_queries_timeout }}"
+{% if sentry_dsn is defined and (sentry_dsn | length > 0) %}
+
+sentry:
+  dsn: "{{ sentry_dsn }}"
+{% endif %}

@@ -1,0 +1,76 @@
+---
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: "{{ cs_agent_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Fetch the ComputeStacks apt signing key
+  ansible.builtin.get_url:
+    url: "{{ cs_agent_apt_key_url }}"
+    dest: "{{ cs_agent_keyring_asc }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: cs_agent_apt_key_download
+
+- name: Check whether the dearmored keyring exists
+  ansible.builtin.stat:
+    path: "{{ cs_agent_keyring }}"
+  register: cs_agent_keyring_stat
+
+# apt refuses an ASCII-armored key in signed-by, so the fetched .asc is
+# converted to a binary keyring. Re-runs only when the upstream key changed or
+# the keyring is missing — a rotated key rolls through on the next converge.
+- name: Dearmor the ComputeStacks apt signing key
+  ansible.builtin.command:
+    cmd: >-
+      gpg --batch --yes --dearmor
+      --output {{ cs_agent_keyring }}
+      {{ cs_agent_keyring_asc }}
+  when: cs_agent_apt_key_download is changed or not cs_agent_keyring_stat.stat.exists
+  changed_when: true
+
+- name: Ensure the dearmored keyring is world readable
+  ansible.builtin.file:
+    path: "{{ cs_agent_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the ComputeStacks apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by={{ cs_agent_keyring }}] {{ cs_agent_apt_repo }}
+      {{ cs_agent_apt_suite }} {{ cs_agent_apt_component }}
+    filename: "{{ cs_agent_apt_sources_filename }}"
+    state: present
+    update_cache: true
+
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: apt
+
+# A held package cannot be moved to a new pin, so the hold is released before
+# the install and re-applied after it. That is what makes a version bump in
+# versions.yml roll through on a rerun (docs/contracts.md rule 3).
+- name: Release the cs-agent apt hold before installing the pinned version
+  ansible.builtin.dpkg_selections:
+    name: "{{ cs_agent_package }}"
+    selection: install
+  when: cs_agent_package in ansible_facts.packages
+
+- name: Install the pinned cs-agent package
+  ansible.builtin.apt:
+    name: "{{ cs_agent_package }}={{ cs_agent_apt_version }}"
+    state: present
+    allow_downgrade: true
+    update_cache: true
+  notify: Restart cs-agent
+
+- name: Hold the cs-agent package at the pinned version
+  ansible.builtin.dpkg_selections:
+    name: "{{ cs_agent_package }}"
+    selection: hold

@@ -1,0 +1,94 @@
+---
+- name: Assert the inventory vars cs_agent renders from are present
+  ansible.builtin.assert:
+    that:
+      - hostname is defined and (hostname | length > 0)
+      - primary_ip is defined and (primary_ip | length > 0)
+      - backups_key is defined and (backups_key | length > 0)
+      - cs_agent_apt_version is defined and cs_agent_apt_version != 'VERIFY'
+    fail_msg: >-
+      cs_agent needs the inventory vars `hostname` and `primary_ip` on every
+      node, `backups_key` in the vaulted secrets file, and a resolved
+      `cs_agent_apt_version` in playbooks/group_vars/all/versions.yml.
+
+# One shared backup server is architectural (docs/control-plane graph). The
+# assert is what makes the `| first` below safe — the role never silently
+# picks one of several backup servers.
+- name: Assert exactly one backup server is in the inventory
+  ansible.builtin.assert:
+    that:
+      - (groups[cs_agent_backup_group] | default([]) | length) == 1
+    fail_msg: >-
+      cs_agent expects exactly one host in groups['{{ cs_agent_backup_group }}']
+      (found {{ groups[cs_agent_backup_group] | default([]) | length }}). The
+      borg SSH backend points every node at a single shared backup server.
+
+- name: Install the cs-agent package from the ComputeStacks apt repository
+  ansible.builtin.include_tasks: install.yml
+
+- name: Ensure the ComputeStacks configuration directory exists
+  ansible.builtin.file:
+    path: "{{ cs_agent_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure the borg SSH key directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ cs_agent_backup_dir }}"
+    - "{{ cs_agent_backup_ssh_dir }}"
+
+- name: Generate the node's borg SSH keypair
+  community.crypto.openssh_keypair:
+    path: "{{ cs_agent_backup_keyfile }}"
+    type: ed25519
+    owner: root
+    group: root
+    mode: "0600"
+    comment: "cs-agent {{ hostname }}"
+    regenerate: never
+    state: present
+  register: cs_agent_backup_keypair
+
+# Additive, per-node entry — safe against an existing_env backup server that
+# already carries every other node's key.
+- name: Authorize the node's borg key on the backup server
+  ansible.posix.authorized_key:
+    user: "{{ cs_agent_backup_ssh_user }}"
+    key: "{{ cs_agent_backup_keypair.public_key }}"
+    comment: "cs-agent {{ hostname }}"
+    state: present
+    manage_dir: true
+  delegate_to: "{{ groups[cs_agent_backup_group] | first }}"
+
+- name: Read the admin token hash already present in agent.yml
+  ansible.builtin.include_tasks: read_token_hash.yml
+  tags: [enroll]
+
+- name: Fetch this node's admin token hash from the controller
+  ansible.builtin.include_tasks: enroll.yml
+  tags: [enroll]
+
+- name: Deploy agent.yml
+  ansible.builtin.template:
+    src: agent.yml.j2
+    dest: "{{ cs_agent_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [enroll]
+  notify: Restart cs-agent
+
+- name: Enable and start cs-agent
+  ansible.builtin.systemd_service:
+    name: "{{ cs_agent_service }}"
+    state: started
+    enabled: true
+    daemon_reload: true

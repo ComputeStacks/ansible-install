@@ -1,0 +1,45 @@
+---
+# Enrollment, per docs/contracts.md "Controller invocation helper".
+#
+# The controller mints the per-node agent token when controller_seed creates
+# the Node row, and only ever stores its sha256. v2 therefore reads the hash
+# controller-side through the cstacks CLI rather than through cs-agent's
+# documented HTTP enrolment endpoint (which is source-IP matched and would
+# have to be reachable from every node).
+#
+# `cstacks` is a wave 3G deliverable: until it lands these tasks fail loudly
+# on a missing command, which is the intended behaviour — end-to-end
+# verification of this path belongs to wave 4J. Run them on their own with
+# `--tags enroll` (the agent.yml render carries the same tag, so the fetched
+# hash is written out and the service restarted).
+#
+# Phase 4 of cs-agent replaces this one file with `cs-agent enroll`.
+
+- name: Read the node's agent token hash from the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ cs_agent_enroll_command }}"
+      - runner
+      - "{{ cs_agent_enroll_query }}"
+  vars:
+    cs_agent_enroll_query: "{{ 'puts Node.find_by!(hostname: %q{' ~ hostname ~ '}).agent_token_hash' }}"
+  delegate_to: "{{ groups[cs_agent_controller_group] | first }}"
+  changed_when: false
+  register: cs_agent_enroll_result
+
+- name: Assert the controller returned a usable agent token hash
+  ansible.builtin.assert:
+    that:
+      - cs_agent_enroll_result.stdout_lines | length > 0
+      - (cs_agent_enroll_result.stdout_lines | last | trim) is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      The controller did not return a 64-character hex agent token hash for
+      node '{{ hostname }}' — got {{ cs_agent_enroll_result.stdout | default('') | trim | truncate(120) }}.
+      Check that controller_seed has run and created the Node row, that the
+      hostname matches the seeded Node exactly, and that `cstacks runner`
+      works on {{ groups[cs_agent_controller_group] | first }}.
+    success_msg: "{{ hostname }}: agent token hash retrieved from the controller"
+
+- name: Use the controller's agent token hash in agent.yml
+  ansible.builtin.set_fact:
+    cs_agent_admin_token_hash: "{{ cs_agent_enroll_result.stdout_lines | last | trim }}"

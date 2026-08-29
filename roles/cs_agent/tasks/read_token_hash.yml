@@ -1,0 +1,29 @@
+---
+# Pre-seed cs_agent_admin_token_hash from the node's current agent.yml so that
+# a converge which does not re-enroll (`--skip-tags enroll`, or a rerun after
+# the controller row was already read) can never re-render the file with an
+# empty hash — an empty hash disables the admin scope outright and the
+# controller loses the node.
+
+- name: Check whether agent.yml already exists
+  ansible.builtin.stat:
+    path: "{{ cs_agent_config_file }}"
+  register: cs_agent_existing_config
+
+- name: Read the existing agent.yml
+  ansible.builtin.slurp:
+    src: "{{ cs_agent_config_file }}"
+  register: cs_agent_existing_config_content
+  when: cs_agent_existing_config.stat.exists
+
+- name: Carry the existing admin token hash forward
+  ansible.builtin.set_fact:
+    cs_agent_admin_token_hash: "{{ (cs_agent_existing_hash_match | first) if (cs_agent_existing_hash_match | length > 0) else '' }}"
+  vars:
+    # regex_findall, not regex_search: a capturing regex_search raises when it
+    # does not match, so a first-ever converge (no hash in the file yet) would
+    # fail the play instead of falling through to enrollment.
+    cs_agent_existing_hash_match: >-
+      {{ (cs_agent_existing_config_content.content | b64decode)
+         | regex_findall('admin_token_hash:[ "\x27]*([0-9a-f]{64})') }}
+  when: cs_agent_existing_config.stat.exists

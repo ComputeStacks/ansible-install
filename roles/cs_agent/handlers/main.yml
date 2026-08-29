@@ -1,0 +1,10 @@
+---
+# The agent re-reads agent.yml only at startup. A restart is cheap: it does not
+# touch running containers, and the deb's unit carries
+# ConditionPathExists=/etc/computestacks/agent.yml plus Requires=docker.service.
+- name: Restart cs-agent
+  ansible.builtin.systemd_service:
+    name: "{{ cs_agent_service }}"
+    state: restarted
+    enabled: true
+    daemon_reload: true

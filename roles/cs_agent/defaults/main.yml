@@ -1,0 +1,97 @@
+---
+# cs-agent (v3.3.0) node agent. Schema of agent.yml is cs-agent's
+# config/config.go — NOT the upstream agent.sample.yml, which is wrong in
+# places (see README.md and docs/contracts.md).
+
+# --- apt -------------------------------------------------------------------
+# cs_agent_apt_version / cs_agent_apt_repo / cs_agent_apt_key_url are pinned in
+# playbooks/group_vars/all/versions.yml (contracts.md rule 4).
+cs_agent_package: cs-agent
+cs_agent_service: cs-agent
+cs_agent_keyring_dir: /etc/apt/keyrings
+cs_agent_keyring_asc: "{{ cs_agent_keyring_dir }}/computestacks.asc"
+cs_agent_keyring: "{{ cs_agent_keyring_dir }}/computestacks.gpg"
+cs_agent_apt_suite: stable
+cs_agent_apt_component: main
+# Basename of the sources.list.d file (ansible appends .list).
+cs_agent_apt_sources_filename: computestacks
+
+# --- paths -----------------------------------------------------------------
+# /etc/computestacks is the ONLY host directory bind-mounted into the borg
+# container, so the borg ssh key has to live under it (docs/contracts.md).
+cs_agent_config_dir: /etc/computestacks
+cs_agent_config_file: "{{ cs_agent_config_dir }}/agent.yml"
+cs_agent_backup_dir: "{{ cs_agent_config_dir }}/backup"
+cs_agent_backup_ssh_dir: "{{ cs_agent_backup_dir }}/.ssh"
+cs_agent_backup_keyfile: "{{ cs_agent_backup_ssh_dir }}/id_ed25519"
+
+# --- metadata front door ---------------------------------------------------
+# Pairwise tailscale derivation (docs/contracts.md): the listener binds all
+# interfaces ONLY when this node is on the tailnet, because the controller may
+# then dial it over the tailnet address. Otherwise it binds primary_ip. It is
+# NEVER the tailscale address itself — containers reach the agent through
+# metadata.internal, which resolves to primary_ip. Mirrors site.yml's own
+# tailscale condition.
+cs_agent_tailnet_joined: "{{ (tailscale_authkey is defined) and (tailscale_enabled | default(true) | bool) }}"
+cs_agent_listen_addr: >-
+  {{ (':' ~ cs_ports.agent_http) if (cs_agent_tailnet_joined | bool)
+     else (primary_ip ~ ':' ~ cs_ports.agent_http) }}
+
+# Hex sha256 of the per-node admin Bearer the controller authenticates with.
+# Filled in by tasks/enroll.yml from the controller; pre-seeded from whatever
+# is already in agent.yml so a re-render can never blank a working node.
+cs_agent_admin_token_hash: ""
+
+# --- agent behaviour -------------------------------------------------------
+cs_agent_iptables_cmd: iptables
+cs_agent_ip6tables_cmd: ip6tables
+cs_agent_store_data_dir: /var/lib/cs-agent
+cs_agent_queue_numworkers: 3
+# Optional; the enrollment snippet parses it. Rendered only when
+# cs_portal_domain is set in the inventory.
+cs_agent_controller_host: "{{ ('https://' ~ cs_portal_domain) if (cs_portal_domain | default('') | length > 0) else '' }}"
+
+# --- backups ---------------------------------------------------------------
+cs_agent_backups_enabled: true
+cs_agent_backup_group: backup
+cs_agent_backup_ssh_user: cstacks
+# Inventory var, never a gathered fact (contracts.md rule 1): a --limit'ed run
+# must render the same backup endpoint as a full run. `first` is safe because
+# tasks/main.yml asserts the group holds exactly one host.
+cs_agent_backup_ssh_host: "{{ hostvars[groups[cs_agent_backup_group] | first].primary_ip }}"
+# Path ON the backup server. Attach mode MUST set backup_host_path to the
+# existing server's path (v1 default was /mnt).
+cs_agent_backup_host_path: "{{ backup_host_path | default('/var/lib/computestacks/backups') }}"
+# Path to the borg binary ON the backup server. Attach mode MUST set
+# backup_borg_remote_path (v1 servers use the distro borg at /usr/bin/borg;
+# the v2 default is the wrapper the backup_server role installs).
+cs_agent_borg_remote_path: "{{ backup_borg_remote_path | default(borg_binary_path) }}"
+# NOT `compress` — the upstream sample's key is a bug, the code reads
+# backups.borg.compression (config/config.go).
+cs_agent_borg_compression: "zstd,3"
+
+# --- backup export to S3 (optional) ----------------------------------------
+# Inert until a bucket AND both credentials are set; s3_export_access_key /
+# s3_export_secret_key live in the vaulted secrets file.
+cs_agent_s3_export_bucket: ""
+cs_agent_s3_export_endpoint: ""          # empty = real AWS; set for MinIO/Ceph
+cs_agent_s3_export_region: "us-east-1"
+cs_agent_s3_export_prefix: "exports/"
+cs_agent_s3_export_force_path_style: false
+cs_agent_s3_export_enabled: >-
+  {{ (cs_agent_s3_export_bucket | length > 0)
+     and (s3_export_access_key | default('') | length > 0)
+     and (s3_export_secret_key | default('') | length > 0) }}
+
+# --- mariadb ---------------------------------------------------------------
+# TOP-LEVEL in the schema. The upstream sample nests these under `backups:`,
+# which the code never reads (config/config.go registers `mariadb.*`).
+cs_agent_mariadb_lock_wait_query_type: "ALL"
+cs_agent_mariadb_lock_wait_timeout: 60
+cs_agent_mariadb_long_queries_query_type: "SELECT"
+cs_agent_mariadb_long_queries_timeout: 20
+
+# --- enrollment ------------------------------------------------------------
+cs_agent_controller_group: controller
+# The cstacks CLI (wave 3G) executes this inside the running portal container.
+cs_agent_enroll_command: cstacks
