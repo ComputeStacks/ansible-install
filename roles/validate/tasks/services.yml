@@ -1,0 +1,61 @@
+---
+# `systemctl is-active` / `is-enabled` per unit rather than service_facts:
+# cs-firewall is a oneshot with RemainAfterExit, whose sub-state is `exited`,
+# and service_facts surfaces that as not-running. `is-active` reports it
+# active, which is what the unit actually is.
+
+- name: Check whether each expected unit is active
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ item }}"
+  loop: "{{ validate_expected_services }}"
+  register: validate_service_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert every expected unit is active
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      {{ item.item }} is not active on {{ inventory_hostname }}
+      (systemctl reports "{{ item.stdout | default('') | trim | default('unknown', true) }}").
+      Inspect it with `systemctl status {{ item.item }}` and
+      `journalctl -u {{ item.item }} -n 50`.
+    quiet: true
+  loop: "{{ validate_service_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check whether each expected unit is enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-enabled
+      - "{{ item }}"
+  loop: "{{ validate_expected_enabled_services }}"
+  register: validate_service_enabled
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# haproxy is enabled but deliberately not started: the distro's stock config
+# has no listener, and the controller starts it when it pushes the first real
+# load balancer configuration (roles/haproxy).
+- name: Assert every expected unit is enabled
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      {{ item.item }} is not enabled on {{ inventory_hostname }}
+      (systemctl reports "{{ item.stdout | default('') | trim | default('unknown', true) }}").
+      It does not need to be running — the controller starts it when it
+      deploys the first load balancer configuration — but it must come back
+      after a reboot.
+    quiet: true
+  loop: "{{ validate_service_enabled.results }}"
+  loop_control:
+    label: "{{ item.item }}"

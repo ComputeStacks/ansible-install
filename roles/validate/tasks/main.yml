@@ -1,0 +1,108 @@
+---
+# Post-install assertions for a finished converge. Nothing here changes a
+# host; every task is read-only and `changed_when: false`.
+#
+# Each check is a separate task file, included under its own tag and skipped
+# when its name appears in `validate_skip`. The tags mean a single check can
+# be re-run on its own without re-running the converge:
+#
+#   ansible-playbook -i inventories/<env> playbooks/site.yml \
+#     --tags validate --skip-tags borg
+
+- name: Assert every expected service is running
+  ansible.builtin.include_tasks:
+    file: services.yml
+    apply:
+      tags: [validate, services]
+  when: "'services' not in validate_skip"
+  tags: [validate, services]
+
+- name: Assert the control-plane containers are running
+  ansible.builtin.include_tasks:
+    file: containers.yml
+    apply:
+      tags: [validate, containers]
+  when:
+    - "'containers' not in validate_skip"
+    - validate_expected_containers | length > 0
+  tags: [validate, containers]
+
+- name: Assert the controller can reach this node's agent
+  ansible.builtin.include_tasks:
+    file: agent.yml
+    apply:
+      tags: [validate, agent]
+  when:
+    - "'agent' not in validate_skip"
+    - "'nodes' in group_names"
+  tags: [validate, agent]
+
+- name: Assert this node has latched its datachannel backfill
+  ansible.builtin.include_tasks:
+    file: backfill.yml
+    apply:
+      tags: [validate, backfill]
+  when:
+    - "'backfill' not in validate_skip"
+    - "'nodes' in group_names"
+  tags: [validate, backfill]
+
+- name: Assert prometheus answers the controller's placement query for this node
+  ansible.builtin.include_tasks:
+    file: prometheus.yml
+    apply:
+      tags: [validate, prometheus]
+  when:
+    - "'prometheus' not in validate_skip"
+    - "'nodes' in group_names"
+  tags: [validate, prometheus]
+
+- name: Assert this node can reach the backup server as the borg user
+  ansible.builtin.include_tasks:
+    file: borg.yml
+    apply:
+      tags: [validate, borg]
+  when:
+    - "'borg' not in validate_skip"
+    - "'nodes' in group_names"
+    - validate_backup_host | length > 0
+  tags: [validate, borg]
+
+- name: Assert the controller can reach this host over root ssh
+  ansible.builtin.include_tasks:
+    file: ssh.yml
+    apply:
+      tags: [validate, ssh]
+  when:
+    - "'ssh' not in validate_skip"
+    - "'nodes' in group_names or 'registry' in group_names"
+  tags: [validate, ssh]
+
+- name: Assert this node can reach the portal
+  ansible.builtin.include_tasks:
+    file: portal.yml
+    apply:
+      tags: [validate, portal]
+  when:
+    - "'portal' not in validate_skip"
+    - "'nodes' in group_names"
+  tags: [validate, portal]
+
+- name: Assert the tenant DNS zone resolves on every nameserver
+  ansible.builtin.include_tasks:
+    file: dns.yml
+    apply:
+      tags: [validate, dns]
+  when:
+    - "'dns' not in validate_skip"
+    - "'controller' in group_names"
+    - dns_driver | default('none') != 'none'
+    - groups['nameservers'] | default([]) | length > 0
+  tags: [validate, dns]
+
+- name: Report the checks that ran on this host
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} validated.
+      {{ 'Skipped: ' ~ (validate_skip | join(', ')) if validate_skip | length > 0 else 'No checks skipped.' }}
+  tags: [validate]

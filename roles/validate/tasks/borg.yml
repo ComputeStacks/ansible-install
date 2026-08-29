@@ -1,0 +1,76 @@
+---
+# Control-plane row #11: the node's cs-agent SSHes into the backup server as
+# `cstacks` with its own key and runs borg (plus `mkdir -p` / `rm -rf` for
+# repository create and teardown, which is why there is no forced command).
+# This checks the key is authorized and that the remote borg is the version
+# the client half expects.
+
+- name: Check the node can SSH to the backup server as the borg user
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ validate_borg_keyfile }}"
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - -o
+      - "ConnectTimeout={{ validate_ssh_timeout }}"
+      - -p
+      - "{{ cs_ports.ssh }}"
+      - "{{ validate_borg_ssh_user }}@{{ hostvars[validate_backup_host].primary_ip }}"
+      - "{{ validate_borg_remote_path }} --version"
+  register: validate_borg_ssh
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the node can reach the backup server and run borg there
+  ansible.builtin.assert:
+    that:
+      - validate_borg_ssh.rc == 0
+    fail_msg: >-
+      {{ inventory_hostname }} cannot run
+      `{{ validate_borg_remote_path }}` as
+      {{ validate_borg_ssh_user }}@{{ hostvars[validate_backup_host].primary_ip }}:
+      {{ (validate_borg_ssh.stderr | default('') | trim) | truncate(300) }}.
+      Every backup on this node fails until it can. Check that the node's
+      public key ({{ validate_borg_keyfile }}.pub) is in the cstacks
+      account's authorized_keys on {{ validate_backup_host }}, and that
+      `backup_borg_remote_path` points at a borg that actually exists there
+      (an existing v1 server has the distro borg at /usr/bin/borg, not v2's
+      wrapper).
+    quiet: true
+
+# The client half of every operation is the cs-docker-borg image, whose borg
+# is `borg_version` — versions.yml pins the image tag and this version
+# together and documents that they are bumped together. A server on a
+# different version breaks repositories in ways that only surface at restore
+# time, so this is blocking by default.
+- name: Assert the backup server's borg matches the client version
+  ansible.builtin.assert:
+    that:
+      - (validate_borg_ssh.stdout | default('') | trim).split(' ') | last == borg_version
+    fail_msg: >-
+      Borg version mismatch: {{ validate_backup_host }} reports
+      "{{ validate_borg_ssh.stdout | default('') | trim }}" while the node's
+      backup container runs borg {{ borg_version }} ({{ borg_image }}).
+      Bring the two to the same version — bump `borg_version` and
+      `borg_image` together in versions.yml, or point
+      `backup_borg_remote_path` at a matching binary on the server. Set
+      `validate_borg_version_compare: false` to downgrade this to a warning
+      if you are knowingly running a mixed pair.
+    quiet: true
+  when: validate_borg_version_compare | bool
+
+- name: Warn about a borg version mismatch
+  ansible.builtin.debug:
+    msg: >-
+      Borg version mismatch (not enforced):
+      {{ validate_backup_host }} reports
+      "{{ validate_borg_ssh.stdout | default('') | trim }}", the node's
+      container runs {{ borg_version }}.
+  when:
+    - not (validate_borg_version_compare | bool)
+    - (validate_borg_ssh.stdout | default('') | trim).split(' ') | last != borg_version

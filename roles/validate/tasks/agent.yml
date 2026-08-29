@@ -1,0 +1,53 @@
+---
+# Control-plane row #3: the controller dials this node's cs-agent admin API.
+# The probe runs FROM the controller, on the address the controller actually
+# uses (pairwise tailnet derivation), because that is the leg that breaks.
+#
+# There is no unauthenticated route to call: in cs-agent v3.3.0 every handler
+# is wrapped in requireCustomer/requireAdmin, and a request with no
+# Authorization header is answered 401 by `authenticate`
+# (httpapi/httpapi.go). A 401 is therefore the success condition — it proves
+# the port is open from the controller AND that cs-agent is what is answering
+# on it. Sending the real admin Bearer would tell us no more and would put a
+# cleartext credential in a check.
+
+- name: Assert this node has a dial address for the controller
+  ansible.builtin.assert:
+    that:
+      - validate_agent_dial_address | length > 0
+    fail_msg: >-
+      No address to dial cs-agent on for {{ inventory_hostname }}: neither
+      `primary_ip` nor a tailnet address is available. `primary_ip` is a
+      required node inventory var (docs/contracts.md rule 1).
+    quiet: true
+
+- name: Probe the cs-agent admin API from the controller
+  ansible.builtin.uri:
+    url: "http://{{ validate_agent_dial_address }}:{{ cs_ports.agent_http }}{{ validate_agent_probe_path }}"
+    method: GET
+    status_code: "{{ validate_agent_expected_status }}"
+    timeout: "{{ validate_agent_timeout }}"
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_agent_probe
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Assert the controller reaches cs-agent on this node
+  ansible.builtin.assert:
+    that:
+      - validate_agent_probe.status | default(0) | int == validate_agent_expected_status | int
+    fail_msg: >-
+      {{ validate_controller_host }} cannot reach cs-agent on
+      {{ inventory_hostname }} at
+      http://{{ validate_agent_dial_address }}:{{ cs_ports.agent_http }} —
+      expected HTTP {{ validate_agent_expected_status }} (the agent answering
+      an unauthenticated request), got
+      "{{ validate_agent_probe.status | default('no response') }}
+      {{ validate_agent_probe.msg | default('') }}".
+      Check that cs-agent is running on the node, that
+      `metadata.listen_addr` in /etc/computestacks/agent.yml matches this
+      address, and that the firewall accepts
+      {{ cs_ports.agent_http }} from the controller
+      {{ '(over tailscale0)' if validate_controller_on_tailnet | bool else '(from its primary_ip/public_ip)' }}.
+    quiet: true

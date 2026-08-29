@@ -1,0 +1,42 @@
+---
+# The tenant zone must answer NS on every nameserver, not just the leader:
+# followers serve from a replicated copy, and a follower whose replication
+# never bootstrapped answers nothing while looking healthy. Queried from the
+# controller, one query per nameserver, against that host's own address.
+
+- name: Query each nameserver for the tenant zone's NS records
+  ansible.builtin.command:
+    argv:
+      - dig
+      - "+time=5"
+      - "+tries=2"
+      - "+short"
+      - "@{{ hostvars[item].primary_ip }}"
+      - "{{ cs_app_zone }}"
+      - NS
+  loop: "{{ groups['nameservers'] }}"
+  delegate_to: "{{ validate_controller_host }}"
+  run_once: true
+  register: validate_dns_result
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert every nameserver answers for the tenant zone
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim | length > 0
+    fail_msg: >-
+      {{ item.item }} ({{ hostvars[item.item].primary_ip }}) returned no NS
+      records for {{ cs_app_zone }}. Tenant DNS records are created in this
+      zone, so nothing a customer deploys will resolve through this
+      nameserver. On the leader, check `pdnsutil list-zone {{ cs_app_zone }}`;
+      on a follower, check that postgres replication is streaming
+      (`pg_stat_wal_receiver`) — roles/powerdns bootstraps it once with
+      pg_basebackup and a follower that missed it serves an empty database.
+    quiet: true
+  loop: "{{ validate_dns_result.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  run_once: true

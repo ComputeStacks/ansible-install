@@ -1,0 +1,29 @@
+---
+# The two control-plane containers that are not systemd units: the portal
+# itself and the vault-bootstrap container that signs every docker
+# certificate. A stopped vault is easy to miss — certificates are static
+# files, so nothing notices until the next issuance or renewal.
+
+- name: Read the state of the expected containers
+  community.docker.docker_container_info:
+    name: "{{ item }}"
+  loop: "{{ validate_expected_containers }}"
+  register: validate_container_info
+  changed_when: false
+  check_mode: false
+
+- name: Assert every expected container exists and is running
+  ansible.builtin.assert:
+    that:
+      - item.exists
+      - item.container.State.Status == 'running'
+    fail_msg: >-
+      Container {{ item.item }} is
+      {{ 'missing' if not item.exists else 'in state ' ~ item.container.State.Status }}
+      on {{ inventory_hostname }}.
+      {{ 'Start it with `cstacks run`.' if item.item == 'portal'
+         else 'Start it with `docker start ' ~ item.item ~ '` and re-run the vault role to unseal it.' }}
+    quiet: true
+  loop: "{{ validate_container_info.results }}"
+  loop_control:
+    label: "{{ item.item }}"

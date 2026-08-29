@@ -1,0 +1,41 @@
+---
+# Control-plane rows #4 and #19: the controller manages every node over root
+# SSH (volumes, haproxy certificate deploy, load balancer reload) and every
+# tenant registry over SSH on the registry host (DockerSSH). Both legs are
+# keyed off the pubkeys roles/ssh_trust installs; if the key never landed,
+# the symptom is a SystemEvent nobody reads and orders that quietly fail.
+
+- name: Check the controller can reach this host over root ssh
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - -o
+      - "ConnectTimeout={{ validate_ssh_timeout }}"
+      - -p
+      - "{{ cs_ports.ssh }}"
+      - "root@{{ primary_ip }}"
+      - "true"
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_controller_ssh
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the controller can reach this host over root ssh
+  ansible.builtin.assert:
+    that:
+      - validate_controller_ssh.rc == 0
+    fail_msg: >-
+      {{ validate_controller_host }} cannot ssh to
+      root@{{ primary_ip }} ({{ inventory_hostname }}):
+      {{ (validate_controller_ssh.stderr | default('') | trim) | truncate(300) }}.
+      {{ 'Registry orders fail without this (DockerSSH).'
+         if 'registry' in group_names
+         else 'Volume management, haproxy certificate deploys and load balancer reloads all ride this connection.' }}
+      Re-run the ssh_trust play; it installs the controller's root and
+      application pubkeys into root's authorized_keys here.
+    quiet: true

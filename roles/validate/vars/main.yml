@@ -1,0 +1,44 @@
+---
+# Computed, not operator knobs.
+
+validate_controller_host: "{{ groups['controller'] | first }}"
+
+# Tailnet membership is the pure-inventory predicate every other role uses
+# (docs/contracts.md §Facts exception): an auth key plus the per-host opt-out.
+# It needs no facts, so it stays correct under `--limit`.
+validate_controller_on_tailnet: >-
+  {{ (hostvars[validate_controller_host].tailscale_authkey | default('')) | length > 0
+     and (hostvars[validate_controller_host].tailscale_enabled | default(true) | bool) }}
+validate_self_on_tailnet: >-
+  {{ (tailscale_authkey | default('')) | length > 0
+     and (tailscale_enabled | default(true) | bool) }}
+
+# The address the CONTROLLER dials this node's agent on — pairwise, exactly
+# as roles/controller_seed derives `node.agent_host`: the node's tailnet
+# address only when the controller is itself on the tailnet, otherwise
+# primary_ip. The address VALUE is the one blessed use of a non-inventory
+# fact, and both defaults are mandatory.
+validate_agent_dial_address: >-
+  {{ (tailscale_ip
+      | default(ansible_local.computestacks.tailscale_ip | default(primary_ip | default(''))))
+     if (validate_controller_on_tailnet | bool and validate_self_on_tailnet | bool)
+     else (primary_ip | default('')) }}
+
+validate_expected_services: >-
+  {{ (validate_services_common
+      + (validate_services_v2_only if not (existing_env | default(false) | bool) else [])
+      + (validate_services_controller if 'controller' in group_names else [])
+      + (validate_services_metrics if 'metrics' in group_names else [])
+      + (validate_services_registry if 'registry' in group_names else [])
+      + (validate_services_nodes if 'nodes' in group_names else [])
+      + (validate_services_nameservers if 'nameservers' in group_names else [])
+      + (validate_services_backup if 'backup' in group_names else []))
+     | unique }}
+
+validate_expected_enabled_services: >-
+  {{ (validate_services_enabled_nodes if 'nodes' in group_names else []) | unique }}
+
+validate_expected_containers: >-
+  {{ (validate_containers_controller if 'controller' in group_names else []) | unique }}
+
+validate_backup_host: "{{ groups['backup'] | default([]) | first | default('') }}"

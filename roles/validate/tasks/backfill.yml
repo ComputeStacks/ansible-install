@@ -1,0 +1,37 @@
+---
+# `nodes.datachannel_backfilled_at` is the latch that unblocks task dispatch:
+# until a node has it, Agent::Client#create_task refuses the node and backup,
+# restore, export and delete all stay blocked — with no other symptom.
+# controller_post_enroll runs the backfill; this asserts it took.
+
+- name: Read this node's datachannel_backfilled_at from the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ validate_cstacks_bin }}"
+      - runner
+      - "{{ validate_backfill_query }}"
+  vars:
+    validate_backfill_query: >-
+      {{ 'puts Node.find_by!(hostname: %q{' ~ hostname ~ '}).datachannel_backfilled_at.to_s' }}
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_backfill_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert this node has latched its datachannel backfill
+  ansible.builtin.assert:
+    that:
+      - validate_backfill_state.rc == 0
+      - validate_backfill_state.stdout | trim | length > 0
+    fail_msg: >-
+      {{ hostname }} has not latched `datachannel_backfilled_at`
+      {{ '(the lookup itself failed: ' ~ (validate_backfill_state.stderr | default('') | trim) ~ ')'
+         if validate_backfill_state.rc != 0 else '' }}.
+      Until it does, the controller refuses every task for this node and
+      backup, restore, export and delete stay blocked. Re-run
+      `docker exec --env NODE={{ hostname }} portal bundle exec rake agent:datachannel_backfill`
+      on {{ validate_controller_host }} and read its output — the usual cause
+      is that the node's admin token does not match the controller's stored
+      hash, which a re-run of the nodes play with `--tags enroll` fixes.
+    quiet: true

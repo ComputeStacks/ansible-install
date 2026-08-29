@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: validate
+  author: ComputeStacks
+  description: >-
+    Read-only post-install assertions: services and containers up, the
+    controller reaching every node's agent and dockerd, the prometheus label
+    contract answering, borg reachable, the portal reachable from the nodes,
+    and the tenant DNS zone resolving.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

@@ -1,0 +1,52 @@
+---
+# The label contract (docs/contracts.md §Prometheus contract), asserted the
+# only way that matters: by running the controller's own placement query.
+#
+#   count(node_cpu_seconds_total{node="<hostname>",region="<az>",job="node-exporter"})
+#
+# The controller matches on exactly these labels. Get them wrong and every
+# node reports 0 cpu / 0 mem and ALL orders are rejected, while prometheus,
+# the exporter and the scrape all look healthy. An empty result set here is
+# that failure, caught at install time.
+#
+# The query runs FROM the controller because that is control-plane row #10:
+# the metrics vhost accepts 3101 from the controller's addresses only.
+
+- name: Query prometheus for this node's cpu metric from the controller
+  ansible.builtin.uri:
+    url: "{{ validate_prometheus_endpoint }}/api/v1/query?query={{ validate_prometheus_query | urlencode }}"
+    method: GET
+    url_username: "{{ validate_prometheus_username }}"
+    url_password: "{{ validate_prometheus_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ validate_tls_verify | bool }}"
+    return_content: true
+  vars:
+    validate_prometheus_query: >-
+      count({{ validate_prometheus_metric }}{node="{{ hostname }}",region="{{ az }}",job="{{ validate_prometheus_job }}"})
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_prometheus_result
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert prometheus returns data for this node's label set
+  ansible.builtin.assert:
+    that:
+      - validate_prometheus_result.status | default(0) | int == 200
+      - validate_prometheus_result.json.status | default('') == 'success'
+      - validate_prometheus_result.json.data.result | default([]) | length > 0
+      - (validate_prometheus_result.json.data.result | first).value[1] | int > 0
+    fail_msg: >-
+      The controller's placement query returned no data for
+      node="{{ hostname }}",region="{{ az }}",job="{{ validate_prometheus_job }}"
+      at {{ validate_prometheus_endpoint }}
+      (HTTP {{ validate_prometheus_result.status | default('no response') }}).
+      This is the failure that rejects every order against this node while
+      every dashboard stays green. Check, in order: the per-AZ file_sd
+      fragment /etc/prometheus/node_exporter/{{ az }}.yml on the metrics host
+      (its labels must be region={{ az }} and node={{ hostname }}); that
+      prometheus can reach {{ hostname }} on {{ cs_ports.node_exporter }};
+      and that the metrics vhost accepts {{ cs_ports.metrics_prometheus }}
+      from {{ validate_controller_host }} with these credentials.
+    quiet: true

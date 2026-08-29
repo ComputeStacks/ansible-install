@@ -1,0 +1,105 @@
+---
+# Post-install assertions. Every check is named; a name listed in
+# `validate_skip` is not run, and every check also carries its name as a tag
+# (plus `validate`), so `--tags prometheus` or `--skip-tags borg` work too.
+#
+#   validate_skip: [borg, dns]
+#
+# Check names: services, containers, agent, backfill, prometheus, borg, ssh,
+# portal, dns.
+validate_skip: []
+
+# TLS verification for the two checks that dial an HTTPS endpoint by name
+# (the prometheus query and the portal reachability probe). Set false while
+# the portal is still on a self-signed certificate.
+validate_tls_verify: true
+
+# --- services -------------------------------------------------------------
+# `systemctl is-active` per unit rather than service_facts: a oneshot
+# RemainAfterExit unit (cs-firewall) reports sub-state `exited`, which
+# service_facts surfaces as a non-running state, while `is-active` correctly
+# reports it active.
+validate_services_common:
+  - prometheus-node-exporter
+# Not present on an existing v1 host, which runs cs-iptables instead.
+validate_services_v2_only:
+  - cs-firewall
+validate_services_controller:
+  - docker
+  - nginx
+  - postgresql
+  - redis-server
+validate_services_metrics:
+  - docker
+  - nginx
+  - prometheus
+  - alertmanager
+  - loki
+validate_services_registry:
+  - docker
+  - nginx
+validate_services_nodes:
+  - docker
+  - cs-agent
+  - cadvisor
+  - fluentd
+validate_services_nameservers:
+  - pdns
+  - postgresql
+validate_services_backup: []
+# haproxy is deliberately enabled-but-not-started until the controller pushes
+# a real configuration (roles/haproxy), so it is checked for enablement only.
+validate_services_enabled_nodes:
+  - haproxy
+
+# --- containers -----------------------------------------------------------
+validate_containers_controller:
+  - portal
+  - vault-bootstrap
+
+# --- backfill -------------------------------------------------------------
+# Set to an absolute path if `cstacks` is not on the controller's
+# non-interactive PATH (the same knob roles/cs_agent exposes for enrolment).
+validate_cstacks_bin: "{{ cs_agent_enroll_command | default('cstacks') }}"
+
+# --- agent ----------------------------------------------------------------
+# cs-agent v3.3.0 has NO unauthenticated route: every handler is wrapped in
+# requireCustomer/requireAdmin and a request with no Authorization header is
+# answered 401 by `authenticate` (httpapi/httpapi.go). A 401 from this path is
+# therefore the strongest available liveness signal — it proves the port is
+# reachable from the controller AND that cs-agent, not something else, is
+# serving it. Anything else (connection refused, timeout, 404 from a stray
+# web server) fails the check.
+validate_agent_probe_path: /v1/admin/changelog
+validate_agent_expected_status: 401
+validate_agent_timeout: 10
+
+# --- prometheus -----------------------------------------------------------
+# The label contract, verbatim from docs/contracts.md: the controller's
+# placement queries match node="<hostname>",region="<az>",job="node-exporter".
+# Wrong labels mean every node reports 0 cpu / 0 mem and ALL orders are
+# rejected while prometheus itself looks perfectly healthy.
+validate_prometheus_metric: node_cpu_seconds_total
+validate_prometheus_job: node-exporter
+validate_prometheus_username: "{{ acme_web_prometheus_username | default('promuser') }}"
+validate_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
+validate_prometheus_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus }}"
+
+# --- borg -----------------------------------------------------------------
+validate_borg_ssh_user: "{{ cs_agent_backup_ssh_user | default('cstacks') }}"
+validate_borg_keyfile: /etc/computestacks/backup/.ssh/id_ed25519
+validate_borg_remote_path: "{{ backup_borg_remote_path | default(borg_binary_path) }}"
+# The client half of every backup is the cs-docker-borg image, whose borg is
+# `borg_version` (versions.yml pins the two together). A server on a different
+# version breaks repositories in ways that only show up at restore time, so
+# the comparison is blocking. Set false to downgrade it to a warning.
+validate_borg_version_compare: true
+
+# --- ssh ------------------------------------------------------------------
+validate_ssh_timeout: 10
+
+# --- portal ---------------------------------------------------------------
+validate_portal_url: "https://{{ cs_portal_domain }}/"
+# The portal answers / with a redirect to the login page on a fresh install
+# and 200 once a session exists; both prove reachability.
+validate_portal_status_codes: [200, 301, 302, 303, 401, 403]

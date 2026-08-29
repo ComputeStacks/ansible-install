@@ -1,0 +1,34 @@
+---
+# Control-plane row #6: after the controller triggers a load balancer update
+# over SSH, the node fetches its generated configuration from the portal over
+# HTTPS. The node therefore has to resolve and reach the portal domain
+# itself — v2 deleted v1's /etc/hosts mangling, so this is real public DNS
+# plus a real certificate.
+
+- name: Fetch the portal from this node
+  ansible.builtin.uri:
+    url: "{{ validate_portal_url }}"
+    method: GET
+    status_code: "{{ validate_portal_status_codes }}"
+    validate_certs: "{{ validate_tls_verify | bool }}"
+    timeout: "{{ validate_agent_timeout }}"
+  register: validate_portal_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert this node can reach the portal
+  ansible.builtin.assert:
+    that:
+      - validate_portal_probe.status | default(0) | int in validate_portal_status_codes
+    fail_msg: >-
+      {{ inventory_hostname }} cannot reach {{ validate_portal_url }} —
+      got "{{ validate_portal_probe.status | default('no response') }}
+      {{ validate_portal_probe.msg | default('') }}".
+      The node fetches its generated load balancer configuration from this
+      URL, so a broken leg here means haproxy never picks up a new tenant
+      site. Check public DNS for {{ cs_portal_domain }} from this node, that
+      the controller's nginx is serving {{ cs_ports.controller_https }}, and
+      the certificate chain (set `validate_tls_verify: false` if the portal
+      is still on a self-signed certificate).
+    quiet: true
