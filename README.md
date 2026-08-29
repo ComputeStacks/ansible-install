@@ -36,6 +36,13 @@ ansible-galaxy collection install -r requirements.yml -p collections
 points `roles_path` and `collections_path` at them. Re-run both commands after
 a `requirements.yml` bump.
 
+The `Makefile` is a thin wrapper around exactly these commands and the
+playbook runs below — `make deps`, `make site ENV=prod`,
+`make add-region ENV=prod`, `make validate ENV=prod`, `make lint`,
+`make check`. Every playbook target requires `ENV` (there is no default
+inventory) and honours `LIMIT=`, `ARGS=` and `VAULT=`; `make help` lists them.
+Nothing in this README depends on it.
+
 **Managed hosts.** Ubuntu 26.04 LTS, amd64, with root SSH from the control
 machine and a resolvable, unique, single-word hostname (`node101`, not
 `node101.example.com`). Nothing else — the playbooks install their own
@@ -226,6 +233,7 @@ is not a recoverable environment.
 
 ```
 ansible.cfg                     roles_path, collections_path, ssh settings
+Makefile                        thin wrapper: deps, site, add-region, validate, lint, check
 requirements.yml                pinned galaxy roles and collections
 playbooks/site.yml              greenfield converge
 playbooks/add-region.yml        attach mode
@@ -242,6 +250,9 @@ docs/
   existing v1 environment.
 * [`docs/acme-providers.md`](docs/acme-providers.md) — ACME challenge methods
   and the DNS-01 provider matrix.
+* [`docs/control-plane.md`](docs/control-plane.md) — who dials whom, on what
+  address, with what credential. The 19-row graph `ports.yml`, the firewall
+  rules and the play order are all derived from.
 * [`docs/contracts.md`](docs/contracts.md) — the rules every role obeys:
   ownership, play ordering, the ports and prometheus contracts, attach-mode
   limits. Read this before changing anything.
