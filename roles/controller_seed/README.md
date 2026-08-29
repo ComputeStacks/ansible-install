@@ -34,8 +34,8 @@ template that drifted from the controller's models across releases.
    `diff: false` + `no_log` (it carries the admin password, the DNS API keys,
    the client credentials, the stats password and the load balancer's private
    key).
-5. Attach mode only: runs `DRY_RUN=1 cstacks seed`, prints the diff, and
-   `pause`s for the operator.
+5. Attach mode only: runs `DRY_RUN=1 cstacks seed`, prints what it would
+   create plus any drift warnings, and `pause`s for the operator.
 6. Runs `cstacks seed`, prints the change log, and **deletes the manifest**.
    A failed apply keeps the file on purpose and says so — the apply is one
    transaction, so nothing was written to the database and the rendered
@@ -75,7 +75,11 @@ there, and `primary_ip` may not be.
 
 The role **warns** (never fails) when the fallback applies, naming every node
 whose az would carry the controller's `primary_ip`: the role cannot know
-whether that address routes from a given region. `roles/validate`'s
+whether that address routes from a given region. This only actually lands on
+a region seeded for the **first time** by this apply — an az that already
+exists on the controller keeps its own `acme_server` regardless of what the
+manifest renders; the rendered value is only compared against it and reported
+as drift if the two disagree. `roles/validate`'s
 `acme_backend` check probes the same derived address from each node and does
 fail, so the hazard is caught at install time rather than by the first tenant
 certificate that never issues.
@@ -157,8 +161,12 @@ without which the new region is invisible to every user in the default group.
 No `settings`, no `dns`, no `metric_clients`/`log_clients`, no `products`,
 `catalog`, `features` or `admin_user`. Set
 `controller_seed_full_manifest: true` to render the whole greenfield document
-against a live controller; that rewrites settings and the DNS driver, so do it
-deliberately.
+against a live controller instead. Nothing in it is an overwrite there:
+settings are seeded only while still unconfigured, and the DNS driver is
+never reconfigured once it exists — a difference from the manifest is
+reported as drift, not applied. Do it deliberately anyway: it is how a
+still-unconfigured setting gets seeded, and how the fuller drift report gets
+printed.
 
 The regions still reference the metric/log clients **by endpoint**. The match
 is exact and a miss aborts the apply — which is the wanted behaviour: it means
@@ -179,7 +187,7 @@ needs a tty); `controller_seed_dry_run_first: false` skips the preview.
 | `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Attach-mode preview and prompt. |
 | `controller_seed_registry_node` | first registry host's `primary_ip` | `Setting.registry_node`. Empty ⇒ the registry settings are omitted. |
 | `controller_seed_cr_le` | `{{ cs_registry_domain }}` | `Setting.cr_le`. |
-| `controller_seed_settings_extra` | `{}` | Extra `Setting` rows (`company_name`, `app_name`, `general_support`, `acme_email`, …). **Update-only** — an unknown name aborts the apply. |
+| `controller_seed_settings_extra` | `{}` | Extra `Setting` rows (`company_name`, `app_name`, `general_support`, `acme_email`, …). **Seed-only** — written only while nobody has configured that setting yet, and an unknown name aborts the apply. |
 | `controller_seed_metric_endpoint` / `_log_endpoint` | `https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus / metrics_loki }}` | Matched exactly by the apply. |
 | `controller_seed_prometheus_username` / `_loki_username` | `promuser` / `loguser` | Follow `acme_web_*_username` when the operator overrides those. |
 | `controller_seed_dns_endpoint` | `http://<ns_primary primary_ip>:{{ cs_ports.pdns_api }}/api/v1/servers/localhost` | Full PowerDNS API server path. |

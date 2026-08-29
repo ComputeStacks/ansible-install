@@ -18,9 +18,13 @@ controller_seed_remove_manifest: true
 # On an existing controller (existing_env: true) the manifest carries the
 # topology only -- locations/regions/nodes/networks/load_balancers, plus the
 # user_group region link so the new region is orderable. Set this true to
-# render the whole greenfield manifest against a live controller instead;
-# that rewrites settings, the DNS driver and the metric/log clients, so only
-# do it deliberately.
+# also render settings, the DNS driver and the metric/log clients sections
+# against a live controller -- none of it is an overwrite: the apply seeds a
+# setting only while it is still unconfigured, never reconfigures an existing
+# DNS driver or client, and reports any difference from the manifest as
+# drift instead of applying it. Do it deliberately anyway, since it is how a
+# still-unconfigured setting gets seeded and how the fuller drift report gets
+# printed.
 controller_seed_full_manifest: false
 
 # Attach mode always previews with DRY_RUN=1 first and then waits for the
@@ -44,8 +48,9 @@ controller_seed_registry_ssh_port: "{{ cs_ports.ssh }}"
 # is a copy/paste bug -- see README.md.
 controller_seed_cr_le: "{{ cs_registry_domain }}"
 # Additional Setting rows, name -> value (e.g. company_name, app_name,
-# general_support, acme_email). UPDATE-ONLY: the apply aborts on a name
-# Setting.setup! does not know, so do not invent names here.
+# general_support, acme_email). SEED-ONLY: written only while nobody has
+# configured that setting, and the apply aborts on a name Setting.setup!
+# does not know, so do not invent names here.
 controller_seed_settings_extra: {}
 
 # --- metric_clients / log_clients -----------------------------------------

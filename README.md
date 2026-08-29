@@ -12,10 +12,15 @@ Two entry points:
 | `playbooks/site.yml` | A whole environment, from bare Ubuntu 26.04 hosts. |
 | `playbooks/add-region.yml` | A new region/AZ/node attached to an environment that already exists. |
 
-Both are convergent: re-running reconciles configuration, images and package
-versions rather than skipping work it thinks is already done. Everything
-externally sourced is pinned in `playbooks/group_vars/all/versions.yml`, and
-a bump there rolls out on the next run.
+Both are convergent for host configuration, images and package versions:
+re-running reconciles them rather than skipping work it thinks is already
+done. Everything externally sourced is pinned in
+`playbooks/group_vars/all/versions.yml`, and a bump there rolls out on the
+next run. The controller's own database is the one exception: the bootstrap
+manifest only creates rows that are missing, so an existing region, node,
+load balancer or setting is never rewritten by a rerun, and a manifest that
+disagrees with the database is reported as drift, not applied — see
+[`roles/controller_seed/README.md`](roles/controller_seed/README.md).
 
 Start with [`docs/install.md`](docs/install.md) for a step-by-step greenfield
 install. This file is the reference.

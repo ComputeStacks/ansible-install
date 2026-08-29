@@ -145,7 +145,11 @@
 # `regions[].acme_server` falls back to the controller's primary_ip for every
 # node that is not tailnet-paired with the controller. On a node in the same
 # datacentre that is correct; on a REMOTE region it is an address that routes
-# nowhere, and nothing notices until a tenant certificate fails to issue.
+# nowhere, and nothing notices until a tenant certificate fails to issue. This
+# only actually lands on a region seeded for the FIRST time by this apply --
+# an az that already exists on the controller keeps its own acme_server
+# regardless, and the rendered value is only compared against it and reported
+# as drift.
 # Warn, don't fail: whether primary_ip is routable from a given region is an
 # environment fact this role cannot see. `validate`'s `acme_backend` check
 # probes the address for real and DOES fail.
@@ -178,11 +182,14 @@
       {{ hostvars[controller_seed_controller_host].primary_ip | default('the controller primary_ip') }}:{{ cs_ports.controller_acme_backend }}
       — {{ controller_seed_acme_primary_ip_nodes | join(', ') }}.
       That is the address each node's haproxy proxies tenant ACME challenges
-      to. It is correct for a node that shares a network with the controller
-      and UNROUTABLE from a remote region — where the symptom is not an
-      install failure but tenant certificates that never issue. Set
-      `controller_acme_address` as a host var on any node that cannot reach
-      it, to an address that is routable from there.
+      to, for an az seeded for the first time by this apply — an az that
+      already exists keeps its own acme_server regardless, and this rendered
+      value is only reported as drift if it disagrees. It is correct for a
+      node that shares a network with the controller and UNROUTABLE from a
+      remote region — where the symptom is not an install failure but tenant
+      certificates that never issue. Set `controller_acme_address` as a host
+      var on any node that cannot reach it, to an address that is routable
+      from there.
   when: (controller_seed_acme_primary_ip_nodes | length) > 0
 
 - name: Check that the tenant wildcard certificate exists

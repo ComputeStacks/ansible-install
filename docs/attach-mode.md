@@ -125,19 +125,23 @@ ansible-playbook -i inventories/prod playbooks/add-region.yml --ask-vault-pass
 ```
 
 The run stops and waits once, on purpose. `controller_seed` applies the
-manifest with `DRY_RUN=1` first, prints the diff, and pauses for you to read
-it. That is the last point before anything is written to the controller's
-database. Set `controller_seed_confirm: false` to skip the prompt in CI (the
-`pause` module needs a tty), and `controller_seed_dry_run_first: false` to
-skip the preview entirely — both are deliberate opt-outs, not defaults.
+manifest with `DRY_RUN=1` first, prints what it would create plus any drift
+warnings, and pauses for you to read it. That is the last point before
+anything is written to the controller's database. Set
+`controller_seed_confirm: false` to skip the prompt in CI (the `pause` module
+needs a tty), and `controller_seed_dry_run_first: false` to skip the preview
+entirely — both are deliberate opt-outs, not defaults.
 
 The attach manifest carries **topology only**: the new location, region, node,
 network and load balancer, plus the user-group region link without which the
 new region is invisible to every existing user. It carries no settings, no DNS
 driver, no products and no admin user, so nothing global is touched.
 `controller_seed_full_manifest: true` renders the whole greenfield document
-against the live controller instead — that rewrites settings and the DNS
-driver, so do it deliberately or not at all.
+against the live controller instead. Nothing in it is an overwrite there —
+settings are seeded only while still unconfigured, the DNS driver is never
+reconfigured once it exists, and a difference from the manifest surfaces as a
+drift warning rather than being applied — so do it deliberately, if only for
+the fuller drift report, or not at all.
 
 The regions still reference the existing metric and log clients **by exact
 endpoint string**, and a miss aborts the apply rather than creating a second
