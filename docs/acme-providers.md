@@ -16,10 +16,9 @@ secrets in the vaulted `secrets.yml`, not in `main.yml`).
 ## Port 80 and the host firewall
 
 HTTP-01 needs port 80 reachable from the CA. `roles/firewall` opens
-`cs_ports.controller_http` on the **controller only** — the metrics and
-registry hosts accept 3101/3102 and the tenant port range, not 80. Use a
-DNS-01 provider on those hosts, or have the firewall wave open port 80 for
-their groups. The role prints a warning when it detects this combination.
+`cs_ports.controller_http` on the controller, the metrics host and the
+registry host, so HTTP-01 works on all three. Use a DNS-01 provider on a host
+whose network cannot expose port 80 to the internet at all.
 
 ---
 

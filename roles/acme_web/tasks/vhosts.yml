@@ -41,6 +41,9 @@
   notify: Reload nginx
   when: "'metrics' in group_names"
 
+# mode 0644, not 0640: nginx's worker processes run as uid 101 (`user nginx`
+# in nginx.conf) and read these at request time. See the note on the htpasswd
+# directory in tasks/main.yml for the tradeoff.
 - name: Create the prometheus basic-auth file
   community.general.htpasswd:
     path: "{{ acme_web_htpasswd_dir }}/prometheus.htpasswd"
@@ -48,7 +51,7 @@
     password: "{{ acme_web_prometheus_password }}"
     owner: root
     group: root
-    mode: "0640"
+    mode: "0644"
   no_log: true
   when: "'metrics' in group_names"
 
@@ -59,6 +62,6 @@
     password: "{{ acme_web_loki_password }}"
     owner: root
     group: root
-    mode: "0640"
+    mode: "0644"
   no_log: true
   when: "'metrics' in group_names"

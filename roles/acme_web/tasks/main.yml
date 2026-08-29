@@ -46,21 +46,6 @@
       {{ cs_ports.metrics_prometheus }}/{{ cs_ports.metrics_loki }}.
   when: "'metrics' in group_names"
 
-# The registry and metrics hosts do not accept port 80 in the nftables input
-# chain (roles/firewall), so HTTP-01 validation cannot complete there.
-- name: Warn when HTTP-01 is selected on a host whose firewall does not open port 80
-  ansible.builtin.debug:
-    msg: >-
-      acme_web_challenge_method is 'http', but roles/firewall opens
-      cs_ports.controller_http ({{ cs_ports.controller_http }}) on the
-      controller only. HTTP-01 validation for {{ acme_web_domains | join(', ') }}
-      on {{ inventory_hostname }} will time out unless port 80 is reachable.
-      Use a DNS-01 provider here (docs/acme-providers.md), or have the
-      firewall wave open port 80 on this group.
-  when:
-    - acme_web_challenge_method == 'http'
-    - "'controller' not in group_names"
-
 - name: Install the nginx support packages
   ansible.builtin.apt:
     name:
@@ -87,13 +72,19 @@
     - "{{ acme_web_ssl_dir }}"
     - "{{ acme_web_webroot }}/.well-known/acme-challenge"
 
+# World-readable on purpose (v1 parity): the nginx container's worker
+# processes drop to `user nginx` (uid 101) and must read the htpasswd files
+# to answer any authenticated request. 0750/0640 root:root makes every
+# prometheus/loki request fail with a permission error in the nginx log.
+# The tradeoff is accepted: the files hold bcrypt/md5-crypt hashes, not
+# plaintext, and this is a single-purpose host with no untrusted local users.
 - name: Create the htpasswd directory
   ansible.builtin.file:
     path: "{{ acme_web_htpasswd_dir }}"
     state: directory
     owner: root
     group: root
-    mode: "0750"
+    mode: "0755"
 
 - name: Install nginx.conf
   ansible.builtin.copy:

@@ -39,8 +39,7 @@ join the `ops` docker network.
 
 1. Asserts `nginx_image` is an exact pin and `acme_sh_version` is a release
    tag; asserts this host has a certificate domain; asserts the metrics
-   basic-auth passwords are set; warns when HTTP-01 is selected on a host
-   whose firewall does not open port 80 (see below).
+   basic-auth passwords are set.
 2. Installs `python3-passlib`, `rsync`, `git`; creates the nginx tree.
 3. Installs `nginx.conf`, the error pages, the dhparam group and the ACME
    challenge snippet.
@@ -93,15 +92,21 @@ Operator-facing variable names are unchanged from v1 (`acme_challenge_method`,
 `acme_cf_token`, …); the role reads each through an `acme_web_`-prefixed
 variable so both the documented vocabulary and the role-prefix lint rule hold.
 
-### Known gap: port 80 on the metrics and registry hosts
+### Port 80 on the metrics and registry hosts
 
-`roles/firewall` opens `cs_ports.controller_http` on the **controller only**.
-The metrics host accepts 3101/3102 from the controller and nodes; the registry
-host accepts 443 and the tenant port range. Neither accepts 80, so an HTTP-01
-challenge against `cs_metrics_domain` or `cs_registry_domain` cannot complete.
-Use a DNS-01 provider on those hosts, or have the firewall wave open 80 for
-their groups. The role prints a warning rather than failing, because the
-answer is an environment decision.
+`roles/firewall` opens `cs_ports.controller_http` on the controller, the
+metrics host and the registry host, so the default HTTP-01 challenge works
+for `cs_portal_domain`, `cs_metrics_domain` and `cs_registry_domain` alike.
+A host that cannot expose 80 to the internet at all needs a DNS-01 provider
+(`docs/acme-providers.md`).
+
+### htpasswd file permissions
+
+The htpasswd directory is `0755` and the files inside it `0644`, matching v1.
+nginx's worker processes drop to `user nginx` (uid 101) inside the container
+and read the files at request time; `0750`/`0640 root:root` makes every
+authenticated 3101/3102 request fail. The files hold bcrypt/md5-crypt hashes,
+not plaintext, and the metrics host has no untrusted local users.
 
 ## The registry certificate, and why one hook does two jobs
 
