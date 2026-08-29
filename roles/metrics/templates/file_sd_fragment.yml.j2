@@ -1,0 +1,10 @@
+---
+# Managed by the metrics role (tasks/file_sd.yml) -- do not hand-edit.
+# One target per file -- exactly one node per az. Label contract
+# (docs/contracts.md, frozen): region=<az>, node=<hostname>. The controller's
+# placement queries match on these labels exactly; wrong values here silently
+# zero out cpu/mem for this node and reject every order against it.
+- targets: ['{{ metrics_scrape_address }}:{{ metrics_file_sd_port }}']
+  labels:
+    region: {{ hostvars[metrics_file_sd_target].az }}
+    node: {{ hostvars[metrics_file_sd_target].hostname }}

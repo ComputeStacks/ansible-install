@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: loki
+  author: ComputeStacks
+  description: >-
+    Containerized loki on the metrics host. Joins the `ops` docker network
+    owned by the metrics role; must run after it in the same play.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

@@ -1,0 +1,124 @@
+---
+# Greenfield converge of the metrics host: ops network (sole owner), the
+# prometheus + alertmanager containers, and this host's own per-AZ file_sd
+# fragments. Attach mode (add-region.yml) does NOT run this file against an
+# existing v1 metrics host -- it includes tasks/file_sd.yml on its own (see
+# that file's header and README.md).
+
+- name: Assert the prometheus and alertmanager images are exact pins
+  ansible.builtin.assert:
+    that:
+      - prometheus_image is defined
+      - prometheus_image is search(':')
+      - not (prometheus_image is search(':latest$'))
+      - alertmanager_image is defined
+      - alertmanager_image is search(':')
+      - not (alertmanager_image is search(':latest$'))
+    fail_msg: >-
+      prometheus_image and alertmanager_image must be exact pins from
+      playbooks/group_vars/all/versions.yml (no :latest tag).
+
+- name: Create the ops docker network (metrics is the SOLE owner)
+  community.docker.docker_network:
+    name: "{{ metrics_ops_network }}"
+    state: present
+
+- name: Ensure the prometheus config directory exists
+  ansible.builtin.file:
+    path: "{{ metrics_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure the prometheus and alertmanager docker volumes exist
+  community.docker.docker_volume:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - prometheus-data
+    - alertmanager-data
+
+- name: Install the static prometheus/node alert rule files (v1 parity)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ metrics_config_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - alerts_node.yml
+    - alerts_prometheus.yml
+  notify: Restart prometheus
+
+- name: Render the container-resource alert rules
+  ansible.builtin.template:
+    src: alerts_containers.yml.j2
+    dest: "{{ metrics_config_dir }}/alerts_containers.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart prometheus
+
+- name: Render the alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ metrics_config_dir }}/alertmanager.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart alertmanager
+
+- name: Pull the alertmanager image
+  community.docker.docker_image_pull:
+    name: "{{ alertmanager_image }}"
+  notify: Restart alertmanager
+
+- name: Render the alertmanager systemd unit
+  ansible.builtin.template:
+    src: alertmanager.service.j2
+    dest: /etc/systemd/system/alertmanager.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart alertmanager
+
+- name: Ensure the alertmanager service is enabled and running
+  ansible.builtin.systemd_service:
+    name: alertmanager
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Render the prometheus main configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ metrics_config_dir }}/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart prometheus
+
+- name: Render this metrics host's per-AZ file_sd fragments
+  ansible.builtin.include_tasks: file_sd.yml
+
+- name: Pull the prometheus image
+  community.docker.docker_image_pull:
+    name: "{{ prometheus_image }}"
+  notify: Restart prometheus
+
+- name: Render the prometheus systemd unit
+  ansible.builtin.template:
+    src: prometheus.service.j2
+    dest: /etc/systemd/system/prometheus.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart prometheus
+
+- name: Ensure the prometheus service is enabled and running
+  ansible.builtin.systemd_service:
+    name: prometheus
+    state: started
+    enabled: true
+    daemon_reload: true

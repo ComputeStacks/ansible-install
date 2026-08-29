@@ -1,0 +1,16 @@
+---
+# loki joins the `ops` docker network, owned by the metrics role (docs/
+# contracts.md ownership map) -- this role never creates it. site.yml's
+# "Metrics host" play runs metrics before loki for exactly this reason;
+# loki must not be run on a host where metrics hasn't already run.
+loki_ops_network: ops
+
+loki_config_dir: /etc/loki
+loki_data_dir: /var/lib/loki
+
+# Loopback-only, role-internal port (analogous to vault_listen_port /
+# metrics_prometheus_internal_port -- see roles/vault/README.md "Notes on
+# the contracts"). Exposed to the controller/node fluentd shippers only via
+# the nginx vhost Wave 3G's acme_web role builds at cs_ports.metrics_loki
+# (3102); this is the interface it builds against.
+loki_internal_port: 3100

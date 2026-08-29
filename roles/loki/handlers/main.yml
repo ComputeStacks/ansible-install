@@ -1,0 +1,10 @@
+---
+# Full restart: the container runs in the foreground via `docker run --rm`
+# with no ExecReload wired up, so a config or image change always goes
+# through a restart.
+- name: Restart loki
+  ansible.builtin.systemd_service:
+    name: loki
+    state: restarted
+    enabled: true
+    daemon_reload: true

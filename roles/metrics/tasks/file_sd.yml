@@ -1,0 +1,65 @@
+---
+# Renders ONLY the per-AZ prometheus file_sd fragments for the node_exporter,
+# cadvisor, and haproxy jobs -- v1's exact file paths and format
+# (/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml). Exactly one
+# node per az (preflight-enforced), so each fragment holds exactly one
+# target.
+#
+# Self-contained and safe to include on its own -- this is the attach-mode
+# entry point:
+#
+#   - name: Render this new region's prometheus file_sd fragments
+#     ansible.builtin.include_role:
+#       name: metrics
+#       tasks_from: file_sd
+#
+# add-region.yml runs this against an EXISTING v1 metrics host
+# (existing_env: true), scoped with --limit to the new node's az so it never
+# touches any other region's fragment files. Each fragment is a whole-file
+# write keyed by az -- the per-AZ-fragment exception docs/contracts.md's
+# attach-mode rule names explicitly (rule 9 / rev-4 write-set item 5).
+#
+# No notify here, in either mode: Prometheus's file_sd_configs mechanism
+# watches these files and picks up additions/changes within one scrape
+# interval on its own, on both v1's prometheus and this role's -- no restart
+# or reload coordination is needed or wanted.
+
+- name: Ensure the per-AZ file_sd directories exist
+  ansible.builtin.file:
+    path: "/etc/prometheus/{{ item.component }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ metrics_file_sd_jobs }}"
+  loop_control:
+    label: "{{ item.component }}"
+
+# Tailscale pairwise derivation (docs/contracts.md "Tailscale address
+# derivation"): the scrape address for a node is its tailscale IP ONLY if
+# BOTH this metrics host and that node are tailnet-joined; otherwise
+# primary_ip. `tailscale_ip` is a Wave 2F hostvar that does not exist yet --
+# `default(primary_ip)` makes this correct before and after Wave 2F lands.
+- name: Render the per-AZ file_sd fragments (node_exporter, cadvisor, haproxy)
+  ansible.builtin.template:
+    src: file_sd_fragment.yml.j2
+    dest: "/etc/prometheus/{{ item.0.component }}/{{ hostvars[item.1].az }}.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ metrics_file_sd_jobs | product(groups['nodes']) | list }}"
+  loop_control:
+    label: "{{ item.0.component }}/{{ hostvars[item.1].az }}.yml"
+  vars:
+    metrics_file_sd_target: "{{ item.1 }}"
+    metrics_file_sd_port: "{{ item.0.port }}"
+    # Pairwise: both this metrics host AND the target node must be
+    # tailnet-joined, or the address falls back to primary_ip. Computed
+    # inline (rather than via intermediate named booleans) to avoid
+    # chaining a `| bool` filter over a cross-referenced templated var.
+    metrics_scrape_address: >-
+      {{ (hostvars[item.1].tailscale_ip | default(hostvars[item.1].primary_ip))
+         if (tailscale_authkey is defined
+             and (tailscale_enabled | default(true))
+             and (hostvars[item.1].tailscale_enabled | default(true)))
+         else hostvars[item.1].primary_ip }}

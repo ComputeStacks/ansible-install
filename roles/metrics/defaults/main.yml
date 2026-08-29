@@ -1,0 +1,65 @@
+---
+# metrics is the SOLE owner of the `ops` docker network (docs/contracts.md
+# ownership map). loki (same host, Wave 2E) joins it but never creates it;
+# site.yml runs metrics before loki in the "Metrics host" play for exactly
+# this reason.
+metrics_ops_network: ops
+
+metrics_config_dir: /etc/prometheus
+
+metrics_scrape_interval: 10s
+metrics_evaluation_interval: 10s
+
+# Loopback-only, role-internal ports (analogous to vault_listen_port, see
+# roles/vault/README.md "Notes on the contracts") -- never firewalled, never
+# dialed cross-host. The nginx vhosts that expose these at cs_ports.
+# metrics_prometheus (3101) / cs_ports.metrics_loki (3102) are Wave 3G's
+# acme_web role; this is the interface it builds against.
+metrics_prometheus_internal_port: 9090
+# Container-network-internal only (prometheus -> alertmanager over the `ops`
+# docker network's embedded DNS, by container name) -- never bound to a host
+# port, never crosses a host boundary, so this is not a cs_ports entry
+# either.
+metrics_alertmanager_port: 9093
+
+# Alertmanager webhook target -- the controller's alert_notifications API
+# (v1 parity).
+metrics_alert_endpoint: "https://{{ cs_portal_domain }}/api/system/alert_notifications"
+# Accept the controller's self-signed wildcard cert (acme_web/controller,
+# Wave 3G) unless/until it carries a CA-signed cert. v1 default; unchanged.
+metrics_alertmanager_tls_skip_verify: true
+
+# Static, non-per-AZ node-exporter scrape targets: infra hosts that run the
+# distro node_exporter package but aren't in groups['nodes'] (which are
+# scraped via the per-AZ file_sd fragments below instead). Iterated, never
+# indexed -- docs/contracts.md rule 2. Each group gets its own "region" label
+# (the group name) so these targets are visually distinct from real az
+# labels in Prometheus, never colliding with a real node's region="<az>".
+metrics_infra_node_exporter_groups:
+  - controller
+  - registry
+  - metrics
+  - backup
+  - nameservers
+
+# The three per-AZ file_sd jobs this role owns (docs/contracts.md Prometheus
+# contract). One rendered file per node per component, keyed by that node's
+# az -- v1's exact paths/format, so an existing v1 prometheus (attach mode)
+# reads them unchanged.
+metrics_file_sd_jobs:
+  - component: node_exporter
+    port: "{{ cs_ports.node_exporter }}"
+  - component: cadvisor
+    port: "{{ cs_ports.cadvisor }}"
+  - component: haproxy
+    port: "{{ cs_ports.haproxy_stats }}"
+
+# v1's container-name ignore list for the container-resource alert rule.
+# FROZEN for fleet compatibility (docs/contracts.md dispatch) -- ported
+# byte-for-byte from roles/prometheus/vars/main.yml in the v1 tree, trailing
+# pipe and duplicate "haproxy" entry included. Do not "clean this up" without
+# checking it against every v1-built metrics host this fragment format must
+# keep matching.
+metrics_container_ignore_list: "alertmanager|consul|fluentd|haproxy|loki|loki-logs|cadvisor|portal|prometheus|grafana|vault-bootstrap|nginx|haproxy|"
+metrics_container_cpu_limit: 95
+metrics_container_memory_limit: 92

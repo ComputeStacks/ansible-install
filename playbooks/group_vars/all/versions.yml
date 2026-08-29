@@ -36,10 +36,22 @@ bastion_image: "ghcr.io/computestacks/cs-docker-bastion:v2"
 xtrabackup24_image: "ghcr.io/computestacks/cs-docker-xtrabackup:2.4"
 xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
 
-# Metrics / logging stack (containers, exact tags). VERIFY (wave E): confirm
-# each is the latest stable of its line at implementation time and pin.
-prometheus_image: "prom/prometheus:v2.53.5"        # VERIFY
-alertmanager_image: "prom/alertmanager:v0.28.1"    # VERIFY
+# Metrics / logging stack (containers, exact tags).
+# Verified 2026-08-28 (wave E): the v2.53 LTS line went EOL 2025-07-31 and its
+# successor LTS (3.5) is also now past its 2026-07-31 support window --
+# Prometheus's currently-active LTS line is 3.13 (2026-07-01 to 2027-07-31),
+# latest patch v3.13.2 (docker hub prom/prometheus, confirmed present,
+# linux/amd64). Pinning the active LTS line rather than a dead one, per the
+# versions.yml note that VERIFY may resolve to "the v2.53 LTS line OR newer
+# stable". The v2->v3 jump does not affect anything this role's templates
+# generate: scrape_configs/file_sd_configs/rule_files/alerting sections are
+# unchanged across the major version; the only user-visible v3 changes are a
+# new default web UI and default-on UTF-8 metric/label names, neither of
+# which this repo's config relies on.
+prometheus_image: "prom/prometheus:v3.13.2"
+# Verified 2026-08-28 (wave E): v0.34.0 is the latest stable tag on Docker Hub
+# (prom/alertmanager); alertmanager does not publish a separate LTS line.
+alertmanager_image: "prom/alertmanager:v0.34.0"
 loki_image: "grafana/loki:2.9.10"                  # fleet parity; controller queries Loki API v1
 # Verified 2026-08-28 (wave D): the tag exists on Docker Hub with a linux/amd64
 # manifest. The image's tags track the Loki release line, so this stays pinned

@@ -1,0 +1,59 @@
+---
+- name: Assert the loki image is an exact pin
+  ansible.builtin.assert:
+    that:
+      - loki_image is defined
+      - loki_image is search(':')
+      - not (loki_image is search(':latest$'))
+    fail_msg: >-
+      loki_image must be an exact pin from playbooks/group_vars/all/
+      versions.yml (no :latest tag). loki_image is deliberately pinned at
+      2.9.10 for fleet parity with v1-built metrics hosts -- do not bump it
+      without confirming attach mode still targets a compatible config
+      format on the existing environment.
+
+- name: Ensure the loki config and data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ loki_config_dir }}"
+    - "{{ loki_data_dir }}"
+
+- name: Install the loki configuration (v1 parity -- static, no template vars)
+  ansible.builtin.copy:
+    src: loki-config.yml
+    dest: "{{ loki_config_dir }}/loki-config.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart loki
+
+- name: Ensure the loki docker volume exists
+  community.docker.docker_volume:
+    name: loki-data
+    state: present
+
+- name: Pull the loki image
+  community.docker.docker_image_pull:
+    name: "{{ loki_image }}"
+  notify: Restart loki
+
+- name: Render the loki systemd unit
+  ansible.builtin.template:
+    src: loki.service.j2
+    dest: /etc/systemd/system/loki.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart loki
+
+- name: Ensure the loki service is enabled and running
+  ansible.builtin.systemd_service:
+    name: loki
+    state: started
+    enabled: true
+    daemon_reload: true

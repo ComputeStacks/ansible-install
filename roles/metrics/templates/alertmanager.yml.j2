@@ -1,0 +1,18 @@
+---
+# Managed by the metrics role -- do not hand-edit. v1 parity (roles/
+# alertmanager/templates/alertmanager.yml.j2): webhooks every alert to the
+# controller's alert_notifications API.
+route:
+  group_by: ['alertname', 'name', 'service', 'region', 'node']
+  group_wait: 30s
+  group_interval: 1m
+  repeat_interval: 1h
+  receiver: controller
+receivers:
+  - name: 'controller'
+    webhook_configs:
+      - send_resolved: true
+        url: "{{ metrics_alert_endpoint }}"
+        http_config:
+          tls_config:
+            insecure_skip_verify: {{ metrics_alertmanager_tls_skip_verify | lower }}

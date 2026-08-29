@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: metrics
+  author: ComputeStacks
+  description: >-
+    Containerized prometheus + alertmanager on the metrics host. Owns the
+    `ops` docker network. Renders per-AZ prometheus file_sd fragments for
+    node_exporter/cadvisor/haproxy (also usable standalone via
+    tasks_from: file_sd, for attach mode against an existing v1 metrics
+    host).
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

@@ -1,0 +1,54 @@
+---
+# Managed by the metrics role -- do not hand-edit.
+#
+# Every scrape target here iterates an inventory group; nothing is indexed
+# with [0] and nothing reads a gathered fact (docs/contracts.md rules 1/2).
+# Per-node targets (node_exporter/cadvisor/haproxy on groups['nodes']) come
+# from the per-AZ file_sd fragments in tasks/file_sd.yml, not from here.
+global:
+  scrape_interval: {{ metrics_scrape_interval }}
+  evaluation_interval: {{ metrics_evaluation_interval }}
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:{{ metrics_alertmanager_port }}']
+
+rule_files:
+  - "alerts_prometheus.yml"
+  - "alerts_node.yml"
+  - "alerts_containers.yml"
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:{{ metrics_prometheus_internal_port }}']
+
+  # Node-exporter runs on every host in the fleet (installed elsewhere, per
+  # role README) -- groups['nodes'] via file_sd (one node per az), every
+  # other infra group via static_configs below, each host as its own
+  # targets/labels entry.
+  - job_name: node-exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/node_exporter/*.yml
+    static_configs:
+{% for group_name in metrics_infra_node_exporter_groups %}
+{% for h in groups[group_name] | default([]) %}
+      - targets: ['{{ hostvars[h].primary_ip }}:{{ cs_ports.node_exporter }}']
+        labels:
+          region: "{{ group_name }}"
+          node: "{{ hostvars[h].hostname }}"
+{% endfor %}
+{% endfor %}
+
+  # cadvisor and haproxy run only on groups['nodes'] -- file_sd only.
+  - job_name: cadvisor
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/cadvisor/*.yml
+
+  - job_name: haproxy
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/haproxy/*.yml
