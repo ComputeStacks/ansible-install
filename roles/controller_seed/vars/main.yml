@@ -1,0 +1,20 @@
+---
+# The frozen top-level key set of bootstrap manifest schema_version 1
+# (controller repo doc/bootstrap_manifest.md, Bootstrap::Manifest::SECTIONS).
+# The apply treats an unknown top-level key as an ERROR, not a warning --
+# "it is almost always a typo in the provisioner template" -- so the rendered
+# document is checked against this list before it is written. Role vars, not
+# defaults: this mirrors the controller's constant and is not an operator
+# knob.
+controller_seed_schema_sections:
+  - schema_version
+  - settings
+  - metric_clients
+  - log_clients
+  - dns
+  - locations
+  - products
+  - catalog
+  - user_group
+  - features
+  - admin_user

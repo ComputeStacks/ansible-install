@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: controller_seed
+  author: ComputeStacks
+  description: >-
+    Render the ComputeStacks bootstrap manifest from the inventory and apply
+    it with `cstacks seed` (rake bootstrap:apply).
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

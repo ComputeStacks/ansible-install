@@ -1,0 +1,137 @@
+---
+# controller_seed renders the bootstrap manifest and applies it with
+# `cstacks seed` (rake bootstrap:apply). The schema is the controller repo's
+# doc/bootstrap_manifest.md, schema_version 1 -- FROZEN. An unknown key is a
+# hard error there, so every key this role renders must appear in that
+# document.
+
+controller_seed_manifest_path: /var/lib/computestacks/manifest.yml
+controller_seed_cstacks_bin: /usr/local/bin/cstacks
+
+# Delete the manifest after a SUCCESSFUL apply: it carries the admin password,
+# the DNS API keys, the metric/log client credentials, the haproxy stats
+# password and the load balancer's private key. A FAILED apply deliberately
+# keeps it (root 0600) so the rendered document can be inspected.
+controller_seed_remove_manifest: true
+
+# --- attach mode ----------------------------------------------------------
+# On an existing controller (existing_env: true) the manifest carries the
+# topology only -- locations/regions/nodes/networks/load_balancers, plus the
+# user_group region link so the new region is orderable. Set this true to
+# render the whole greenfield manifest against a live controller instead;
+# that rewrites settings, the DNS driver and the metric/log clients, so only
+# do it deliberately.
+controller_seed_full_manifest: false
+
+# Attach mode always previews with DRY_RUN=1 first and then waits for the
+# operator to confirm. Set controller_seed_confirm: false for CI (the pause
+# module needs a tty).
+controller_seed_dry_run_first: true
+controller_seed_confirm: true
+
+# --- settings -------------------------------------------------------------
+controller_seed_registry_hosts: "{{ groups['registry'] | default([]) }}"
+# Setting.registry_node: the registry server's IP, which the controller SSHes
+# to for tenant container registries (schema doc). Built by appending '' to
+# the extracted list and taking `first`, so an empty registry group yields ''
+# and the four registry settings are omitted -- no [0] indexing anywhere
+# (docs/contracts.md rule 2).
+controller_seed_registry_node: >-
+  {{ ((controller_seed_registry_hosts | map('extract', hostvars, 'primary_ip') | list) + ['']) | first }}
+controller_seed_registry_ssh_port: "{{ cs_ports.ssh }}"
+# Setting.cr_le: the domain the controller orders the container registry's
+# ACME certificate for. v1's bootstrap.rake wrote cs_portal_domain here, which
+# is a copy/paste bug -- see README.md.
+controller_seed_cr_le: "{{ cs_registry_domain }}"
+# Additional Setting rows, name -> value (e.g. company_name, app_name,
+# general_support, acme_email). UPDATE-ONLY: the apply aborts on a name
+# Setting.setup! does not know, so do not invent names here.
+controller_seed_settings_extra: {}
+
+# --- metric_clients / log_clients -----------------------------------------
+# The endpoints the CONTROLLER reads metrics and logs back from: the nginx TLS
+# vhosts roles/acme_web publishes on the metrics host. Matched EXACTLY by the
+# apply -- a changed port or scheme is a different client, not a rename.
+controller_seed_metric_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus }}"
+controller_seed_log_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_loki }}"
+controller_seed_prometheus_username: "{{ acme_web_prometheus_username | default('promuser') }}"
+controller_seed_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
+controller_seed_loki_username: "{{ acme_web_loki_username | default('loguser') }}"
+controller_seed_loki_password: "{{ loki_basic_auth_password | default('') }}"
+controller_seed_create_clients: true
+
+# --- dns ------------------------------------------------------------------
+controller_seed_dns_username: admin
+controller_seed_pdns_zone_type: master
+controller_seed_pdns_server: localhost
+# PowerDNS API path (schema doc: the full API server path). The controller
+# must reach the leader on an address that pdns.conf's `webserver-allow-from`
+# lists -- roles/powerdns puts the controller's primary_ip and public_ip
+# there, NOT its tailnet address, so this is deliberately not a tailscale
+# derivation.
+controller_seed_dns_primary_ip: >-
+  {{ ((groups['ns_primary'] | default([]) | map('extract', hostvars, 'primary_ip') | list) + ['']) | first }}
+controller_seed_dns_endpoint: "http://{{ controller_seed_dns_primary_ip }}:{{ cs_ports.pdns_api }}/api/v1/servers/localhost"
+controller_seed_dns_zone: "{{ cs_app_zone }}"
+
+# --- locations / regions --------------------------------------------------
+controller_seed_fill_strategy: least
+controller_seed_network_driver: bridge
+controller_seed_p_net_size: 27
+controller_seed_volume_backend: local
+controller_seed_pid_limit: 300
+controller_seed_ulimit_nofile_soft: 2500
+controller_seed_ulimit_nofile_hard: 3000
+
+# --- nodes ----------------------------------------------------------------
+controller_seed_node_ssh_port: "{{ cs_ports.ssh }}"
+# Must match the published-port range the node firewall opens.
+controller_seed_node_port_begin: "{{ cs_ports.tenant_port_begin }}"
+controller_seed_node_port_end: "{{ cs_ports.tenant_port_end }}"
+
+# --- load balancer --------------------------------------------------------
+# The shared wildcard domain tenant containers are published under
+# (<container>.<domain>). It MUST equal the CN/SAN of the wildcard
+# certificate below or every tenant TLS handshake mismatches; both come from
+# cs_app_zone through roles/controller's controller_wildcard_domain.
+controller_seed_lb_domain: "{{ controller_wildcard_domain | default(cs_app_zone) }}"
+controller_seed_lb_stats_bind: "*:{{ cs_ports.haproxy_stats }}"
+# The column ships a hard-coded default, so leaving this unset would publish
+# the same stats password on every install. Derived deterministically from
+# secret_key_base (one-way) unless the operator sets `haproxy_stats_password`
+# in the vaulted secrets.
+controller_seed_lb_stats_password: >-
+  {{ haproxy_stats_password
+     | default((secret_key_base ~ '|haproxy-stats') | hash('sha256') | truncate(32, true, '')) }}
+controller_seed_lb_direct_connect: false
+controller_seed_lb_le: false
+# The self-signed tenant wildcard roles/controller generates once (cert AND
+# key in one pem). v1 kept it at the same path, so attach mode reads the
+# existing environment's certificate here too.
+controller_seed_shared_cert_path: >-
+  {{ controller_wildcard_cert | default('/var/lib/computestacks/.ssl_wildcard/sharedcert.pem') }}
+
+# --- products / catalog / user group / features / admin --------------------
+controller_seed_products_seed: true
+controller_seed_catalog_system_content: true
+# Slow (seeds the whole container image catalog). Greenfield wants it.
+controller_seed_catalog_container_images: true
+controller_seed_user_group_name: default
+controller_seed_link_regions: all
+controller_seed_features_defaults: true
+controller_seed_admin_email: "{{ cs_admin_email | default('') }}"
+controller_seed_admin_password: "{{ cs_admin_password | default('') }}"
+controller_seed_admin_fname: Admin
+controller_seed_admin_lname: Admin
+controller_seed_admin_currency: "{{ currency | default('USD') }}"
+controller_seed_admin_bypass_billing: true
+
+# Node vars the manifest cannot be rendered without.
+controller_seed_required_node_vars:
+  - hostname
+  - primary_ip
+  - public_ip
+  - region
+  - az
+  - container_network
+  - container_network_name

@@ -1,0 +1,65 @@
+---
+# One backfill rake task -- `controller_post_enroll_task` -- run inside the
+# portal container. Included per task from main.yml, in order.
+#
+# Greenfield: one unscoped, fleet-wide pass. Attach mode: one scoped pass per
+# NEW node (the inventory's nodes group holds only those), because a
+# fleet-wide pass on a live controller re-PUTs desired state to every existing
+# node for no reason and one unrelated failure would mask the result for the
+# node being attached. The scoped form additionally fails when the node it was
+# asked about does not latch.
+#
+# Both tasks exit non-zero on any failure (Wave 1C), so the command's own exit
+# code is the gate; the output is shown either way because it names the nodes
+# and projects that still need a re-run.
+
+- name: Backfill
+  block:
+    - name: Run against the whole fleet - {{ controller_post_enroll_task }}
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ controller_post_enroll_container }}"
+          - bundle
+          - exec
+          - rake
+          - "{{ controller_post_enroll_task }}"
+      register: controller_post_enroll_fleet
+      changed_when: controller_post_enroll_fleet.stdout is search('\\[(ok|latched)\\]')
+      when: not (existing_env | default(false) | bool)
+
+    - name: Run once per new node - {{ controller_post_enroll_task }}
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "--env"
+          - "{{ controller_post_enroll_scope_env }}={{ hostvars[item].hostname }}"
+          - "{{ controller_post_enroll_container }}"
+          - bundle
+          - exec
+          - rake
+          - "{{ controller_post_enroll_task }}"
+      register: controller_post_enroll_scoped
+      changed_when: controller_post_enroll_scoped.stdout is search('\\[(ok|latched)\\]')
+      loop: "{{ controller_post_enroll_scoped_hosts }}"
+      loop_control:
+        label: "{{ controller_post_enroll_scope_env }}={{ hostvars[item].hostname }}"
+      when: existing_env | default(false) | bool
+  always:
+    # Operational output, printed whether the pass succeeded or failed. It
+    # carries no credentials: per-node/per-project [ok]/[fail]/[skip] lines
+    # and the "not backfilled" pending list.
+    - name: Show the fleet output - {{ controller_post_enroll_task }}
+      ansible.builtin.debug:
+        var: controller_post_enroll_fleet.stdout_lines
+      when: (controller_post_enroll_fleet.stdout_lines | default([])) | length > 0
+
+    - name: Show the per-node output - {{ controller_post_enroll_task }}
+      ansible.builtin.debug:
+        var: item.stdout_lines
+      loop: "{{ (controller_post_enroll_scoped | default({})).results | default([]) }}"
+      loop_control:
+        label: "{{ controller_post_enroll_scope_env }}={{ hostvars[item.item | default('')].hostname | default('') }}"
+      when: (item.stdout_lines | default([])) | length > 0

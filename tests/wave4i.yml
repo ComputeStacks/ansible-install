@@ -1,0 +1,26 @@
+---
+# Wave 4I syntax-check harness. NOT a converge -- site.yml owns the real play
+# ordering (docs/contracts.md): controller_seed -> cs_agent (enrol) ->
+# controller_post_enroll. Run:
+#
+#   ansible-playbook --syntax-check tests/wave4i.yml
+#
+# group_vars under playbooks/ are not auto-loaded for a playbook that lives
+# outside that directory, so the two contract files are loaded explicitly.
+- name: Controller — render the bootstrap manifest and apply it
+  hosts: controller
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - controller_seed
+
+- name: Controller — post-enrolment backfills and connectivity report
+  hosts: controller
+  gather_facts: false
+  vars_files:
+    - ../playbooks/group_vars/all/ports.yml
+    - ../playbooks/group_vars/all/versions.yml
+  roles:
+    - controller_post_enroll

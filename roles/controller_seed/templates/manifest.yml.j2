@@ -1,0 +1,189 @@
+{# ---------------------------------------------------------------------------
+  ComputeStacks bootstrap manifest -- rendered by roles/controller_seed.
+
+  Schema: controller repo doc/bootstrap_manifest.md, schema_version 1 (FROZEN).
+  Unknown keys abort the apply, so nothing may be added here that is not in
+  that document.
+
+  INVENTORY VARS ONLY (docs/contracts.md rule 1). The single exception is the
+  blessed tailscale_ip facts expression (contracts.md "Facts exception"), used
+  for the two pairwise derivations: region.acme_server and node.agent_host.
+  No [0] indexing (rule 2): groups are iterated, and `| first` is used only
+  for the single controller / single primary nameserver preflight guarantees.
+
+  Every jinja control tag sits at column 0 on purpose -- ansible renders with
+  trim_blocks but not lstrip_blocks, so an indented tag would leak its own
+  indentation into the YAML.
+--------------------------------------------------------------------------- #}
+{% set controller_host = groups['controller'] | first %}
+{% set controller_ts = hostvars[controller_host].tailscale_ip | default(hostvars[controller_host].ansible_local.computestacks.tailscale_ip | default('')) %}
+{% set controller_tailnet = (tailscale_authkey is defined) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
+{% set include_globals = (not (existing_env | default(false) | bool)) or (controller_seed_full_manifest | bool) %}
+{% set node_regions = groups['nodes'] | map('extract', hostvars, 'region') | list | unique | sort %}
+# Rendered by ansible (roles/controller_seed) -- do not hand-edit.
+# Carries secrets: root 0600, deleted after a successful apply.
+schema_version: 1
+{% if include_globals %}
+
+settings:
+  defaults: true
+  values:
+    hostname: {{ cs_portal_domain | to_json }}
+{% if controller_seed_registry_node | length > 0 %}
+    registry_node: {{ controller_seed_registry_node | to_json }}
+    registry_base_url: {{ cs_registry_domain | to_json }}
+    registry_ssh_port: {{ controller_seed_registry_ssh_port | string | to_json }}
+    cr_le: {{ controller_seed_cr_le | to_json }}
+{% endif %}
+{% for name, value in (controller_seed_settings_extra | dictsort) %}
+    {{ name }}: {{ value | to_json }}
+{% endfor %}
+
+# What the CONTROLLER reads metrics/logs back from (the acme_web nginx vhosts
+# on the metrics host). Matched by EXACT endpoint string.
+metric_clients:
+  - endpoint: {{ controller_seed_metric_endpoint | to_json }}
+    create: {{ controller_seed_create_clients | bool | to_json }}
+    username: {{ controller_seed_prometheus_username | to_json }}
+    password: {{ controller_seed_prometheus_password | to_json }}
+
+log_clients:
+  - endpoint: {{ controller_seed_log_endpoint | to_json }}
+    create: {{ controller_seed_create_clients | bool | to_json }}
+    username: {{ controller_seed_loki_username | to_json }}
+    password: {{ controller_seed_loki_password | to_json }}
+{% if dns_driver | default('none') == 'powerdns' %}
+
+dns:
+  driver:
+    module_name: Pdns
+    endpoint: {{ controller_seed_dns_endpoint | to_json }}
+    auth_type: static
+    username: {{ controller_seed_dns_username | to_json }}
+    # Pdns::Auth is (user_id, username, password, api_key) and
+    # ProvisionDriver#cloud_auth passes (username, api_key_column,
+    # api_secret_column) into it -- so the WEB password goes in api_key and
+    # the X-API-Key goes in api_secret. It reads backwards; it is correct.
+    api_key: {{ pdns_web_key | to_json }}
+    api_secret: {{ pdns_api_key | to_json }}
+    settings:
+      config:
+        zone_type: {{ controller_seed_pdns_zone_type | to_json }}
+        masters: []
+        nameservers:
+{% for ns in (groups['nameservers'] | default([]) | sort) %}
+          - {{ (hostvars[ns].powerdns_name | regex_replace('\.$', '') ~ '.') | to_json }}
+{% endfor %}
+        server: {{ controller_seed_pdns_server | to_json }}
+  zones:
+    - name: {{ controller_seed_dns_zone | to_json }}
+      provider_ref: {{ (controller_seed_dns_zone ~ '.') | to_json }}
+{% endif %}
+{% endif %}
+
+# region (inventory) -> Location; az (inventory) -> Region. Exactly one node
+# per az, preflight-enforced.
+locations:
+{% for location in node_regions %}
+  - name: {{ location | to_json }}
+    active: true
+    fill_strategy: {{ controller_seed_fill_strategy | to_json }}
+    fill_by_qty: true
+    regions:
+{% for host in (groups['nodes'] | sort) %}
+{% if hostvars[host].region == location %}
+{% set node_ts = hostvars[host].tailscale_ip | default(hostvars[host].ansible_local.computestacks.tailscale_ip | default('')) %}
+{% set node_tailnet = (tailscale_authkey is defined) and (hostvars[host].tailscale_enabled | default(true)) and (node_ts | length > 0) %}
+{% set acme_address = hostvars[host].controller_acme_address | default(controller_ts if (controller_tailnet and node_tailnet) else hostvars[controller_host].primary_ip) %}
+      - name: {{ hostvars[host].az | to_json }}
+        active: true
+        network_driver: {{ controller_seed_network_driver | to_json }}
+        p_net_size: {{ controller_seed_p_net_size | int }}
+        volume_backend: {{ controller_seed_volume_backend | to_json }}
+        pid_limit: {{ controller_seed_pid_limit | int }}
+        ulimit_nofile_soft: {{ controller_seed_ulimit_nofile_soft | int }}
+        ulimit_nofile_hard: {{ controller_seed_ulimit_nofile_hard | int }}
+        # The controller address THIS az's node reaches the acme backend on:
+        # the controller's tailnet address when both ends are on the tailnet,
+        # otherwise its primary_ip. host:port, no scheme.
+        acme_server: {{ (acme_address ~ ':' ~ cs_ports.controller_acme_backend) | to_json }}
+        # Where CONTAINERS ship logs to. Credentials are spliced in
+        # controller-side from the log client (Region#loki_container_endpoint),
+        # so this carries none.
+        loki_endpoint: {{ controller_seed_log_endpoint | to_json }}
+        metric_client_endpoint: {{ controller_seed_metric_endpoint | to_json }}
+        log_client_endpoint: {{ controller_seed_log_endpoint | to_json }}
+        nodes:
+          - label: {{ hostvars[host].hostname | to_json }}
+            hostname: {{ hostvars[host].hostname | to_json }}
+            primary_ip: {{ hostvars[host].primary_ip | to_json }}
+            public_ip: {{ hostvars[host].public_ip | to_json }}
+            active: true
+            ssh_port: {{ controller_seed_node_ssh_port | int }}
+            port_begin: {{ controller_seed_node_port_begin | int }}
+            port_end: {{ controller_seed_node_port_end | int }}
+{% if controller_tailnet and node_tailnet %}
+            # Only when the CONTROLLER is on the tailnet too -- it is the end
+            # that dials cs-agent. Omitted entirely otherwise (a blank value
+            # would be stored, not treated as "fall back to primary_ip").
+            agent_host: {{ node_ts | to_json }}
+{% endif %}
+        networks:
+          # `name` is normalised controller-side (downcased, non-alphanumerics
+          # stripped): net-exm-001 is stored as netexm001. The raw inventory
+          # name is passed through; the apply matches on the normalised form.
+          - name: {{ hostvars[host].container_network_name | to_json }}
+            label: {{ (hostvars[host].az ~ ' shared') | to_json }}
+            subnet: {{ hostvars[host].container_network | to_json }}
+            is_shared: true
+            active: true
+            network_driver: {{ controller_seed_network_driver | to_json }}
+        load_balancer:
+          label: {{ (hostvars[host].az ~ ' lb') | to_json }}
+          domain: {{ controller_seed_lb_domain | to_json }}
+          public_ip: {{ hostvars[host].public_ip | to_json }}
+          ext_ip:
+            - {{ hostvars[host].primary_ip | to_json }}
+          internal_ip:
+            - {{ hostvars[host].primary_ip | to_json }}
+          direct_connect: {{ controller_seed_lb_direct_connect | bool | to_json }}
+          le: {{ controller_seed_lb_le | bool | to_json }}
+          stats_bind: {{ controller_seed_lb_stats_bind | to_json }}
+          stats_password: {{ controller_seed_lb_stats_password | to_json }}
+          shared_certificate: |
+{{ controller_seed_shared_certificate | trim | indent(12, true) }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% if include_globals %}
+
+products:
+  seed: {{ controller_seed_products_seed | bool | to_json }}
+
+catalog:
+  system_content: {{ controller_seed_catalog_system_content | bool | to_json }}
+  container_images: {{ controller_seed_catalog_container_images | bool | to_json }}
+
+user_group:
+  name: {{ controller_seed_user_group_name | to_json }}
+  link_regions: {{ controller_seed_link_regions | to_json }}
+
+features:
+  defaults: {{ controller_seed_features_defaults | bool | to_json }}
+  values:
+    updated_cr_cert: true
+
+admin_user:
+  email: {{ controller_seed_admin_email | to_json }}
+  password: {{ controller_seed_admin_password | to_json }}
+  fname: {{ controller_seed_admin_fname | to_json }}
+  lname: {{ controller_seed_admin_lname | to_json }}
+  currency: {{ controller_seed_admin_currency | to_json }}
+  bypass_billing: {{ controller_seed_admin_bypass_billing | bool | to_json }}
+{% else %}
+
+# Attach mode: topology only. The default user group is linked to the new
+# region so its users can order there -- links are added, never removed.
+user_group:
+  link_regions: {{ controller_seed_link_regions | to_json }}
+{% endif %}

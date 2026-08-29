@@ -1,0 +1,69 @@
+---
+# Controller-side tasks that can only run AFTER every node's cs-agent is
+# enrolled: the agent coordination tables start empty, and
+# agent:datachannel_backfill calls each node's agent, which 401s until the
+# node holds its admin token. site.yml's play order is the contract:
+# controller_seed -> cs_agent (enrol) -> this role. See README.md.
+#
+# `cstacks` has no general rake passthrough (its `seed` and `test`
+# subcommands each wrap one specific task), so these run through the same
+# `docker exec portal` the CLI itself uses. If a `cstacks rake <task>`
+# subcommand is ever added, this role is its only caller.
+
+- name: Look for the running portal container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - ps
+      - --quiet
+      - --filter
+      - "name=^{{ controller_post_enroll_container }}$"
+  register: controller_post_enroll_ps
+  changed_when: false
+  check_mode: false
+
+- name: Assert the portal container is running
+  ansible.builtin.assert:
+    that:
+      - (controller_post_enroll_ps.stdout | trim) | length > 0
+    fail_msg: >-
+      The '{{ controller_post_enroll_container }}' container is not running on
+      {{ inventory_hostname }}, so the backfills cannot be executed. Start it
+      with `cstacks run` (roles/controller owns it) and re-run this play. The
+      backfills are mandatory on a first boot: until
+      agent:datachannel_backfill latches datachannel_backfilled_at, backup,
+      restore, export and delete dispatch stay blocked on every node.
+    quiet: true
+
+# Included one at a time, in order: a failed backfill must stop the sequence.
+# (A `loop:` on the command itself would run every remaining item anyway and
+# bury the real error under the failures it caused.)
+- name: Run the controller backfills in order
+  ansible.builtin.include_tasks: backfill.yml
+  loop: "{{ controller_post_enroll_backfills }}"
+  loop_control:
+    loop_var: controller_post_enroll_task
+
+- name: Report controller -> node connectivity
+  when: controller_post_enroll_test_connection | bool
+  block:
+    - name: Run the connectivity checks
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ controller_post_enroll_container }}"
+          - bundle
+          - exec
+          - rake
+          - "{{ controller_post_enroll_test_connection_task }}"
+      register: controller_post_enroll_connectivity
+      changed_when: false
+  always:
+    - name: Show the connectivity report
+      # test_connection:all prints "[FAILED] ..." for a leg it could not dial
+      # but still exits 0, so this output has to be read. The validate role
+      # (Wave 4J) turns the same checks into hard assertions.
+      ansible.builtin.debug:
+        var: controller_post_enroll_connectivity.stdout_lines
+      when: (controller_post_enroll_connectivity.stdout_lines | default([])) | length > 0

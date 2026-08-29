@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: controller_post_enroll
+  author: ComputeStacks
+  description: >-
+    Post-enrolment controller tasks: the agent datachannel and metadata
+    backfills, and the controller -> node connectivity report.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

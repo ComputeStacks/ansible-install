@@ -1,0 +1,274 @@
+---
+# Render the bootstrap manifest from INVENTORY VARS and apply it with
+# `cstacks seed` (rake bootstrap:apply). Runs on the controller, after every
+# host is built and BEFORE the nodes enrol -- the apply is what creates the
+# Node rows whose agent tokens cs_agent reads back. See README.md.
+
+- name: Assert the environment inputs the manifest needs are present
+  ansible.builtin.assert:
+    that:
+      - (cs_portal_domain | default('')) | length > 0
+      - (cs_metrics_domain | default('')) | length > 0
+      - (cs_app_zone | default('')) | length > 0
+      - (groups['nodes'] | default([])) | length > 0
+    fail_msg: >-
+      cs_portal_domain, cs_metrics_domain and cs_app_zone must be set in the
+      inventory, and groups['nodes'] must contain at least one node -- the
+      manifest's locations/regions are derived entirely from the node group.
+    quiet: true
+
+- name: Assert the admin account inputs are present
+  # Greenfield only: the attach manifest carries no admin_user section.
+  ansible.builtin.assert:
+    that:
+      - (controller_seed_admin_email | default('')) | length > 0
+      - (controller_seed_admin_password | default('')) | length > 0
+      - "'CHANGEME' not in (controller_seed_admin_password | default(''))"
+    fail_msg: >-
+      cs_admin_email and cs_admin_password must be set (and cs_admin_password
+      must not still be the CHANGEME sample) -- the manifest's admin_user
+      section creates the first administrator, and it is create-if-absent
+      only, so a bad value here cannot be fixed by re-running the seed.
+    quiet: true
+  when: not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
+
+- name: Assert the metric and log client credentials are present
+  ansible.builtin.assert:
+    that:
+      - (controller_seed_prometheus_password | default('')) | length > 0
+      - (controller_seed_loki_password | default('')) | length > 0
+    fail_msg: >-
+      prometheus_basic_auth_password and loki_basic_auth_password must be set
+      in the vaulted secrets. They are the credentials the controller uses
+      against the acme_web nginx vhosts on the metrics host; blank ones make
+      every placement query return no data and every order fail with "no
+      capacity".
+    quiet: true
+  when: not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
+
+- name: Assert the region tunables are inside the ranges the models validate
+  ansible.builtin.assert:
+    that:
+      - controller_seed_p_net_size | int > 23
+      - controller_seed_p_net_size | int < 30
+      - controller_seed_pid_limit | int >= 0
+      - controller_seed_ulimit_nofile_soft | int >= 0
+      - controller_seed_ulimit_nofile_hard | int >= controller_seed_ulimit_nofile_soft | int
+      - controller_seed_volume_backend in ['local', 'nfs']
+      - controller_seed_network_driver in ['bridge', 'calico_docker']
+      - controller_seed_fill_strategy in ['least', 'full']
+    fail_msg: >-
+      A region tunable is out of range: p_net_size must be 24-29,
+      ulimit_nofile_hard must be >= ulimit_nofile_soft (docker rejects every
+      container start otherwise and the model does NOT check it),
+      volume_backend must be local|nfs, network_driver bridge|calico_docker
+      (bridge for all new installs), fill_strategy least|full (anything else
+      silently disables placement).
+    quiet: true
+
+- name: Assert every node carries the vars the manifest is rendered from
+  ansible.builtin.assert:
+    that:
+      - hostvars[item.0][item.1] is defined
+      - (hostvars[item.0][item.1] | string) | length > 0
+    fail_msg: >-
+      Node '{{ item.0 }}' is missing required host var '{{ item.1 }}'. The
+      manifest maps region -> Location, az -> Region, and cannot be rendered
+      without it (see inventories/example/hosts.yml).
+    quiet: true
+  loop: "{{ groups['nodes'] | product(controller_seed_required_node_vars) | list }}"
+  loop_control:
+    label: "{{ item.0 }}.{{ item.1 }}"
+
+- name: Assert Setting.registry_node resolves to exactly one address
+  ansible.builtin.assert:
+    that:
+      - (controller_seed_registry_hosts | length) <= 1
+    fail_msg: >-
+      groups['registry'] has {{ controller_seed_registry_hosts | length }}
+      hosts, but Setting.registry_node is a single address the controller
+      SSHes to. Set controller_seed_registry_node explicitly (and
+      controller_seed_registry_hosts to that one host) to say which registry
+      host the controller should use.
+    quiet: true
+
+- name: Assert the dns driver is one this role can seed
+  ansible.builtin.assert:
+    that:
+      - (dns_driver | default('none')) in ['powerdns', 'none']
+    fail_msg: >-
+      dns_driver is '{{ dns_driver | default('none') }}'. controller_seed
+      renders the manifest's dns section for 'powerdns' only, and omits the
+      section entirely for 'none'. AutoDNS seeding is not implemented in v2 --
+      configure the driver in the admin UI and set dns_driver: none, or raise
+      it with the engineering manager.
+    quiet: true
+
+- name: Assert the powerdns inputs the dns section needs are present
+  ansible.builtin.assert:
+    that:
+      - (pdns_api_key | default('')) | length > 0
+      - (pdns_web_key | default('')) | length > 0
+      - (controller_seed_dns_primary_ip | default('')) | length > 0
+      - (groups['nameservers'] | default([])) | length > 0
+    fail_msg: >-
+      dns_driver is 'powerdns' but pdns_api_key / pdns_web_key are unset, or
+      the inventory has no nameservers group with a primary_ip on the
+      ns_primary host. The manifest's DNS driver cannot be rendered without
+      them.
+    quiet: true
+  when:
+    - dns_driver | default('none') == 'powerdns'
+    - not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
+
+- name: Assert every nameserver defines a unique powerdns_name
+  # These become the zone's NS records. Role defaults are not in scope in this
+  # play, so the value has to come from the inventory -- and two nameservers
+  # sharing the sample default would publish a broken NS set.
+  ansible.builtin.assert:
+    that:
+      - (groups['nameservers'] | map('extract', hostvars, 'powerdns_name') | select('defined') | list | length)
+        == (groups['nameservers'] | length)
+      - (groups['nameservers'] | map('extract', hostvars, 'powerdns_name') | list | unique | length)
+        == (groups['nameservers'] | length)
+    fail_msg: >-
+      Every host in groups['nameservers'] must set a unique 'powerdns_name'
+      (its FQDN, e.g. ns1.example.com) in the inventory -- these are written
+      into the DNS driver's nameservers list and become the NS records of
+      every tenant zone. roles/powerdns's default is a placeholder and is not
+      visible from this play.
+    quiet: true
+  when:
+    - dns_driver | default('none') == 'powerdns'
+    - not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
+
+- name: Check that the tenant wildcard certificate exists
+  ansible.builtin.stat:
+    path: "{{ controller_seed_shared_cert_path }}"
+  register: controller_seed_cert_stat
+
+- name: Assert the tenant wildcard certificate is present
+  ansible.builtin.assert:
+    that:
+      - controller_seed_cert_stat.stat.exists
+    fail_msg: >-
+      No tenant wildcard certificate at {{ controller_seed_shared_cert_path }}.
+      Greenfield: roles/controller generates it (run the controller role
+      first). Attach mode: point controller_seed_shared_cert_path at the
+      existing environment's shared certificate pem -- every load balancer in
+      the fleet must serve the SAME certificate, so never let this render
+      empty.
+    quiet: true
+
+- name: Read the tenant wildcard certificate
+  # Carries the private key: never logged, never diffed.
+  ansible.builtin.slurp:
+    src: "{{ controller_seed_shared_cert_path }}"
+  register: controller_seed_cert_raw
+  no_log: true
+
+- name: Keep the certificate for the manifest render
+  ansible.builtin.set_fact:
+    controller_seed_shared_certificate: "{{ controller_seed_cert_raw.content | b64decode }}"
+  no_log: true
+
+- name: Render the manifest in memory
+  # Rendered first, written second, so the YAML can be validated before a
+  # secrets-bearing file lands on disk.
+  ansible.builtin.set_fact:
+    controller_seed_manifest_content: "{{ lookup('ansible.builtin.template', 'manifest.yml.j2') }}"
+  no_log: true
+
+- name: Assert the rendered manifest parses and carries only schema-1 sections
+  ansible.builtin.assert:
+    that:
+      - (controller_seed_manifest_content | from_yaml) is mapping
+      - (controller_seed_manifest_content | from_yaml).schema_version == 1
+      - ((controller_seed_manifest_content | from_yaml).keys() | list | difference(controller_seed_schema_sections)) | length == 0
+      - ((controller_seed_manifest_content | from_yaml).locations | default([])) | length > 0
+    fail_msg: >-
+      The rendered manifest is not a schema_version 1 document: it either does
+      not parse as a YAML mapping, carries a top-level key the apply does not
+      know (an unknown key is a hard error there, never a warning), or has no
+      locations. This is a template bug -- nothing was written.
+    quiet: true
+
+- name: Seed the controller
+  block:
+    - name: Write the manifest
+      # 0600 root: admin password, DNS API keys, client credentials, stats
+      # password and the load balancer private key. diff:false as well as
+      # no_log so a --diff run can never print it either.
+      ansible.builtin.copy:
+        content: "{{ controller_seed_manifest_content }}"
+        dest: "{{ controller_seed_manifest_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      diff: false
+      no_log: true
+
+    - name: Preview the apply against the existing controller (DRY_RUN)
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_seed_cstacks_bin }}"
+          - seed
+          - "{{ controller_seed_manifest_path }}"
+      environment:
+        DRY_RUN: "1"
+      register: controller_seed_dry_run
+      changed_when: false
+      when:
+        - existing_env | default(false) | bool
+        - controller_seed_dry_run_first | bool
+
+    - name: Show what the apply would change
+      ansible.builtin.debug:
+        var: controller_seed_dry_run.stdout_lines
+      when: (controller_seed_dry_run.stdout_lines | default([])) | length > 0
+
+    - name: Confirm the apply against the existing controller
+      ansible.builtin.pause:
+        prompt: >-
+          Review the DRY_RUN diff above. Press ENTER to apply it to the live
+          controller, or Ctrl-C then A to abort. (Set
+          controller_seed_confirm: false to skip this prompt in CI.)
+      when:
+        - existing_env | default(false) | bool
+        - controller_seed_confirm | bool
+
+    - name: Apply the manifest
+      ansible.builtin.command:
+        argv:
+          - "{{ controller_seed_cstacks_bin }}"
+          - seed
+          - "{{ controller_seed_manifest_path }}"
+      register: controller_seed_apply
+      changed_when: "'0 created, 0 updated, 0 linked were applied' not in controller_seed_apply.stdout"
+
+    - name: Show what the apply changed
+      # Safe to print: the apply redacts every secret it touches.
+      ansible.builtin.debug:
+        var: controller_seed_apply.stdout_lines
+      when: (controller_seed_apply.stdout_lines | default([])) | length > 0
+
+    - name: Remove the manifest now the apply has succeeded
+      ansible.builtin.file:
+        path: "{{ controller_seed_manifest_path }}"
+        state: absent
+      when: controller_seed_remove_manifest | bool
+  rescue:
+    - name: Report where the failed manifest was left
+      ansible.builtin.debug:
+        msg: >-
+          The seed FAILED and nothing was written to the controller database
+          (the whole apply is one transaction). {{ controller_seed_manifest_path }}
+          has been kept for debugging -- it is root 0600 and carries secrets,
+          so delete it once you are done. Re-running this role re-renders and
+          re-applies it; the apply is idempotent.
+
+    - name: Fail the play
+      ansible.builtin.fail:
+        msg: >-
+          cstacks seed failed on {{ inventory_hostname }} -- see the apply's
+          own error above, which names the manifest section and key path.

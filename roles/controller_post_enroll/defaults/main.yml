@@ -1,0 +1,25 @@
+---
+# controller_post_enroll runs the controller-side rake tasks that can only run
+# once every node's cs-agent is enrolled. See README.md.
+
+controller_post_enroll_container: portal
+
+# In order. Both are idempotent, resumable, and (since Wave 1C) exit non-zero
+# on any failure, which is what makes them usable from a play.
+controller_post_enroll_backfills:
+  - agent:datachannel_backfill
+  - metadata:agent_backfill
+
+# Controller -> node connectivity report (ssh, docker mTLS, cs-agent) plus the
+# DNS provider check. Informational: the task prints "[FAILED] ..." lines but
+# exits 0, so it cannot fail this play -- the validate role (Wave 4J) owns the
+# hard assertions.
+controller_post_enroll_test_connection: true
+controller_post_enroll_test_connection_task: test_connection:all
+
+# Attach mode scopes each backfill to one node at a time with NODE=<hostname>
+# (NODE_ID=<id> is the other accepted form). A full-fleet pass on a live
+# controller would re-PUT desired state to every existing node, and one
+# unrelated failure would mask the result for the node being attached.
+controller_post_enroll_scope_env: NODE
+controller_post_enroll_scoped_hosts: "{{ groups['nodes'] | default([]) | sort }}"
