@@ -9,3 +9,4 @@ workspace-plan-DO-NOT-COMMIT.md
 collections/
 .ansible/
 galaxy_roles/
+.ansible_facts_cache/
