@@ -102,6 +102,7 @@ Exactly this, and nothing else:
 | metrics | firewall: the same node-address appends | |
 | backup | the `cstacks` account, its `~/.ssh`, and the repository path's ownership | v2's borg is **not** installed over the server's existing one. |
 | backup | one `authorized_keys` entry for the new node | Added by `cs_agent`, commented with the node's hostname. |
+| backup | firewall: the same node-address appends | Latent on most v1 servers — their script's `default_allow_ssh` accepts 22 from anywhere, so borg already reaches them. On a server built with `default_allow_ssh: false` the appends are what keeps the new node's backups from failing silently. |
 | vault (on the controller) | nothing | The new node's docker certificate is *issued* from the existing PKI; the playbook unseals the vault if it is sealed and writes nothing. |
 
 `/etc/default/computestacks` is append-only, always. No shared-host file is

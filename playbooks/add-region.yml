@@ -197,10 +197,19 @@
 # runs, so v2's borg is never installed over the server's existing one and
 # only the cstacks account, its ~/.ssh and the repository path's ownership are
 # touched. The per-node authorized_keys entry is added later, by cs_agent.
-- name: Existing backup server — account and repository path only
+- name: Existing backup server — account, repository path, firewall appends
   hosts: backup
   roles:
     - backup_server
+  tasks:
+    # The node's borg container dials this host over SSH. v1's script only
+    # accepts 22 from anywhere when `default_allow_ssh` is true; with it
+    # false, the new node's backups fail silently until its addresses are
+    # allowed. Same append as the metrics and controller plays.
+    - name: Append the new node addresses to the v1 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v1_append
 
 # The controller trusts the new node over SSH (control-plane row #4: volumes,
 # haproxy certificate deploy, LB reload). ssh_trust skips the controller's
