@@ -24,6 +24,31 @@ validate_agent_dial_address: >-
      if (validate_controller_on_tailnet | bool and validate_self_on_tailnet | bool)
      else (primary_ip | default('')) }}
 
+# The controller address THIS node dials the ACME backend on (control-plane
+# row #7). Recomputed with the SAME pairwise expression roles/controller_seed
+# renders into `regions[].acme_server` (its manifest.yml.j2 and README) — the
+# point of the check is that the value the manifest actually carries is
+# routable from here, so a variant expression would validate the wrong thing.
+# Both tailnet halves require a real address as well as membership, exactly as
+# the manifest does, and a per-node `controller_acme_address` override wins
+# over the derivation in both places.
+validate_controller_tailscale_ip: >-
+  {{ hostvars[validate_controller_host].tailscale_ip
+     | default(hostvars[validate_controller_host].ansible_local.computestacks.tailscale_ip
+               | default('')) }}
+validate_self_tailscale_ip: >-
+  {{ tailscale_ip | default(ansible_local.computestacks.tailscale_ip | default('')) }}
+validate_acme_address: >-
+  {{ controller_acme_address
+     | default((validate_controller_tailscale_ip | trim)
+               if ((validate_controller_on_tailnet | bool)
+                   and ((validate_controller_tailscale_ip | trim) | length > 0)
+                   and (validate_self_on_tailnet | bool)
+                   and ((validate_self_tailscale_ip | trim) | length > 0))
+               else (hostvars[validate_controller_host].primary_ip | default(''))) }}
+validate_acme_server: >-
+  {{ (validate_acme_address | trim) ~ ':' ~ cs_ports.controller_acme_backend }}
+
 validate_expected_services: >-
   {{ (validate_services_common
       + (validate_services_v2_only if not (existing_env | default(false) | bool) else [])

@@ -142,6 +142,49 @@
     - dns_driver | default('none') == 'powerdns'
     - not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
 
+# `regions[].acme_server` falls back to the controller's primary_ip for every
+# node that is not tailnet-paired with the controller. On a node in the same
+# datacentre that is correct; on a REMOTE region it is an address that routes
+# nowhere, and nothing notices until a tenant certificate fails to issue.
+# Warn, don't fail: whether primary_ip is routable from a given region is an
+# environment fact this role cannot see. `validate`'s `acme_backend` check
+# probes the address for real and DOES fail.
+- name: Reset the derived acme_server warning list
+  ansible.builtin.set_fact:
+    controller_seed_acme_primary_ip_nodes: []
+
+- name: Determine which nodes fall back to the controller's primary_ip for acme_server
+  ansible.builtin.set_fact:
+    controller_seed_acme_primary_ip_nodes: >-
+      {{ controller_seed_acme_primary_ip_nodes
+         + ([item] if (hostvars[item].controller_acme_address is not defined
+                       and not ((controller_seed_controller_tailnet | bool) and (controller_seed_node_tailnet | bool)))
+            else []) }}
+  loop: "{{ groups['nodes'] | default([]) }}"
+  vars:
+    controller_seed_node_ts: >-
+      {{ hostvars[item].tailscale_ip
+         | default(hostvars[item].ansible_local.computestacks.tailscale_ip | default('')) }}
+    controller_seed_node_tailnet: >-
+      {{ ((tailscale_authkey | default('')) | length > 0)
+         and (hostvars[item].tailscale_enabled | default(true) | bool)
+         and ((controller_seed_node_ts | trim) | length > 0) }}
+
+- name: Warn when a node's acme_server is the controller's primary_ip
+  ansible.builtin.debug:
+    msg: >-
+      These nodes are not tailnet-paired with the controller, so their az's
+      `acme_server` is rendered as
+      {{ hostvars[controller_seed_controller_host].primary_ip | default('the controller primary_ip') }}:{{ cs_ports.controller_acme_backend }}
+      — {{ controller_seed_acme_primary_ip_nodes | join(', ') }}.
+      That is the address each node's haproxy proxies tenant ACME challenges
+      to. It is correct for a node that shares a network with the controller
+      and UNROUTABLE from a remote region — where the symptom is not an
+      install failure but tenant certificates that never issue. Set
+      `controller_acme_address` as a host var on any node that cannot reach
+      it, to an address that is routable from there.
+  when: (controller_seed_acme_primary_ip_nodes | length) > 0
+
 - name: Check that the tenant wildcard certificate exists
   ansible.builtin.stat:
     path: "{{ controller_seed_shared_cert_path }}"

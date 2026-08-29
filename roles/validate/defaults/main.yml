@@ -6,7 +6,7 @@
 #   validate_skip: [borg, dns]
 #
 # Check names: services, containers, agent, backfill, prometheus, borg, ssh,
-# portal, dns.
+# portal, acme_backend, dns.
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name
@@ -103,3 +103,12 @@ validate_portal_url: "https://{{ cs_portal_domain }}/"
 # The portal answers / with a redirect to the login page on a fresh install
 # and 200 once a session exists; both prove reachability.
 validate_portal_status_codes: [200, 301, 302, 303, 401, 403]
+
+# --- acme_backend ---------------------------------------------------------
+# Control-plane row #7, probed from the node on the address the manifest's
+# `regions[].acme_server` carries. ANY HTTP response proves the leg: the
+# portal answers :3000 directly, and what fails here is routing, not routing
+# to a particular page. No `status_code` list is set for that reason: `uri`
+# reports status -1 on a connection error, so the assertion is simply "a
+# status came back".
+validate_acme_timeout: 10

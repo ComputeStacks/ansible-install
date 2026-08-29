@@ -1,0 +1,62 @@
+---
+# Control-plane row #7: the node's haproxy proxies every tenant ACME
+# challenge back to the controller's portal on
+# `cs_ports.controller_acme_backend`, at the address the manifest's
+# `regions[].acme_server` carries for this az. The probe therefore runs FROM
+# the node, on that exact derived address — that is the leg that breaks, and
+# it breaks in the one way nothing else catches: a remote region with no
+# tailnet pairing gets the controller's `primary_ip`, which is routable on
+# the controller's LAN and nowhere else. Nothing surfaces until a customer's
+# certificate fails to issue, weeks later.
+#
+# Any HTTP response counts. The portal answers :3000 directly (no vhost
+# routing, no TLS), so what is being asserted is that something answered at
+# all — a connection refused, a timeout or an unroutable address is the
+# failure this check exists for.
+
+- name: Assert this node has an address for the controller ACME backend
+  ansible.builtin.assert:
+    that:
+      - (validate_acme_address | trim) | length > 0
+    fail_msg: >-
+      No controller address could be derived for
+      {{ inventory_hostname }} ({{ az | default('unknown az') }}): the
+      controller has no `primary_ip` and no tailnet address, and this node
+      sets no `controller_acme_address`. `primary_ip` is a required
+      inventory var (docs/contracts.md rule 1).
+    quiet: true
+
+- name: Probe the controller ACME backend from this node
+  ansible.builtin.uri:
+    url: "http://{{ validate_acme_server | trim }}/"
+    method: GET
+    timeout: "{{ validate_acme_timeout }}"
+  register: validate_acme_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert this node reaches the controller ACME backend
+  ansible.builtin.assert:
+    that:
+      - validate_acme_probe.status | default(0) | int > 0
+    fail_msg: >-
+      {{ inventory_hostname }} (az {{ az | default('unknown') }}) cannot
+      reach the controller's ACME backend at
+      http://{{ validate_acme_server | trim }}/ —
+      got "{{ validate_acme_probe.status | default('no response') }}
+      {{ validate_acme_probe.msg | default('') }}".
+      That address is what this az's `regions[].acme_server` carries in the
+      bootstrap manifest, so every tenant certificate issued from this region
+      will fail at the challenge. It was derived as
+      {{ 'the per-node `controller_acme_address` override'
+         if controller_acme_address is defined
+         else ('the controller tailnet address (both ends paired)'
+               if (validate_acme_address | trim) == (validate_controller_tailscale_ip | trim)
+               else 'the controller primary_ip (no tailnet pairing for this node)') }}.
+      If this region cannot route to that address, set
+      `controller_acme_address` as a host var on {{ inventory_hostname }} to
+      an address that IS routable from it (a public address of the
+      controller, or its tailnet address once the region is paired), and
+      re-run the seed so the manifest carries it.
+    quiet: true

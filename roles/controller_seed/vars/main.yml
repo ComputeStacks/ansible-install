@@ -6,6 +6,20 @@
 # document is checked against this list before it is written. Role vars, not
 # defaults: this mirrors the controller's constant and is not an operator
 # knob.
+### Pairwise tailnet state for the acme_server derivation.
+# Same expressions manifest.yml.j2 uses (membership is pure inventory; the
+# ADDRESS is the blessed facts exception, docs/contracts.md). Role vars, not
+# defaults: they mirror the template and are not operator knobs.
+controller_seed_controller_host: "{{ groups['controller'] | first }}"
+controller_seed_controller_ts: >-
+  {{ hostvars[controller_seed_controller_host].tailscale_ip
+     | default(hostvars[controller_seed_controller_host].ansible_local.computestacks.tailscale_ip
+               | default('')) }}
+controller_seed_controller_tailnet: >-
+  {{ ((tailscale_authkey | default('')) | length > 0)
+     and (hostvars[controller_seed_controller_host].tailscale_enabled | default(true) | bool)
+     and ((controller_seed_controller_ts | trim) | length > 0) }}
+
 controller_seed_schema_sections:
   - schema_version
   - settings

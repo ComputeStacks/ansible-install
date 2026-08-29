@@ -73,6 +73,13 @@ Set `controller_acme_address` as a host var on a node to override it — a
 remote region with no tailnet needs an address that is actually routable from
 there, and `primary_ip` may not be.
 
+The role **warns** (never fails) when the fallback applies, naming every node
+whose az would carry the controller's `primary_ip`: the role cannot know
+whether that address routes from a given region. `roles/validate`'s
+`acme_backend` check probes the same derived address from each node and does
+fail, so the hazard is caught at install time rather than by the first tenant
+certificate that never issues.
+
 The address value uses the blessed facts exception
 (`hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`);
 tailnet *membership* stays a pure inventory predicate.

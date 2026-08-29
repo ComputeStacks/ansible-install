@@ -27,6 +27,7 @@ this role exists to catch at install time.
 | `borg` | nodes | itself | SSH to the backup server as `cstacks` runs the remote borg, and its version matches the client's. |
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
+| `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
 | `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone`. |
 
 Each check is a task file included under its own tag, so
@@ -69,6 +70,22 @@ is what `nodes/node_metrics.rb` matches on. An empty result set is the
 failure that makes every node report 0 cpu / 0 mem and rejects every order,
 while prometheus, the exporter and the scrape all look healthy.
 
+**The ACME back-channel check recomputes the manifest's own expression.**
+Control-plane row #7 is the one leg with no other alarm on it: the node's
+haproxy proxies tenant ACME challenges to the controller's portal on
+`cs_ports.controller_acme_backend`, at whatever address
+`regions[].acme_server` carries for that az. `controller_seed` derives that
+address pairwise — the controller's tailnet address only when both ends are
+paired, otherwise its `primary_ip` — so a remote region with no tailnet gets
+an address that is routable on the controller's LAN and nowhere else. Nothing
+fails at install time; the first customer certificate fails weeks later.
+`vars/main.yml` therefore rebuilds the *same* expression (a variant would
+validate an address the manifest does not carry) and the node probes it. Any
+HTTP response counts as reachable — the portal answers `:3000` directly, and
+what is being asserted is routing. The fail message names the az, the derived
+address, how it was derived, and the `controller_acme_address` host var that
+overrides it.
+
 **`systemctl is-active`, not `service_facts`.** `cs-firewall` is a oneshot
 with `RemainAfterExit`; its sub-state is `exited`, which `service_facts`
 surfaces as not-running. `is-active` reports what the unit actually is.
@@ -105,12 +122,13 @@ the control plane rather than of how the host was built.
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
 | `validate_portal_url` / `_status_codes` | `https://{{ cs_portal_domain }}/` | |
-| `validate_ssh_timeout` / `validate_agent_timeout` | `10` | Seconds. |
+| `validate_ssh_timeout` / `validate_agent_timeout` / `validate_acme_timeout` | `10` | Seconds. |
 
 Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `az`,
 `cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`, `dns_driver`,
 `borg_version`, `borg_image`, `prometheus_basic_auth_password`,
-`existing_env`, `tailscale_authkey` / `tailscale_enabled`.
+`existing_env`, `tailscale_authkey` / `tailscale_enabled`,
+`controller_acme_address`.
 
 ## Requirements
 

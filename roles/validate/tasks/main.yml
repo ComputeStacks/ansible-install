@@ -88,6 +88,16 @@
     - "'nodes' in group_names"
   tags: [validate, portal]
 
+- name: Assert this node can reach the controller's ACME backend
+  ansible.builtin.include_tasks:
+    file: acme_backend.yml
+    apply:
+      tags: [validate, acme_backend]
+  when:
+    - "'acme_backend' not in validate_skip"
+    - "'nodes' in group_names"
+  tags: [validate, acme_backend]
+
 - name: Assert the tenant DNS zone resolves on every nameserver
   ansible.builtin.include_tasks:
     file: dns.yml
