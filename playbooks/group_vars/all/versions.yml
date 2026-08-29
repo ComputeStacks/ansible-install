@@ -12,11 +12,14 @@ controller_image_tag: "9.7"
 # controller_image_repo: "registry.example.com/computestacks/controller-enterprise"
 # controller_registry_username / controller_registry_password in secrets.yml
 
-# cs-agent — apt PACKAGE version, which is NOT the agent's self-reported
-# version (two version schemes; package 1.5.0 shipped agent 2.0.0).
-# VERIFY (wave D): read the current package version for agent v3.3.x from the
-# repo.computestacks.com index and pin it here.
-cs_agent_apt_version: "VERIFY"
+# cs-agent — apt PACKAGE version. Historically this was NOT the agent's
+# self-reported version (package 1.5.0 shipped backup-agent 2.0.0), but since
+# the node-agent rename the deb is cut straight from the git tag, so package
+# == agent version. Verified 2026-08-28 (wave D) against
+# https://repo.computestacks.com/public/dists/stable/main/binary-amd64/Packages
+# — newest listed package is 3.3.0, which is agent v3.3.0 (the pool is
+# append-only, so every older version stays installable for a rollback).
+cs_agent_apt_version: "3.3.0"
 cs_agent_apt_repo: "https://repo.computestacks.com/public"
 cs_agent_apt_key_url: "https://repo.computestacks.com/public/computestacks.gpg.asc"
 
@@ -38,8 +41,17 @@ xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
 prometheus_image: "prom/prometheus:v2.53.5"        # VERIFY
 alertmanager_image: "prom/alertmanager:v0.28.1"    # VERIFY
 loki_image: "grafana/loki:2.9.10"                  # fleet parity; controller queries Loki API v1
-fluentd_loki_image: "grafana/fluent-plugin-loki:2.9.10" # VERIFY tag exists; v1 floated `main`
-cadvisor_image: "ghcr.io/google/cadvisor:v0.54.0"  # VERIFY
+# Verified 2026-08-28 (wave D): the tag exists on Docker Hub with a linux/amd64
+# manifest. The image's tags track the Loki release line, so this stays pinned
+# EQUAL to loki_image — bump the two together, or the node ships with a plugin
+# built against a different Loki than the one receiving it. (2.9.17 is the
+# newest patch of the 2.9 line; wave E owns moving the line as a pair.)
+fluentd_loki_image: "grafana/fluent-plugin-loki:2.9.10"
+# Verified 2026-08-28 (wave D): `v0.54.0` does NOT exist upstream — that line is
+# published unprefixed (`0.54.0`) and only later releases carry the `v`. Pinned
+# to the newest release of the current line, which publishes both spellings and
+# has a linux/amd64 manifest (index sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe).
+cadvisor_image: "ghcr.io/google/cadvisor:v0.60.5"
 
 # Infra containers
 # Verified 2026-08-28 (wave B): latest 1.x release line; hashicorp/vault:1.21.4
