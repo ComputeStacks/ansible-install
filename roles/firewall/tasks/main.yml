@@ -15,7 +15,7 @@
   ansible.builtin.set_fact:
     firewall_tailnet_hosts: >-
       {{ firewall_tailnet_hosts
-         + ([item] if (hostvars[item].tailscale_authkey | default('') | length > 0)
+         + ([item] if ((hostvars[item].tailscale_authkey | default('')) | length > 0)
                       and (hostvars[item].tailscale_enabled | default(true) | bool)
             else []) }}
   loop: "{{ groups['all'] }}"

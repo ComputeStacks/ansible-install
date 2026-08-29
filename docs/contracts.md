@@ -88,9 +88,18 @@ The ONE sanctioned use of non-inventory data in cross-host templates:
 `hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`
 (both defaults mandatory). The tailscale role owns the `tailscale_ip` key in
 `/etc/ansible/facts.d/computestacks.fact` and MERGES into that file, never
-overwrites. Tailnet MEMBERSHIP remains a pure-inventory predicate
-(`tailscale_authkey` set and `tailscale_enabled | default(true)`) — only the
-address VALUE uses this exception.
+overwrites. Tailnet MEMBERSHIP remains a pure-inventory predicate — only the
+address VALUE uses this exception. The membership predicate has exactly ONE
+spelling, everywhere, in tasks and templates alike:
+
+    ((tailscale_authkey | default('')) | length > 0)
+      and (tailscale_enabled | default(true) | bool)
+
+(`hostvars[h].` in front of both terms when asking about another host). Not
+`tailscale_authkey is defined`: an authkey defined as an empty string is NOT
+tailnet membership, and a mixture of spellings makes roles disagree about the
+same host — the agent binding `:8500` on all interfaces while the firewall,
+metrics and manifest all treat the node as off-tailnet.
 
 ### Container network placement (input-chain enforceability)
 Node-side containers (cadvisor, fluentd) run with --network=host, listeners

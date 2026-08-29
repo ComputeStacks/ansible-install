@@ -71,7 +71,7 @@ this metrics host and that node are tailnet-joined**; otherwise
 metrics_scrape_address = (hostvars[node].tailscale_ip
                           | default(hostvars[node].ansible_local.computestacks.tailscale_ip
                                     | default(hostvars[node].primary_ip)))
-                          if (tailscale_authkey is defined
+                          if (((tailscale_authkey | default('')) | length > 0)
                               and (tailscale_enabled | default(true))          # this host
                               and (hostvars[node].tailscale_enabled | default(true)))  # target node
                           else hostvars[node].primary_ip

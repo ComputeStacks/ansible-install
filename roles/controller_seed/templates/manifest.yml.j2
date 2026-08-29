@@ -17,7 +17,7 @@
 --------------------------------------------------------------------------- #}
 {% set controller_host = groups['controller'] | first %}
 {% set controller_ts = hostvars[controller_host].tailscale_ip | default(hostvars[controller_host].ansible_local.computestacks.tailscale_ip | default('')) %}
-{% set controller_tailnet = (tailscale_authkey is defined) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
+{% set controller_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
 {% set include_globals = (not (existing_env | default(false) | bool)) or (controller_seed_full_manifest | bool) %}
 {% set node_regions = groups['nodes'] | map('extract', hostvars, 'region') | list | unique | sort %}
 # Rendered by ansible (roles/controller_seed) -- do not hand-edit.
@@ -93,7 +93,7 @@ locations:
 {% for host in (groups['nodes'] | sort) %}
 {% if hostvars[host].region == location %}
 {% set node_ts = hostvars[host].tailscale_ip | default(hostvars[host].ansible_local.computestacks.tailscale_ip | default('')) %}
-{% set node_tailnet = (tailscale_authkey is defined) and (hostvars[host].tailscale_enabled | default(true)) and (node_ts | length > 0) %}
+{% set node_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[host].tailscale_enabled | default(true)) and (node_ts | length > 0) %}
 {% set acme_address = hostvars[host].controller_acme_address | default(controller_ts if (controller_tailnet and node_tailnet) else hostvars[controller_host].primary_ip) %}
       - name: {{ hostvars[host].az | to_json }}
         active: true

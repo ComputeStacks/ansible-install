@@ -198,7 +198,8 @@ address it has — tailnet traffic is matched by interface. Membership is
 therefore computed from inventory alone:
 
 ```
-tailscale_authkey is set  AND  hostvars[h].tailscale_enabled | default(true)
+((hostvars[h].tailscale_authkey | default('')) | length > 0)
+  and (hostvars[h].tailscale_enabled | default(true) | bool)
 ```
 
 which mirrors `site.yml`'s gate and the `cs_agent` role's

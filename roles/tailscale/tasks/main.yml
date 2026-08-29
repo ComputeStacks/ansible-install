@@ -6,8 +6,7 @@
 - name: Assert a tailscale auth key is present
   ansible.builtin.assert:
     that:
-      - tailscale_authkey is defined
-      - tailscale_authkey | default('') | length > 0
+      - (tailscale_authkey | default('')) | length > 0
     fail_msg: >-
       The tailscale role ran without a 'tailscale_authkey'. site.yml gates this
       role on the key being set in the vaulted secrets file; set it, or set

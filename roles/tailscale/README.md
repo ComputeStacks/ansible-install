@@ -79,12 +79,16 @@ For the *membership* half of those conditions, prefer the pure-inventory
 predicate — it needs no facts and stays correct under `--limit`:
 
 ```jinja
-hostvars[h].tailscale_authkey | default('') | length > 0
-  and hostvars[h].tailscale_enabled | default(true) | bool
+((hostvars[h].tailscale_authkey | default('')) | length > 0)
+  and (hostvars[h].tailscale_enabled | default(true) | bool)
 ```
 
-That is exactly what the `firewall` role uses (it never needs an address at
-all) and what `cs_agent` uses for `cs_agent_tailnet_joined`.
+This is the canonical spelling recorded in docs/contracts.md ("Facts
+exception"), and every consumer uses it verbatim: `firewall` (which never
+needs an address at all), `cs_agent`'s `cs_agent_tailnet_joined`, `metrics`'
+scrape-address derivation, `controller_seed`'s manifest, `preflight`,
+`validate` and both playbooks' gates. Never `tailscale_authkey is defined` —
+an empty-string authkey must read as NOT tailnet everywhere.
 
 ## Variables
 

@@ -164,6 +164,6 @@
       of the tailnet. Confirm this is intentional (documented same-L2
       opt-out) before proceeding.
   when:
-    - tailscale_authkey is defined
+    - (tailscale_authkey | default('')) | length > 0
     - (preflight_tailscale_disabled_hosts | default([])) | length > 0
   run_once: true

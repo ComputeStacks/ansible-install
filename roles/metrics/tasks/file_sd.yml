@@ -65,7 +65,7 @@
       {{ (hostvars[item.1].tailscale_ip
           | default(hostvars[item.1].ansible_local.computestacks.tailscale_ip
                     | default(hostvars[item.1].primary_ip)))
-         if (tailscale_authkey is defined
+         if (((tailscale_authkey | default('')) | length > 0)
              and (tailscale_enabled | default(true))
              and (hostvars[item.1].tailscale_enabled | default(true)))
          else hostvars[item.1].primary_ip }}

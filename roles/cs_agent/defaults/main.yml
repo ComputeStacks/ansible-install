@@ -32,7 +32,9 @@ cs_agent_backup_keyfile: "{{ cs_agent_backup_ssh_dir }}/id_ed25519"
 # NEVER the tailscale address itself — containers reach the agent through
 # metadata.internal, which resolves to primary_ip. Mirrors site.yml's own
 # tailscale condition.
-cs_agent_tailnet_joined: "{{ (tailscale_authkey is defined) and (tailscale_enabled | default(true) | bool) }}"
+cs_agent_tailnet_joined: >-
+  {{ ((tailscale_authkey | default('')) | length > 0)
+     and (tailscale_enabled | default(true) | bool) }}
 cs_agent_listen_addr: >-
   {{ (':' ~ cs_ports.agent_http) if (cs_agent_tailnet_joined | bool)
      else (primary_ip ~ ':' ~ cs_ports.agent_http) }}
