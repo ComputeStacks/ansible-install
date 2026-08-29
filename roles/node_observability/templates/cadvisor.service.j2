@@ -10,6 +10,12 @@ DefaultDependencies=no
 Type=simple
 # The image tag is baked into this unit on purpose: bumping cadvisor_image in
 # versions.yml re-renders the unit, which is what restarts the container.
+#
+# Host network, no --publish: a published port is DNAT'd in PREROUTING and then
+# traverses FORWARD, where the firewall role's input chain never sees it (and
+# contracts.md rule 7 forbids a forward chain). On the host network the
+# listener terminates on the host, so the firewall's `cadvisor from metrics
+# addresses` accept is real enforcement rather than documented intent.
 ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_cadvisor_container }} 2>/dev/null'
 ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ node_observability_cadvisor_container }} 2>/dev/null'
 ExecStart=/usr/bin/env docker run --rm --name {{ node_observability_cadvisor_container }} \
@@ -25,6 +31,7 @@ ExecStart=/usr/bin/env docker run --rm --name {{ node_observability_cadvisor_con
       -v /etc/machine-id:/etc/machine-id:ro \
       --device=/dev/kmsg \
       {{ cadvisor_image }} \
+      -listen_ip={{ node_observability_cadvisor_listen_ip }} \
       -port={{ cs_ports.cadvisor }}
 
 ExecStop=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_cadvisor_container }} 2>/dev/null'

@@ -28,6 +28,45 @@ buffered log lines each run.
 it, and the whole fleet restarts at once, so a crash loop must back off rather
 than hammer docker.
 
+## Host network and bind addresses (firewall-enforceable)
+
+Both containers run with `--network=host` and **no `-p`/`--publish` flags**.
+This is not cosmetic: a published container port is DNAT'd by docker in `nat`
+PREROUTING and then traverses **forward**, which the `firewall` role's input
+chain never sees — and contracts.md rule 7 forbids a forward-hook drop chain
+(it would black-hole every published tenant port). A listener on the host
+network terminates on the host, so the firewall's matrix entry for
+`cs_ports.cadvisor` really is enforcement instead of documented intent. It also
+matches how the existing fleet runs these containers.
+
+Binds:
+
+| Listener | Bind | Why |
+|---|---|---|
+| cadvisor | `0.0.0.0` (`node_observability_cadvisor_listen_ip`) | See below. |
+| fluentd forward | `127.0.0.1` (`node_observability_fluentd_forward_bind`) | Only docker's log driver on this same host dials it; the bind, not a firewall rule, is what keeps it off-box. |
+
+**Why cadvisor binds all interfaces rather than `primary_ip`.** The pairwise
+address rule in docs/contracts.md makes the scrape address a property of the
+*metrics host*, not of the node: prometheus dials a node's **tailscale**
+address whenever the metrics host is itself tailnet-joined, and its `primary_ip`
+otherwise. A cross-region node reached over the tailnet therefore receives a
+connection addressed to its tailnet IP, and a socket bound to `primary_ip`
+would refuse it — every cross-region node would report no container metrics
+while looking healthy. Binding `primary_ip` would only be safe if the scrape
+address were always `primary_ip`, which the contract explicitly says it is not.
+Since moving to the host network is what made the port filterable in the first
+place, the access control belongs in the firewall's input chain (accept 8080
+from metrics addresses) rather than in the bind, and the bind stays permissive
+so both scrape paths work. Set `node_observability_cadvisor_listen_ip` to
+`{{ primary_ip }}` in an environment that never uses tailscale.
+
+**Cross-wave note for the firewall role:** with the tailnet scrape path in use,
+the node's accept for `cs_ports.cadvisor` (and `cs_ports.haproxy_stats`) needs
+the same treatment as the 8500 rule — an `iifname "tailscale0"` accept when the
+metrics host is tailnet-joined. An accept keyed only on the metrics host's
+`primary_ip`/`public_ip` drops a scrape that arrives over `tailscale0`.
+
 ## Loki endpoint
 
 `https://<metrics host>:{{ cs_ports.metrics_loki }}`, with basic auth
@@ -60,6 +99,8 @@ variable, so the tag and the name cannot drift apart.
 |---|---|---|
 | `node_observability_cadvisor_container` | `cadvisor` | Container name (contract — see above). |
 | `node_observability_fluentd_container` | `fluentd` | Container name (contract). |
+| `node_observability_cadvisor_listen_ip` | `0.0.0.0` | cadvisor bind address (see above). |
+| `node_observability_fluentd_forward_bind` | `127.0.0.1` | fluentd forward bind — loopback only. |
 | `node_observability_fluentd_forward_port` | `9432` | fluentd forward source. Node-local (docker's log driver dials it on this host), so deliberately **not** in `cs_ports`. |
 | `node_observability_fluentd_restart_sec` | `30` | systemd backoff. |
 | `node_observability_loki_username` | `loguser` | Basic-auth user on the loki vhost. |
@@ -71,6 +112,7 @@ Consumed, not owned: `cadvisor_image`, `fluentd_loki_image`, `borg_image`,
 `cs_ports.cadvisor`, `cs_ports.metrics_loki`, `cs_metrics_domain`,
 `loki_basic_auth_password`.
 
-The cadvisor container is passed `-port={{ cs_ports.cadvisor }}` so the port the
-metrics host scrapes comes from the ports contract rather than from cadvisor's
-compiled-in default (v1 relied on the default matching).
+The cadvisor container is passed `-listen_ip` and `-port={{ cs_ports.cadvisor }}`
+so the address and port the metrics host scrapes come from the role variable and
+the ports contract rather than from cadvisor's compiled-in defaults (v1 relied on
+the defaults matching).

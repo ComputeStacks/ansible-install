@@ -1,10 +1,14 @@
 # {{ ansible_managed }}
-# fluentd -> loki. Ported from v1 roles/fluentd/files/fluent.conf; the only
-# change is that the forward port comes from the role variable.
+# fluentd -> loki. Ported from v1 roles/fluentd/files/fluent.conf; the forward
+# listener's bind address and port now come from role variables.
 <source>
   @type  forward
   @id    input1
   @label @mainstream
+  # Loopback only: docker's fluentd log driver dials this from the same host.
+  # Nothing off-box may reach it, and on the host network that is enforced by
+  # the bind rather than by a firewall rule the input chain could not apply.
+  bind   {{ node_observability_fluentd_forward_bind }}
   port   {{ node_observability_fluentd_forward_port }}
 </source>
 

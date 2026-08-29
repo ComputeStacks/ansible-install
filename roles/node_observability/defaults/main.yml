@@ -9,6 +9,12 @@ node_observability_fluentd_container: fluentd
 # --- cadvisor --------------------------------------------------------------
 # cadvisor_image is pinned in playbooks/group_vars/all/versions.yml.
 node_observability_cadvisor_restart_sec: 30
+# Runs on the HOST network (no --publish), so the firewall's input chain
+# actually filters the port. All interfaces on purpose: under the pairwise
+# scrape rule the metrics host dials a node's TAILSCALE address whenever the
+# metrics host is itself tailnet-joined, and a listener bound to primary_ip
+# would refuse that connection. See README.md.
+node_observability_cadvisor_listen_ip: "0.0.0.0"
 
 # --- fluentd (loki output plugin) ------------------------------------------
 # fluentd_loki_image is pinned in playbooks/group_vars/all/versions.yml.
@@ -18,7 +24,10 @@ node_observability_fluentd_config: "{{ node_observability_fluentd_config_dir }}/
 # not world-readable in /etc/systemd/system.
 node_observability_fluentd_env_file: "{{ node_observability_fluentd_config_dir }}/loki.env"
 # Node-local only: docker's fluentd log driver dials it on the loopback from
-# this same host, so it is not part of the cs_ports cross-host contract.
+# this same host, so it is not part of the cs_ports cross-host contract. The
+# container runs on the HOST network, so this bind is what keeps the listener
+# off-box — nothing in the firewall needs to (or could) close it.
+node_observability_fluentd_forward_bind: "127.0.0.1"
 node_observability_fluentd_forward_port: 9432
 # The fleet is one restart loop away from losing every tenant log line, so the
 # unit backs off rather than hammering docker.

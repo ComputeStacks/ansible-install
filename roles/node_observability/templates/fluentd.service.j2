@@ -12,6 +12,13 @@ Type=simple
 # in versions.yml re-renders the unit, which is what restarts the container.
 # Loki credentials come from an --env-file so they never appear in this
 # world-readable unit.
+#
+# Host network, no --publish. The docker daemon dials the forward listener from
+# this same host, and fluent.conf binds it to
+# {{ node_observability_fluentd_forward_bind }}:{{ node_observability_fluentd_forward_port }},
+# so it is not reachable off-box and needs no firewall rule at all. A published
+# port would instead be DNAT'd and traverse FORWARD, where the input-chain
+# firewall cannot filter it.
 ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker kill {{ node_observability_fluentd_container }} 2>/dev/null'
 ExecStartPre=-/usr/bin/env sh -c '/usr/bin/env docker rm {{ node_observability_fluentd_container }} 2>/dev/null'
 ExecStart=/usr/bin/env docker run --rm --name {{ node_observability_fluentd_container }} \
