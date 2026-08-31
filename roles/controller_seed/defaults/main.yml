@@ -27,6 +27,18 @@ controller_seed_remove_manifest: true
 # printed.
 controller_seed_full_manifest: false
 
+# Deliberate topology changes ONLY (e.g. rolling tailscale onto an existing
+# region, re-homing the pdns host). When true, the apply runs with
+# UPDATE_ADDRESSES=1: region.acme_server, node.agent_host (including CLEARING
+# it when the pairwise derivation omits it) and the DNS driver endpoint are
+# UPDATED on existing rows to the manifest's derived values, reported as
+# [readdress] lines. Address derivation depends on complete inventory + fact
+# data -- pass this flag only on a FULL run (no --limit) or with a warm fact
+# cache, and only when the new path (tailnet etc.) is already up: the
+# controller starts dialing the new address on its next agent call. A run
+# with this flag always DRY_RUN-previews and pauses first, greenfield or not.
+controller_seed_update_addresses: false
+
 # Attach mode always previews with DRY_RUN=1 first and then waits for the
 # operator to confirm. Set controller_seed_confirm: false for CI (the pause
 # module needs a tty).

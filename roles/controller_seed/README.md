@@ -187,7 +187,8 @@ needs a tty); `controller_seed_dry_run_first: false` skips the preview.
 | `controller_seed_manifest_path` | `/var/lib/computestacks/manifest.yml` | root 0600; deleted after a successful apply. |
 | `controller_seed_remove_manifest` | `true` | Set false to keep the rendered document (it carries secrets). |
 | `controller_seed_full_manifest` | `false` | Attach mode: render the global sections too. |
-| `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Attach-mode preview and prompt. |
+| `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Preview and prompt — fire in attach mode, and on ANY run with the address flag below. |
+| `controller_seed_update_addresses` | `false` | **Deliberate topology changes only.** Runs the apply with `UPDATE_ADDRESSES=1`: `region.acme_server`, `node.agent_host` (incl. clearing) and the DNS driver endpoint are updated on existing rows, reported as `[readdress]` lines. Full run or warm fact cache only; the new path must already be up — the controller dials the new address on its next call. |
 | `controller_seed_registry_node` | first registry host's `primary_ip` | `Setting.registry_node`. Empty ⇒ the registry settings are omitted. |
 | `controller_seed_cr_le` | `{{ cs_registry_domain }}` | `Setting.cr_le`. |
 | `controller_seed_settings_extra` | `{}` | Extra `Setting` rows (`company_name`, `app_name`, `general_support`, `acme_email`, …). **Seed-only** — written only while nobody has configured that setting yet, and an unknown name aborts the apply. |

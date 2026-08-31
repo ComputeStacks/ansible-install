@@ -258,6 +258,9 @@
       diff: false
       no_log: true
 
+    # The preview gates two deliberate-operation paths: any apply against an
+    # existing environment, and any run with the address-update flag on (an
+    # address rewrite is a topology change and deserves eyes even greenfield).
     - name: Preview the apply against the existing controller (DRY_RUN)
       ansible.builtin.command:
         argv:
@@ -266,10 +269,11 @@
           - "{{ controller_seed_manifest_path }}"
       environment:
         DRY_RUN: "1"
+        UPDATE_ADDRESSES: "{{ '1' if controller_seed_update_addresses | bool else '0' }}"
       register: controller_seed_dry_run
       changed_when: false
       when:
-        - existing_env | default(false) | bool
+        - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
         - controller_seed_dry_run_first | bool
 
     - name: Show what the apply would change
@@ -284,7 +288,7 @@
           controller, or Ctrl-C then A to abort. (Set
           controller_seed_confirm: false to skip this prompt in CI.)
       when:
-        - existing_env | default(false) | bool
+        - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
         - controller_seed_confirm | bool
 
     - name: Apply the manifest
@@ -293,6 +297,8 @@
           - "{{ controller_seed_cstacks_bin }}"
           - seed
           - "{{ controller_seed_manifest_path }}"
+      environment:
+        UPDATE_ADDRESSES: "{{ '1' if controller_seed_update_addresses | bool else '0' }}"
       register: controller_seed_apply
       changed_when: "'0 created, 0 seeded, 0 rotated, 0 linked were applied' not in controller_seed_apply.stdout"
 
