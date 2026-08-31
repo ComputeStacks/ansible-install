@@ -270,6 +270,9 @@ docs/
   existing v1 environment.
 * [`docs/acme-providers.md`](docs/acme-providers.md) — ACME challenge methods
   and the DNS-01 provider matrix.
+* [`docs/automation.md`](docs/automation.md) — driving these playbooks from
+  terraform/CI: the inventory contract, the non-interactive knobs, the ACME
+  staging CA.
 * [`docs/control-plane.md`](docs/control-plane.md) — who dials whom, on what
   address, with what credential. The 19-row graph `ports.yml`, the firewall
   rules and the play order are all derived from.

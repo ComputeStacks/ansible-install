@@ -5,8 +5,22 @@ registry hosts with [acme.sh](https://github.com/acmesh-official/acme.sh),
 pinned to the release tag in `playbooks/group_vars/all/versions.yml`
 (`acme_sh_version`) and with acme.sh's own self-upgrade disabled.
 
-**Default CA is ZeroSSL.** Set `use_zerossl: false` in the inventory for
-Let's Encrypt.
+**Default CA is ZeroSSL.** `acme_ca` in the inventory selects another:
+anything acme.sh's `--server` accepts — `letsencrypt`, `letsencrypt_test`,
+`google`, `googletest`, `buypass`, `sslcom`, or a full ACME directory URL.
+
+**Staging.** `acme_ca: letsencrypt_test` is the right CA for automated and
+throwaway environments: production Let's Encrypt allows only 5 duplicate
+certificates per week per name set, which a redeploy loop exhausts in a day,
+while the staging endpoint's limits are not meaningfully hittable. Its chain
+is untrusted by design; `roles/validate` detects the `*test` CAs and skips
+TLS verification in its checks automatically.
+
+**External Account Binding.** A CA that hands out account credentials out of
+band takes them as `acme_eab_kid` plus `acme_eab_hmac_key` (put the key in the
+vaulted `secrets.yml`). Google Trust Services requires EAB; ZeroSSL accepts it
+as the alternative to email registration. Set both or neither — the role
+asserts the pairing.
 
 **Default challenge is HTTP-01** over the webroot `/var/www/acme-sh`, served
 by nginx on port 80. To use DNS-01 instead, set `acme_challenge_method` and

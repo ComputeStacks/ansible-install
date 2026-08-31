@@ -77,6 +77,15 @@
       - "0"
   changed_when: false
 
+- name: Assert the EAB credentials come as a pair
+  ansible.builtin.assert:
+    that:
+      - (acme_web_eab_kid | length > 0) == (acme_web_eab_hmac_key | length > 0)
+    fail_msg: >-
+      acme_eab_kid and acme_eab_hmac_key must be set together — External
+      Account Binding is a keyed pair, and acme.sh rejects half of one.
+    success_msg: EAB credentials are consistent
+
 - name: Select the default certificate authority
   ansible.builtin.command:
     argv:
@@ -85,14 +94,20 @@
       - "{{ acme_web_config_home }}"
       - --set-default-ca
       - --server
-      - "{{ 'zerossl' if acme_web_use_zerossl | bool else 'letsencrypt' }}"
+      - "{{ acme_web_ca }}"
   changed_when: false
 
+# no_log only when EAB is in play: the HMAC key rides in the argv. Without
+# EAB the output stays visible, because "why did registration fail" is the
+# question this task usually answers.
 - name: Register the ACME account
   ansible.builtin.command:
     argv: >-
       {{ [acme_web_executable, '--config-home', acme_web_config_home,
-          '--register-account', '-m', acme_web_account_email]
-         + (['--server', 'zerossl'] if acme_web_use_zerossl | bool else []) }}
+          '--register-account', '--server', acme_web_ca,
+          '-m', acme_web_account_email]
+         + (['--eab-kid', acme_web_eab_kid, '--eab-hmac-key', acme_web_eab_hmac_key]
+            if acme_web_eab_kid | length > 0 else []) }}
   register: acme_web_register
   changed_when: "'Already registered' not in acme_web_register.stdout"
+  no_log: "{{ acme_web_eab_kid | length > 0 }}"

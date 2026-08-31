@@ -10,9 +10,12 @@
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name
-# (the prometheus query and the portal reachability probe). Set false while
-# the portal is still on a self-signed certificate.
-validate_tls_verify: true
+# (the prometheus query and the portal reachability probe). Defaults off when
+# the environment's CA is an ACME staging endpoint — acme.sh names them all
+# with a `test` suffix (`letsencrypt_test`, `buypass_test`, `googletest`) —
+# whose chain is untrusted by design; set false yourself while the portal is
+# on some other self-signed certificate.
+validate_tls_verify: "{{ not (acme_ca | default('zerossl')) is match('.*test$') }}"
 
 # --- services -------------------------------------------------------------
 # `systemctl is-active` per unit rather than service_facts: a oneshot

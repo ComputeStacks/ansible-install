@@ -22,17 +22,30 @@ acme_web_repo: https://github.com/acmesh-official/acme.sh.git
 # port 80 for every vhost.
 acme_web_webroot: /var/www/acme-sh
 
-# ZeroSSL is the default CA (v1 parity). Set `use_zerossl: false` in the
-# inventory for Let's Encrypt.
+# The certificate authority: anything acme.sh's `--server` accepts — a short
+# name (`zerossl`, `letsencrypt`, `letsencrypt_test`, `google`, `googletest`,
+# `buypass`, `sslcom`) or a full ACME directory URL. ZeroSSL is the default
+# (v1 parity). `letsencrypt_test` is the staging CA for automated/throwaway
+# environments: its chain is untrusted by design and its rate limits are not
+# meaningfully hittable — roles/validate defaults `validate_tls_verify` off
+# for the `*_test` CAs so the post-install checks still pass.
 #
 # NOTE on naming: every variable an OPERATOR sets lives in the inventory under
-# its short, documented name (`use_zerossl`, `acme_challenge_method`,
+# its short, documented name (`acme_ca`, `acme_challenge_method`,
 # `acme_cf_token`, ... — see docs/acme-providers.md). The role reads each one
 # through a prefixed role variable, which is what keeps the operator-facing
 # vocabulary stable across the v1 -> v2 rewrite while still satisfying the
 # role-prefix rule.
-acme_web_use_zerossl: "{{ use_zerossl | default(true) }}"
+acme_web_ca: "{{ acme_ca | default('zerossl') }}"
 acme_web_account_email: "{{ acme_account_email | default(cs_admin_email | default('')) }}"
+
+# External Account Binding, for a CA that hands out account credentials out of
+# band: Google Trust Services always requires it; ZeroSSL accepts it as the
+# alternative to registering by email (binding an existing ZeroSSL account
+# instead of auto-creating one). Set both or neither — the role asserts the
+# pairing. The HMAC key is a secret: vault it.
+acme_web_eab_kid: "{{ acme_eab_kid | default('') }}"
+acme_web_eab_hmac_key: "{{ acme_eab_hmac_key | default('') }}"
 
 # HTTP-01 by default. Any other value selects a DNS-01 provider — see
 # docs/acme-providers.md for the per-provider credential variables.

@@ -15,8 +15,12 @@ currency: USD
 dns_driver: powerdns
 
 # ACME (portal/registry/metrics certs)
-use_zerossl: true
+# acme_ca: zerossl | letsencrypt | letsencrypt_test (staging, for throwaway
+# environments) | google | ... | a full directory URL. Default zerossl.
+acme_ca: zerossl
 acme_account_email: admin@example.com
+# acme_eab_kid: ""            # External Account Binding — required by Google
+# acme_eab_hmac_key: in secrets.yml  # Trust Services; optional for ZeroSSL.
 # acme_dns_provider: <see docs/acme-providers.md>; default HTTP-01 webroot
 
 # Tailscale: enabled globally when tailscale_authkey is set in secrets.yml.

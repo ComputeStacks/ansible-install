@@ -131,7 +131,8 @@ certificate directory before copying into it.
 | --- | --- | --- |
 | `nginx_image` | `nginx:1.30.4` | `versions.yml`; asserted to be an exact pin. |
 | `acme_sh_version` | `3.1.4` | `versions.yml`; cloned verbatim as a git tag (the 3.x line has **no** leading `v`). |
-| `use_zerossl` | `true` | Inventory name. ZeroSSL is the default CA; `false` selects Let's Encrypt. |
+| `acme_ca` | `zerossl` | Inventory name. Anything acme.sh's `--server` takes: `letsencrypt`, `letsencrypt_test` (staging — untrusted chain, no meaningful rate limits; `roles/validate` relaxes TLS verification for the `*test` CAs automatically), `google`, a directory URL, … |
+| `acme_eab_kid` / `acme_eab_hmac_key` | unset | Inventory names. External Account Binding, for CAs that hand out account credentials out of band (Google Trust Services requires it; ZeroSSL accepts it instead of email registration). Both or neither; the HMAC key belongs in the vaulted `secrets.yml`. |
 | `acme_account_email` | `{{ cs_admin_email }}` | Inventory name. |
 | `acme_challenge_method` | `http` | Inventory name. See `docs/acme-providers.md`. |
 | `acme_web_domains` | derived from `group_names` | `cs_portal_domain` / `cs_metrics_domain` / `cs_registry_domain`. A host in several groups gets one certificate covering every name. |
