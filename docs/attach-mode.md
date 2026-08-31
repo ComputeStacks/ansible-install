@@ -137,11 +137,16 @@ network and load balancer, plus the user-group region link without which the
 new region is invisible to every existing user. It carries no settings, no DNS
 driver, no products and no admin user, so nothing global is touched.
 `controller_seed_full_manifest: true` renders the whole greenfield document
-against the live controller instead. Nothing in it is an overwrite there —
-settings are seeded only while still unconfigured, the DNS driver is never
-reconfigured once it exists, and a difference from the manifest surfaces as a
-drift warning rather than being applied — so do it deliberately, if only for
-the fuller drift report, or not at all.
+against the live controller instead. Almost nothing in it is an overwrite
+there — settings are seeded only while still unconfigured, the DNS driver is
+never reconfigured once it exists, and a difference from the manifest surfaces
+as a drift warning rather than being applied. The exception is paired
+credentials (metric/log client basic-auth, DNS `api_key`/`api_secret`, the LB
+shared certificate and stats password): those converge to the manifest's
+values, reported as `[rotate]` lines — which is why the secrets in your vault
+MUST be the existing environment's values, not fresh ones. The DRY_RUN gate
+previews any rotations before they land. Do it deliberately, if only for the
+fuller drift report, or not at all.
 
 The regions still reference the existing metric and log clients **by exact
 endpoint string**, and a miss aborts the apply rather than creating a second

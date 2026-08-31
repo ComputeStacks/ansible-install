@@ -35,7 +35,10 @@ template that drifted from the controller's models across releases.
    the client credentials, the stats password and the load balancer's private
    key).
 5. Attach mode only: runs `DRY_RUN=1 cstacks seed`, prints what it would
-   create plus any drift warnings, and `pause`s for the operator.
+   create, any drift warnings, and any `[rotate]` lines (paired credentials —
+   client basic-auth, DNS API keys, LB shared certificate/stats password — are
+   the ONE class the apply converges on existing rows; everything else is
+   create-if-absent), and `pause`s for the operator.
 6. Runs `cstacks seed`, prints the change log, and **deletes the manifest**.
    A failed apply keeps the file on purpose and says so — the apply is one
    transaction, so nothing was written to the database and the rendered

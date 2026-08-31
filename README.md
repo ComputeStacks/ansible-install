@@ -19,8 +19,12 @@ done. Everything externally sourced is pinned in
 next run. The controller's own database is the one exception: the bootstrap
 manifest only creates rows that are missing, so an existing region, node,
 load balancer or setting is never rewritten by a rerun, and a manifest that
-disagrees with the database is reported as drift, not applied — see
-[`roles/controller_seed/README.md`](roles/controller_seed/README.md).
+disagrees with the database is reported as drift, not applied. The one carve-out
+is paired credentials the provisioner owns on both ends (metric/log client
+basic-auth, DNS API keys, the load balancer's shared certificate and stats
+password): rotating those in the vault DOES converge the controller's copy on
+the next run, because the server side of each pair converges from the same
+variables. See [`roles/controller_seed/README.md`](roles/controller_seed/README.md).
 
 Start with [`docs/install.md`](docs/install.md) for a step-by-step greenfield
 install. This file is the reference.
