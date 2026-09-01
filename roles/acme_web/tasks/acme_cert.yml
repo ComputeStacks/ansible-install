@@ -32,14 +32,23 @@
   register: acme_web_cert_info
   when: acme_web_cert_stat.stat.exists
 
+# Both sides normalized to lowercase without a trailing dot -- CAs normalize
+# SANs that way, and comparing the raw inventory string against them would
+# turn a cased domain var into a re-issue on every converge. Only DNS: SANs
+# are compared; these certificates never carry other SAN types.
 - name: Decide whether to issue
   ansible.builtin.set_fact:
     acme_web_need_issue: >-
       {{ not acme_web_cert_stat.stat.exists
          or acme_web_force_issue | bool
          or ((acme_web_cert_info.subject_alt_name | default([])
-              | map('regex_replace', '^DNS:', '') | list)
-             | symmetric_difference(acme_web_domains) | length > 0) }}
+              | select('match', '^DNS:')
+              | map('regex_replace', '^DNS:', '')
+              | map('lower') | map('regex_replace', '\.$', '') | list)
+             | symmetric_difference(acme_web_domains
+                                    | map('lower')
+                                    | map('regex_replace', '\.$', '') | list)
+             | length > 0) }}
 
 - name: Report a SAN mismatch
   ansible.builtin.debug:
@@ -108,18 +117,19 @@
           docs/acme-providers.md.
       when: acme_web_challenge_method != 'http'
 
-    # --force whenever a certificate already exists: we only get here on SAN
-    # drift or an explicit force_issue, and acme.sh's own "not due yet" skip
-    # must not veto either.
+    # --force unconditionally: ansible already decided issuance must happen
+    # (no cert installed, SAN drift, or force_issue), and acme.sh's own "not
+    # due yet" skip must never veto that decision. Without it there is a
+    # wedge: --issue succeeds, --install-cert fails, and the re-run is
+    # skipped by acme.sh's renewal window with nothing installed for nginx.
     - name: Request the certificate (HTTP-01 webroot)
       ansible.builtin.command:
         argv: >-
           {{ [acme_web_executable, '--home', acme_web_current_link,
-              '--config-home', acme_web_config_home, '--issue',
+              '--config-home', acme_web_config_home, '--issue', '--force',
               '--keylength', acme_web_keylength]
              + acme_web_domain_args
-             + ['-w', acme_web_webroot]
-             + (['--force'] if acme_web_cert_stat.stat.exists else []) }}
+             + ['-w', acme_web_webroot] }}
       register: acme_web_issue_http
       changed_when: acme_web_issue_http.rc == 0
       when: acme_web_challenge_method == 'http'
@@ -128,14 +138,13 @@
       ansible.builtin.command:
         argv: >-
           {{ [acme_web_executable, '--home', acme_web_current_link,
-              '--config-home', acme_web_config_home, '--issue',
+              '--config-home', acme_web_config_home, '--issue', '--force',
               '--keylength', acme_web_keylength]
              + acme_web_domain_args
              + ['--dns', acme_web_dns_providers[acme_web_challenge_method].plugin]
              + (acme_web_dns_providers[acme_web_challenge_method].extra_args | default([]))
              + (['--challenge-alias', acme_web_challenge_alias]
-                if acme_web_challenge_alias | length > 0 else [])
-             + (['--force'] if acme_web_cert_stat.stat.exists else []) }}
+                if acme_web_challenge_alias | length > 0 else []) }}
       environment: "{{ acme_web_dns_providers[acme_web_challenge_method].env }}"
       register: acme_web_issue_dns
       changed_when: acme_web_issue_dns.rc == 0

@@ -87,7 +87,13 @@
       Account Binding is a keyed pair, and acme.sh rejects half of one.
     success_msg: EAB credentials are consistent
 
-- name: Select the default certificate authority
+# `--auto-upgrade 0` is a persisted setting, not a command: acme.sh saves it
+# to account.conf, and every later invocation re-saves it in acme.sh's own
+# quoting, so ansible never fights the file (a lineinfile here flapped
+# `changed` forever). It matters because the renewal timer runs `--cron`,
+# which WOULD replace the install with git master if AUTO_UPGRADE were ever
+# "1". This task is local-only -- --set-default-ca touches no network.
+- name: Select the default certificate authority and pin the self-upgrade off
   ansible.builtin.command:
     argv:
       - "{{ acme_web_executable }}"
@@ -98,19 +104,35 @@
       - --set-default-ca
       - --server
       - "{{ acme_web_ca }}"
+      - --auto-upgrade
+      - "0"
   changed_when: false
 
-# Belt and braces: nothing enables acme.sh's self-upgrade (the upstream
-# installer, which defaults it on for curl-pipe installs, never runs and the
-# fresh account.conf carries it only as a comment), but the renewal timer
-# runs `--cron`, which WOULD replace the install with git master if this were
-# ever "1". Pin it. account.conf exists by now -- --set-default-ca above
-# created it.
-- name: Pin the acme.sh self-upgrade off
-  ansible.builtin.lineinfile:
-    path: "{{ acme_web_config_home }}/account.conf"
-    regexp: '^#?AUTO_UPGRADE='
-    line: AUTO_UPGRADE="0"
+# Registration is gated on a stamp of (CA, email, EAB kid): acme.sh's
+# --register-account is NOT a local no-op when already registered -- it
+# fetches the CA directory and POSTs a signed newAccount request every time,
+# so ungated it made every converge depend on the CA being reachable. The
+# stamp is written only after a successful registration, so a failed one
+# retries on the next run; changing the CA, the email or the EAB credentials
+# re-registers.
+- name: Read the account registration stamp
+  ansible.builtin.stat:
+    path: "{{ acme_web_config_home }}/.account-registered"
+  register: acme_web_reg_stamp
+
+- name: Compare the stamp to the configured account
+  ansible.builtin.slurp:
+    src: "{{ acme_web_config_home }}/.account-registered"
+  register: acme_web_reg_stamp_content
+  when: acme_web_reg_stamp.stat.exists
+
+- name: Decide whether to register
+  ansible.builtin.set_fact:
+    acme_web_reg_desired: "{{ acme_web_ca }} {{ acme_web_account_email }} {{ acme_web_eab_kid }}"
+    acme_web_need_register: >-
+      {{ not acme_web_reg_stamp.stat.exists
+         or (acme_web_reg_stamp_content.content | b64decode | trim)
+            != (acme_web_ca ~ ' ' ~ acme_web_account_email ~ ' ' ~ acme_web_eab_kid) | trim }}
 
 # no_log only when EAB is in play: the HMAC key rides in the argv. Without
 # EAB the output stays visible, because "why did registration fail" is the
@@ -125,5 +147,15 @@
          + (['--eab-kid', acme_web_eab_kid, '--eab-hmac-key', acme_web_eab_hmac_key]
             if acme_web_eab_kid | length > 0 else []) }}
   register: acme_web_register
-  changed_when: "'Already registered' not in acme_web_register.stdout"
+  changed_when: true
   no_log: "{{ acme_web_eab_kid | length > 0 }}"
+  when: acme_web_need_register | bool
+
+- name: Write the account registration stamp
+  ansible.builtin.copy:
+    content: "{{ acme_web_reg_desired }}\n"
+    dest: "{{ acme_web_config_home }}/.account-registered"
+    owner: root
+    group: root
+    mode: "0600"
+  when: acme_web_need_register | bool

@@ -130,7 +130,8 @@ postgresql_version: 17
 # commit; any other change is a fetch failure, which is the intent.
 pgdg_key_url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
 pgdg_key_checksum: "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76"
-# acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED.
+# acme.sh: pinned release, installed from the checksummed tarball below,
+# self-upgrade pinned off.
 # Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release
 # (acmesh-official/acme.sh releases/latest). Note the tag carries NO leading
 # 'v' on the 3.x line, unlike the old v2.x tags -- the role downloads the

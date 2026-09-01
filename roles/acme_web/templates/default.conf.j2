@@ -7,7 +7,15 @@ server {
   include /etc/nginx/common/acme.conf;
   include /etc/nginx/common/error_pages.conf;
 
-  return 301 https://$host$request_uri;
+  # Inside a location, NOT at server level: a server-level `return` runs in
+  # the server-rewrite phase, before location matching, which would 301 the
+  # HTTP-01 challenge to :443 as well. Renewals and SAN-drift re-issues
+  # against the RUNNING nginx depend on the challenge answering on :80 --
+  # some CAs refuse a redirect that lands on a certificate not covering the
+  # name (the acme.conf regex location outranks this prefix location).
+  location / {
+    return 301 https://$host$request_uri;
+  }
 }
 
 server {

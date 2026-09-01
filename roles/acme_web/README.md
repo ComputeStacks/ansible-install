@@ -44,7 +44,7 @@ join the `ops` docker network.
 3. Installs `nginx.conf`, the error pages, the dhparam group and the ACME
    challenge snippet.
 4. Pulls the image and renders the systemd unit.
-5. `tasks/acme_install.yml` — acme.sh at the pinned tag.
+5. `tasks/acme_install.yml` — acme.sh from the pinned, checksummed tarball.
 6. `tasks/acme_cert.yml` — issue, install, arm the renewal timer.
 7. `tasks/vhosts.yml` — the real vhosts and the htpasswd files.
 8. Ensures the service is enabled and running.
@@ -87,8 +87,10 @@ certificate exists, `vhosts.yml` overwrites that file with the real
 `default.conf`.
 
 Issuance converges on the **SAN set**: the installed certificate's names are
-read (on the control machine — the fleet carries no python crypto libraries)
-and compared to `acme_web_domains`, so a host that joins or leaves the
+read with `community.crypto.x509_certificate_info`, executed on the ansible
+control machine (`delegate_to: localhost`, needs `cryptography` there — the
+fleet carries no python crypto libraries), normalized to lowercase, and
+compared to `acme_web_domains`, so a host that joins or leaves the
 metrics/registry groups, or a changed domain var, re-issues on the next run —
 against the *running* nginx, whose every vhost serves the challenge path, so
 the bootstrap vhost is not involved. Certificate **expiry** is deliberately
@@ -188,8 +190,12 @@ Consumed, not owned: `cs_ports.*`, `cs_portal_domain`, `cs_metrics_domain`,
 * `listen … http2` (deprecated since nginx 1.25.1) is replaced by the
   `http2 on;` directive.
 * v1's `grafana.conf` vhost is not ported — no grafana is deployed.
-* Certificate issuance no longer passes `--force`, which re-issued a
-  perfectly good certificate every time the task ran.
+* v1 passed `--force` on an ungated issuance task, re-issuing a perfectly
+  good certificate every time it ran. Now the *gate* lives in ansible (SAN
+  convergence, above) and `--force` is passed only once that gate has decided
+  issuance must happen — acme.sh's "not due yet" skip must not veto it, and
+  without it a failed `--install-cert` after a successful `--issue` wedges
+  behind acme.sh's renewal window.
 * v1's `enable_cloudflare_real_ip` cron hook is gone; `ProxyIpList` in the
   controller owns the CDN address lists now.
 * The default NSUPDATE TSIG algorithm moves from `hmac-md5` to `hmac-sha256`
