@@ -3,6 +3,7 @@ inventory.yml
 inventory.*.yml
 inventory/
 .vscode
+.claude/
 tmp
 workspace/
 workspace-plan-DO-NOT-COMMIT.md
