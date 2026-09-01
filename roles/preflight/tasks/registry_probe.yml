@@ -1,7 +1,9 @@
 ---
 # One registry probe, over the registry HTTP API rather than `docker pull`:
 # preflight runs before geerlingguy.docker, so there is no docker daemon on a
-# greenfield host yet. Reads only — nothing here changes the host.
+# greenfield host yet. Reads only — nothing here changes the host, which is
+# also why every request carries `check_mode: false`: under `--check` a
+# skipped probe would report green on a credential nobody had verified.
 #
 # Caller sets, via `vars:`:
 #   preflight_probe_registry    host[:port] as written in the image reference
@@ -14,6 +16,12 @@
 # GET /v2/ answers 401 with a `WWW-Authenticate: Bearer realm=...,service=...`
 # challenge; the realm mints a token from the credentials; the token reads the
 # manifest.
+#
+# The two requests that carry or return a credential are `no_log`, and neither
+# of them decides anything: each is followed by an assert that reads only the
+# status code (and, on a transport failure, the module's own message) and
+# prints the diagnosis itself. A registered result survives `no_log` intact --
+# only the display is suppressed -- so nothing readable is lost.
 
 - name: "Resolve the registry API endpoint for {{ preflight_probe_registry }}"
   ansible.builtin.set_fact:
@@ -34,6 +42,7 @@
     url: "https://{{ preflight_probe_api_host }}/v2/"
     status_code: [200, 401]
     timeout: 20
+  check_mode: false
   register: preflight_probe_root
 
 - name: "Read the authentication challenge from {{ preflight_probe_registry }}"
@@ -44,6 +53,22 @@
     preflight_probe_service: >-
       {{ (preflight_probe_root.www_authenticate | default('')
           | regex_search('service="([^"]+)"', '\1') | default([], true)) | join('') }}
+
+# A registry that serves /v2/ anonymously issues no challenge, so there is no
+# endpoint against which the credentials could be checked. Say so rather than
+# letting the probe report a success it did not earn — the login itself still
+# happens later, in roles/docker_config, under no_log.
+- name: "Warn that no authentication challenge came from {{ preflight_probe_registry }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ preflight_probe_registry }} answered /v2/ without an authentication
+      challenge, so its credentials could NOT be verified here. They are still
+      installed, and a wrong one will surface as a censored failure in
+      roles/docker_config or as a `docker pull` denial later. This is normal
+      for a registry that allows anonymous reads and enforces auth further in.
+  when:
+    - preflight_probe_realm | length == 0
+    - preflight_probe_username | length > 0
 
 # Scope is omitted for a credentials-only probe: every registry this supports
 # mints an unscoped token for valid credentials and refuses one for invalid
@@ -59,22 +84,30 @@
     force_basic_auth: "{{ preflight_probe_username | length > 0 }}"
     status_code: [200, 401, 403]
     timeout: 20
+  check_mode: false
   register: preflight_probe_token_result
+  # The response body is a working pull credential for the repository until it
+  # expires. Ansible prints a task result from -v upward, so without this the
+  # token lands in stdout and in any CI log that captured it.
+  no_log: true
+  failed_when: false
   when: preflight_probe_realm | length > 0
 
 - name: "Assert the credentials are accepted by {{ preflight_probe_registry }}"
   ansible.builtin.assert:
     that:
-      - preflight_probe_token_result.status == 200
+      - (preflight_probe_token_result.status | default(0)) == 200
     fail_msg: >-
       {{ preflight_probe_registry }} refused to issue a pull token for
       {{ preflight_probe_username | default('(anonymous)', true) }}
-      (HTTP {{ preflight_probe_token_result.status }}). The credentials are
-      wrong, expired, or lack pull access. On GitLab this must be a deploy
-      token (project or group, Settings -> Repository -> Deploy tokens) with
-      the `read_registry` scope, and its username is the full
-      `gitlab+deploy-token-<n>` string, not your account name. Deploy tokens
-      expire — check the expiry date before assuming the password is wrong.
+      (HTTP {{ preflight_probe_token_result.status | default('no response') }}).
+      {{ preflight_probe_token_result.msg | default('') }}
+      The credentials are wrong, expired, or lack pull access. On GitLab this
+      must be a deploy token (project or group, Settings -> Repository ->
+      Deploy tokens) with the `read_registry` scope, and its username is the
+      full `gitlab+deploy-token-<n>` string, not your account name. Deploy
+      tokens expire — check the expiry date before assuming the password is
+      wrong.
     success_msg: >-
       {{ preflight_probe_registry }}: credentials accepted
     quiet: true
@@ -94,18 +127,24 @@
     preflight_probe_token: >-
       {{ (preflight_probe_token_result.json | default({})).token
          | default((preflight_probe_token_result.json | default({})).access_token | default(''), true) }}
+  check_mode: false
   register: preflight_probe_manifest
+  # Carries the bearer token in a request header, which -vvv would print with
+  # the rest of the module arguments.
+  no_log: true
+  failed_when: false
   when: preflight_probe_repository | length > 0
 
 - name: "Assert the image is pullable: {{ preflight_probe_path ~ ':' ~ preflight_probe_tag }}"
   ansible.builtin.assert:
     that:
-      - preflight_probe_manifest.status == 200
+      - (preflight_probe_manifest.status | default(0)) == 200
     fail_msg: >-
       {{ preflight_probe_registry }}/{{ preflight_probe_path }}:{{ preflight_probe_tag }}
-      is not pullable (HTTP {{ preflight_probe_manifest.status }}).
+      is not pullable (HTTP {{ preflight_probe_manifest.status | default('no response') }}).
+      {{ preflight_probe_manifest.msg | default('') }}
       {{ preflight_registry_manifest_hint_404
-         if preflight_probe_manifest.status == 404
+         if (preflight_probe_manifest.status | default(0)) == 404
          else preflight_registry_manifest_hint_denied }}
     success_msg: >-
       {{ preflight_probe_registry }}/{{ preflight_probe_path }}:{{ preflight_probe_tag }} is pullable

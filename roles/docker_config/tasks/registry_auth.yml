@@ -12,21 +12,33 @@
 # which means a failure here prints nothing useful -- if one ever does, run
 # the play again and read preflight's assertion.
 
+# Backstop for a standalone run of this role; roles/preflight asserts the same
+# thing a play earlier, before any host has been changed. Collected first and
+# asserted after, rather than asserted inside the loop: a failing looped assert
+# prints the offending `item`, and the item is a credential triple.
+- name: Collect incomplete registry entries
+  ansible.builtin.set_fact:
+    docker_config_incomplete_registries: >-
+      {{ docker_config_incomplete_registries | default([])
+         + [item.registry | default('(no registry key)')] }}
+  loop: "{{ docker_config_registries }}"
+  no_log: true
+  when: >-
+    (item.registry | default('')) | length == 0
+    or (item.username | default('')) | length == 0
+    or (item.password | default('')) | length == 0
+
 - name: Assert every registry entry is a complete triple
   ansible.builtin.assert:
     that:
-      - (item.registry | default('')) | length > 0
-      - (item.username | default('')) | length > 0
-      - (item.password | default('')) | length > 0
+      - (docker_config_incomplete_registries | default([])) | length == 0
     fail_msg: >-
       Each docker_registries entry needs a non-empty `registry`, `username`
-      and `password`. The offending entry names registry
-      '{{ item.registry | default('(unset)') }}'. A half-set entry is almost
-      always a vault variable that did not resolve.
+      and `password`, and these are missing at least one:
+      {{ docker_config_incomplete_registries | default([]) | join(', ') }}.
+      A half-set entry is almost always a vault variable that did not resolve.
+    success_msg: "registry entries are complete"
     quiet: true
-  loop: "{{ docker_config_registries }}"
-  loop_control:
-    label: "{{ item.registry | default('(unset)') }}"
 
 - name: Report the registries this host will authenticate to
   ansible.builtin.debug:

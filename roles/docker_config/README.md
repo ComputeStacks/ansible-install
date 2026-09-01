@@ -56,7 +56,15 @@ controller's own `controller_registry_username` / `controller_registry_password`
 into the list on controller hosts, so there is one login implementation rather
 than two. An explicit `docker_registries` entry for the same host wins.
 
-Two things this role deliberately does not do:
+**Set `docker_registries` in the inventory, never in `playbooks/group_vars`.**
+Playbook `group_vars` outrank inventory `group_vars`, so a default written
+beside the composition would silently discard what the operator put in their
+`secrets.yml` — the whole feature would no-op and the first sign of it would be
+a `docker pull` denial in the controller play. The composition file therefore
+defines no operator-facing variable at all; it reads
+`docker_registries | default([])` at the point of use.
+
+Three things this role deliberately does not do:
 
 * **It does not verify the credentials.** `roles/preflight` already proved them
   against the registry's token endpoint, with a readable failure message,
@@ -68,6 +76,11 @@ Two things this role deliberately does not do:
   `docker_login.update_credentials`). Without it the module compares the stored
   username and secret against the configured ones, so a rotated password still
   updates and an unchanged one is a no-op.
+* **It does not log out.** Convergence here is one-directional: removing an
+  entry from `docker_registries` stops the role refreshing that credential but
+  leaves the existing one in `config.json`. Revoke the token at the registry —
+  which is the only thing that actually takes access away — and delete the
+  entry by hand if the host must not hold it.
 
 The registry must serve a **publicly-trusted** TLS certificate. Nothing here
 writes `/etc/docker/certs.d/<host>/ca.crt` and `insecure-registries` is not

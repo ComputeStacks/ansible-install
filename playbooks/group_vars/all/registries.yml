@@ -1,24 +1,27 @@
 ---
-# Private container registry credentials, and the one composed list every role
-# reads. This lives at play scope rather than inside roles/docker_config
-# because two roles in two different plays need the same answer:
-# roles/preflight verifies the credentials before any host is touched, and
-# roles/docker_config writes them to /root/.docker/config.json — and a role's
-# vars/ are not visible to a role that ran in an earlier play.
-
-# Operator-facing. One entry per registry host; put the passwords in the
-# vaulted secrets file, not here:
+# The composed private-registry login list every role reads. It lives at play
+# scope rather than inside roles/docker_config because two roles in two
+# different plays need the same answer: roles/preflight verifies the
+# credentials before any host is touched, and roles/docker_config writes them
+# to /root/.docker/config.json — and a role's vars/ are not visible to a role
+# that ran in an earlier play.
+#
+# NOTHING operator-facing may be DEFAULTED in this file. Playbook group_vars
+# outrank inventory group_vars, so a `docker_registries: []` here would
+# silently discard the value an operator wrote in their inventory's
+# secrets.yml — the feature would no-op and the failure would surface as a
+# `docker pull` denial deep in the controller play. Operator inputs are read
+# through `| default(...)` at the point of use instead. (versions.yml sets
+# values here on purpose: those are repo-owned pins, not operator inputs.)
+#
+# The operator-facing input is `docker_registries`, one entry per registry
+# host, documented in inventories/example/group_vars/all/secrets.yml:
 #
 #   docker_registries:
 #     - registry: registry.gitlab.com
 #       username: gitlab+deploy-token-42
 #       password: "{{ gitlab_deploy_token }}"
-#
-# `registry` is the host[:port] exactly as it appears in the image reference.
-# A Docker Hub reference carries no host — write `docker.io` for those.
-docker_registries: []
 
-# --- composition ----------------------------------------------------------
 # The registry host of the controller image reference, by docker's own rule:
 # the first slash-separated component is a registry host only when it contains
 # a '.' or a ':', or is exactly 'localhost'. Everything else is a Docker Hub
@@ -26,16 +29,19 @@ docker_registries: []
 # `cmptstks`, which is what a naive split('/')[0] would try to log in to.
 cs_controller_registry_head: "{{ (controller_image_repo | default('')).split('/')[0] }}"
 
-cs_controller_registry_derived: >-
+cs_controller_registry: >-
   {{ cs_controller_registry_head
      if ('/' in (controller_image_repo | default(''))
          and (cs_controller_registry_head is search('[.:]')
               or cs_controller_registry_head == 'localhost'))
      else 'docker.io' }}
 
-# `controller_registry_url` overrides the derivation, for a reference it
-# cannot read.
-cs_controller_registry: "{{ controller_registry_url | default(cs_controller_registry_derived, true) }}"
+# The repository path the registry API wants: the reference with its registry
+# host stripped off.
+cs_controller_repository: >-
+  {{ controller_image_repo.split('/', 1)[1]
+     if (controller_image_repo | default('')).startswith(cs_controller_registry ~ '/')
+     else controller_image_repo | default('') }}
 
 # controller_registry_username / controller_registry_password are the older,
 # single-registry spelling of the same thing. They are folded in on controller
@@ -51,7 +57,8 @@ cs_controller_registry_entries: >-
 
 # Every registry this host authenticates to.
 cs_registry_logins: >-
-  {{ docker_registries
+  {{ (docker_registries | default([]))
      + (cs_controller_registry_entries
-        | rejectattr('registry', 'in', docker_registries | map(attribute='registry') | list)
+        | rejectattr('registry', 'in',
+                     docker_registries | default([]) | map(attribute='registry') | list)
         | list) }}

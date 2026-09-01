@@ -28,11 +28,14 @@ from the network, which is still not a change to a host.
   legitimately opt out, but the operator should see the list and confirm it's
   intentional.
 - Every registry in `docker_registries` accepts its credentials, checked from
-  each docker host (`preflight_docker_groups`).
+  each docker host (`preflight_docker_groups`) that is not flagged
+  `existing_env` — in attach mode only the new nodes ever log in.
+- Every entry in `docker_registries` is a complete `{registry, username,
+  password}` triple and no registry host is named twice.
 - The controller image named by `controller_image_repo:controller_image_tag`
-  exists and is pullable with whatever credentials apply — run on controller
-  hosts, public repository or not, because a typo'd tag is as fatal as a bad
-  credential.
+  exists and is pullable with whatever credentials apply — on controller hosts
+  that are not `existing_env`, public repository or not, because a typo'd tag
+  is as fatal as a bad credential.
 
 ## The registry checks (`tasks/registry.yml`, `tasks/registry_probe.yml`)
 
@@ -53,18 +56,33 @@ whole question. The controller probe additionally asks for
 `repository:<path>:pull` and then reads the manifest, so it separates "your
 credentials are wrong" from "that tag does not exist".
 
-`url_password` is `no_log` in ansible's own argument spec, so the password is
-censored even at `-vvv` without hiding the rest of the diagnostics — which is
-exactly why credential verification lives here and not in
-`roles/docker_config`, where the login task must be `no_log` wholesale.
+Both requests that carry or return a credential are `no_log` — the password
+rides in one, and the *token the registry mints* is itself a working pull
+credential that ansible would otherwise print from `-v` upward. Neither request
+decides anything: each is followed by an assert that reads only the status code
+(and, on a transport failure, the module's own message) and writes the
+diagnosis itself, and a registered result survives `no_log` intact. That is why
+credential verification lives here rather than in `roles/docker_config`, whose
+login task has to be `no_log` as a whole and so fails mutely.
+
+Every request also carries `check_mode: false`. `uri` does not support check
+mode, so under `--check` the probes would skip, every downstream assert would
+skip with them, and a bad credential would report green.
+
+One case cannot be verified: a registry that answers `GET /v2/` anonymously
+issues no challenge, so there is no endpoint to test the credentials against.
+The probe says so in a `debug` warning rather than reporting a success it did
+not earn.
 
 ## Variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
+| `preflight_verify_registries` | `true` | Every network read in this role, in one switch. False makes preflight purely local, for an air-gapped converge. |
 | `preflight_docker_groups` | `controller`, `metrics`, `registry`, `nodes` | Groups whose hosts run a docker daemon. Mirrors the `hosts:` line of site.yml's "Docker hosts" play; a host outside them never logs in to a registry. |
-| `preflight_verify_controller_image` | `true` | Set false for an air-gapped converge, or where egress goes through something the control path cannot see. |
+| `preflight_verify_controller_image` | `true` | The image existence-and-tag check specifically; the credential probes stay on. |
+| `preflight_registry_manifest_hint_404` / `_denied` | see `defaults/main.yml` | The two ways a manifest read fails, as operator-facing sentences. |
 | `preflight_registry_manifest_accept` | OCI + docker, index + manifest | `Accept` header for the manifest read. Which type comes back depends on how the image was built and pushed. |
 
 Consumed from elsewhere in the inventory (not owned by this role):

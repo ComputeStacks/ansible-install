@@ -10,20 +10,27 @@ preflight_required_node_vars:
   - container_network
   - container_network_name
 
+# Every network read in this role, off in one switch. False makes preflight
+# purely local again — for an air-gapped converge where the images are already
+# on the hosts, or where egress leaves through something the ansible control
+# path cannot see.
+preflight_verify_registries: true
+
 # Groups whose hosts run a docker daemon, and therefore pull images. Mirrors
-# the `hosts:` line of the "Docker hosts" play in playbooks/site.yml — a host
+# the `hosts:` line of the "Docker hosts" play in playbooks/site.yml. A host
 # outside these groups never logs in to a registry, so probing one from there
-# would only assert egress it does not need.
+# would only assert egress it does not need. In attach mode
+# (playbooks/add-region.yml) only the NEW nodes run roles/docker_config, which
+# is why the probe additionally skips `existing_env` hosts.
 preflight_docker_groups:
   - controller
   - metrics
   - registry
   - nodes
 
-# The controller image existence check reaches the registry over the network.
-# Set false for an air-gapped converge where the image is already loaded on the
-# host, or where egress goes through something the ansible control path cannot
-# see.
+# The controller image existence-and-tag check specifically. The credential
+# probes stay on — use preflight_verify_registries to turn off the network
+# reads altogether.
 preflight_verify_controller_image: true
 
 # The two ways a manifest read fails, told apart by status so the operator is

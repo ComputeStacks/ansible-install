@@ -188,7 +188,6 @@ Assert first, then act:
 | `controller_postgres_*` | `computestacks` / `cloudportal` / `127.0.0.1` / pool 40 | Composed into `DATABASE_URL`. |
 | `controller_rails_*`, `controller_puma_workers`, `controller_queue_*` | v1 values | Concurrency. |
 | `controller_registry_username` / `_password` | unset | Optional pull credentials for a private image repo, in `secrets.yml`. This role does **not** log in — `playbooks/group_vars/all/registries.yml` folds the pair into `docker_registries` and `roles/docker_config` performs the login, one play earlier. |
-| `controller_registry_url` | derived from `controller_image_repo` | The registry host those credentials are stored under. Only needed when the derivation cannot read the reference. |
 
 Consumed, not owned: `cs_ports.redis`, `secret_key_base`, `user_auth_secret`,
 `node_enrollment_token`, `postgres_password`, `cs_app_zone`, `locale`,

@@ -4,19 +4,74 @@
 # deep in the controller play, as a `docker pull` denial under a `no_log` task,
 # after most of a converge has already run.
 
+# Shape first, and here rather than only in roles/docker_config: that role runs
+# in a later play, by which time `common`, `node_exporter`, `tailscale` and
+# PowerDNS have all changed hosts. A half-set entry is usually a vault
+# variable that did not resolve, and an entry with an empty username would
+# otherwise be probed ANONYMOUSLY below and pass.
+# Collected first, then asserted, rather than asserting inside the loop: a
+# failing looped assert prints the offending `item`, and the item is a
+# credential triple.
+- name: Collect incomplete registry entries
+  ansible.builtin.set_fact:
+    preflight_incomplete_registries: >-
+      {{ preflight_incomplete_registries | default([])
+         + [item.registry | default('(no registry key)')] }}
+  loop: "{{ cs_registry_logins | default([]) }}"
+  no_log: true
+  when: >-
+    (item.registry | default('')) | length == 0
+    or (item.username | default('')) | length == 0
+    or (item.password | default('')) | length == 0
+
+- name: Assert every registry entry is a complete triple
+  ansible.builtin.assert:
+    that:
+      - (preflight_incomplete_registries | default([])) | length == 0
+    fail_msg: >-
+      Each docker_registries entry needs a non-empty `registry`, `username`
+      and `password`, and these are missing at least one:
+      {{ preflight_incomplete_registries | default([]) | join(', ') }}.
+      A half-set entry is almost always a vault variable that did not resolve.
+    success_msg: "registry entries are complete"
+    quiet: true
+
+# Two entries for one host are not merged — the second `docker login`
+# overwrites the first — so the effective credential would depend on list
+# order.
+- name: Assert no registry host is named twice
+  ansible.builtin.assert:
+    that:
+      - (cs_registry_logins | default([]) | map(attribute='registry') | list | unique | length)
+        == (cs_registry_logins | default([]) | length)
+    fail_msg: >-
+      docker_registries names a registry host more than once
+      ({{ cs_registry_logins | default([]) | map(attribute='registry') | list | join(', ') }}).
+      Only the last entry for a host would take effect. Merge them into one.
+    success_msg: "registry hosts are unique"
+    quiet: true
+
 - name: Verify every configured registry accepts its credentials
   ansible.builtin.include_tasks: registry_probe.yml
   vars:
     preflight_probe_registry: "{{ preflight_registry_entry.registry }}"
-    preflight_probe_username: "{{ preflight_registry_entry.username | default('') }}"
-    preflight_probe_password: "{{ preflight_registry_entry.password | default('') }}"
+    preflight_probe_username: "{{ preflight_registry_entry.username }}"
+    preflight_probe_password: "{{ preflight_registry_entry.password }}"
     preflight_probe_repository: ""
     preflight_probe_tag: ""
   loop: "{{ cs_registry_logins | default([]) }}"
   loop_control:
     loop_var: preflight_registry_entry
-    label: "{{ preflight_registry_entry.registry | default('(unset)') }}"
-  when: group_names | intersect(preflight_docker_groups) | length > 0
+    label: "{{ preflight_registry_entry.registry }}"
+  when:
+    - group_names | intersect(preflight_docker_groups) | length > 0
+    # Attach mode (playbooks/add-region.yml) runs roles/docker_config on the
+    # NEW nodes only; the pre-existing controller, metrics and registry hosts
+    # never log in and never pull a new image (roles/controller's attach_prep
+    # recreates the portal from the existing environment file's CS_REG). A
+    # stale credential carried in the shared secrets file must not abort an
+    # attach run over a login that will never happen.
+    - not (existing_env | default(false))
 
 # The controller image is checked by name, tag and all, and on every
 # controller — public repository or not. A typo in controller_image_tag is as
@@ -32,14 +87,7 @@
     preflight_probe_registry: "{{ cs_controller_registry }}"
     preflight_probe_username: "{{ preflight_controller_login.username | default('') }}"
     preflight_probe_password: "{{ preflight_controller_login.password | default('') }}"
-    # The registry host is stripped from the reference to leave the repository
-    # path the API wants. Derived, not overridden: controller_registry_url
-    # names the host credentials are stored under, not what is in the
-    # reference.
-    preflight_probe_repository: >-
-      {{ controller_image_repo.split('/', 1)[1]
-         if controller_image_repo.startswith(cs_controller_registry_derived ~ '/')
-         else controller_image_repo }}
+    preflight_probe_repository: "{{ cs_controller_repository }}"
     preflight_probe_tag: "{{ controller_image_tag }}"
   when:
     - "'controller' in group_names"
