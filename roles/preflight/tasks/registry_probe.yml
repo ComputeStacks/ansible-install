@@ -70,9 +70,15 @@
     - preflight_probe_realm | length == 0
     - preflight_probe_username | length > 0
 
-# Scope is omitted for a credentials-only probe: every registry this supports
-# mints an unscoped token for valid credentials and refuses one for invalid
-# credentials, which is exactly the question being asked.
+# Scope is omitted for a credentials-only probe -- there is no repository to
+# name yet. What the assert below reads is the DISTINCTION between 401 and
+# 403, not a 200: a self-hosted GitLab answers an unscoped token request with
+# 403 even for good credentials (verified against a real instance), while
+# wrong credentials get 401 from both gitlab.com and self-hosted. So 401 means
+# "these credentials are not valid" and 403 means "valid, but this request
+# granted no scope", which is all a credentials-only probe can honestly claim.
+# The scoped request the controller image makes is judged by the manifest read
+# that follows it instead.
 - name: "Request a pull token from {{ preflight_probe_registry }}"
   ansible.builtin.uri:
     url: >-
@@ -96,18 +102,15 @@
 - name: "Assert the credentials are accepted by {{ preflight_probe_registry }}"
   ansible.builtin.assert:
     that:
-      - (preflight_probe_token_result.status | default(0)) == 200
+      - (preflight_probe_token_result.status | default(0)) in [200, 403]
     fail_msg: >-
       {{ preflight_probe_registry }} refused to issue a pull token for
       {{ preflight_probe_username | default('(anonymous)', true) }}
       (HTTP {{ preflight_probe_token_result.status | default('no response') }}).
       {{ preflight_probe_token_result.msg | default('') }}
-      The credentials are wrong, expired, or lack pull access. On GitLab this
-      must be a deploy token (project or group, Settings -> Repository ->
-      Deploy tokens) with the `read_registry` scope, and its username is the
-      full `gitlab+deploy-token-<n>` string, not your account name. Deploy
-      tokens expire — check the expiry date before assuming the password is
-      wrong.
+      {{ preflight_registry_credentials_hint
+         if (preflight_probe_token_result.status | default(0)) == 401
+         else 'The registry did not answer the token request at all — check that this host can reach it.' }}
     success_msg: >-
       {{ preflight_probe_registry }}: credentials accepted
     quiet: true

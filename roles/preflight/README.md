@@ -50,10 +50,14 @@ Two special cases are handled: Docker Hub's API host is `registry-1.docker.io`
 rather than the `docker.io` written in an image reference, and a single-segment
 Hub repository is really `library/<name>`.
 
-Credentials-only probes ask for an unscoped token — every supported registry
-mints one for valid credentials and refuses for invalid ones, which is the
-whole question. The controller probe additionally asks for
-`repository:<path>:pull` and then reads the manifest, so it separates "your
+A credentials-only probe asks for an *unscoped* token and reads the
+distinction between `401` and `403` rather than insisting on a `200`: a
+self-hosted GitLab answers an unscoped request with `403` even for good
+credentials, while wrong credentials get `401` from gitlab.com and self-hosted
+alike. So `401` means "not valid" and `403` means "valid, but this request
+granted no scope" — which is all a probe that does not yet know a repository
+can honestly claim. The controller probe instead asks for
+`repository:<path>:pull` and reads the manifest, so it separates "your
 credentials are wrong" from "that tag does not exist".
 
 Both requests that carry or return a credential are `no_log` — the password
@@ -83,6 +87,7 @@ not earn.
 | `preflight_docker_groups` | `controller`, `metrics`, `registry`, `nodes` | Groups whose hosts run a docker daemon. Mirrors the `hosts:` line of site.yml's "Docker hosts" play; a host outside them never logs in to a registry. |
 | `preflight_verify_controller_image` | `true` | The image existence-and-tag check specifically; the credential probes stay on. |
 | `preflight_registry_manifest_hint_404` / `_denied` | see `defaults/main.yml` | The two ways a manifest read fails, as operator-facing sentences. |
+| `preflight_registry_credentials_hint` | see `defaults/main.yml` | What a `401` from the token endpoint means, as an operator-facing sentence. |
 | `preflight_registry_manifest_accept` | OCI + docker, index + manifest | `Accept` header for the manifest read. Which type comes back depends on how the image was built and pushed. |
 
 Consumed from elsewhere in the inventory (not owned by this role):

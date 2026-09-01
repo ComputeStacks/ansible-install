@@ -33,6 +33,14 @@ preflight_docker_groups:
 # reads altogether.
 preflight_verify_controller_image: true
 
+# What a 401 from the token endpoint means, as an operator-facing sentence.
+preflight_registry_credentials_hint: >-
+  The credentials are wrong, expired, or revoked. On GitLab this must be a
+  deploy token (project or group, Settings -> Repository -> Deploy tokens)
+  with the `read_registry` scope, and its username is the full
+  `gitlab+deploy-token-<n>` string, not your account name. Deploy tokens
+  expire — check the expiry date before assuming the password is wrong.
+
 # The two ways a manifest read fails, told apart by status so the operator is
 # pointed at the right file.
 preflight_registry_manifest_hint_404: >-
