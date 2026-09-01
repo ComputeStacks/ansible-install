@@ -38,9 +38,9 @@ join the `ops` docker network.
 ## What it does, in order (`tasks/main.yml`)
 
 1. Asserts `nginx_image` is an exact pin and `acme_sh_version` is a release
-   tag; asserts this host has a certificate domain; asserts the metrics
-   basic-auth passwords are set.
-2. Installs `python3-passlib`, `rsync`, `git`; creates the nginx tree.
+   tag with its tarball checksum beside it; asserts this host has a
+   certificate domain; asserts the metrics basic-auth passwords are set.
+2. Installs `python3-passlib` and `rsync`; creates the nginx tree.
 3. Installs `nginx.conf`, the error pages, the dhparam group and the ACME
    challenge snippet.
 4. Pulls the image and renders the systemd unit.
@@ -51,15 +51,27 @@ join the `ops` docker network.
 
 ### acme.sh (`tasks/acme_install.yml`)
 
-Cloned at `version: "{{ acme_sh_version }}"`, installed with `--nocron
---noprofile --home /opt/acme --config-home /opt/acme/data`, then
-**`--auto-upgrade 0`**. v1 cloned the default branch and then ran `--upgrade
---auto-upgrade`, which let acme.sh replace itself with HEAD from cron and made
-any pin decorative.
+Installed from the pinned release tarball, sha256-verified against
+`acme_sh_tarball_sha256` (`versions.yml`), into a per-version directory:
 
-Convergence is by installed version: the role reads `acme.sh --version` and
-re-installs only when `acme_sh_version` is not in the output, so a bump in
-`versions.yml` rolls on the next run and an unchanged pin is a no-op.
+```
+/opt/acme/acme.sh-<version>/   the release tree
+/opt/acme/current              symlink to the version in use
+/opt/acme/data/                state: account key, DNS creds, certs (0700)
+```
+
+The upstream installer **never runs** — its only jobs are a cron entry,
+shell-profile edits and the self-upgrade machinery, all unwanted here. There
+is no git clone (tags are mutable upstream; the checksum is not) and no
+`--upgrade` invocation ever (in acme.sh that is the *upgrade command*: it
+contacts the GitHub API and replaces the install with git master — v1 ran it
+from cron, which made any pin decorative). `AUTO_UPGRADE="0"` is additionally
+pinned in `account.conf`, because the renewal timer runs `--cron`, which
+self-upgrades whenever that value is `1`.
+
+Convergence is by directory: a `versions.yml` bump downloads and unpacks the
+new release, repoints `current`, and removes superseded version directories.
+An unchanged pin is a no-op with no network access.
 
 Renewal is a role-owned `acme_renew.timer` (daily, 1h jitter, `Persistent`),
 not acme.sh's cron. `SuccessExitStatus=0 2` — acme.sh exits 2 when nothing was
@@ -74,10 +86,18 @@ restarts nginx, confirms it is actually active, and only then issues. Once the
 certificate exists, `vhosts.yml` overwrites that file with the real
 `default.conf`.
 
-Issuance is gated on the certificate being absent — renewal is the timer's
-job, not a converge's. `--install-cert` is likewise gated on the target files
-being absent (or `acme_web_force_install_cert: true`), because on the registry
-host running it restarts every registry container.
+Issuance converges on the **SAN set**: the installed certificate's names are
+read (on the control machine — the fleet carries no python crypto libraries)
+and compared to `acme_web_domains`, so a host that joins or leaves the
+metrics/registry groups, or a changed domain var, re-issues on the next run —
+against the *running* nginx, whose every vhost serves the challenge path, so
+the bootstrap vhost is not involved. Certificate **expiry** is deliberately
+not a converge trigger: renewal is the timer's job, and a playbook run must
+not race it. A CA switch (`letsencrypt_test` → `letsencrypt`) is invisible to
+the SAN set — that is what `acme_web_force_issue: true` is for (one-shot).
+`--install-cert` re-runs after every (re)issue and is otherwise gated on the
+target files being absent (or `acme_web_force_install_cert: true`), because
+on the registry host running it restarts every registry container.
 
 ### DNS-01
 
@@ -130,7 +150,10 @@ certificate directory before copying into it.
 | Var | Default | Notes |
 | --- | --- | --- |
 | `nginx_image` | `nginx:1.30.4` | `versions.yml`; asserted to be an exact pin. |
-| `acme_sh_version` | `3.1.4` | `versions.yml`; cloned verbatim as a git tag (the 3.x line has **no** leading `v`). |
+| `acme_sh_version` | `3.1.4` | `versions.yml`; names the release tarball verbatim (the 3.x line has **no** leading `v`). Bump together with `acme_sh_tarball_sha256`. |
+| `acme_keylength` | `ec-256` | Inventory name. acme.sh's own default made explicit; `"2048"` for RSA. |
+| `acme_challenge_alias` | unset | Inventory name. DNS alias mode: validate through a permanent `_acme-challenge` CNAME so the DNS credential only writes to the alias zone. |
+| `acme_web_force_issue` | `false` | One-shot re-issue when the SAN set cannot see the change (CA switch). |
 | `acme_ca` | `zerossl` | Inventory name. Anything acme.sh's `--server` takes: `letsencrypt`, `letsencrypt_test` (staging — untrusted chain, no meaningful rate limits; `roles/validate` relaxes TLS verification for the `*test` CAs automatically), `google`, a directory URL, … |
 | `acme_eab_kid` / `acme_eab_hmac_key` | unset | Inventory names. External Account Binding, for CAs that hand out account credentials out of band (Google Trust Services requires it; ZeroSSL accepts it instead of email registration). Both or neither; the HMAC key belongs in the vaulted `secrets.yml`. |
 | `acme_account_email` | `{{ cs_admin_email }}` | Inventory name. |
@@ -156,7 +179,8 @@ Consumed, not owned: `cs_ports.*`, `cs_portal_domain`, `cs_metrics_domain`,
 
 * The two v1 roles are merged. Splitting acme.sh from the nginx that serves
   its challenges bought nothing and let the two drift.
-* `--auto-upgrade 0` and a pinned clone (see above).
+* Checksum-verified tarball install, per-version directories, no upstream
+  installer, self-upgrade pinned off (see above).
 * `nginx_image` is a single `repo:tag` pin instead of v1's split
   `nginx_image` / `nginx_image_tag` floating on `stable`.
 * The container drops `--privileged` — nothing it does needs it.

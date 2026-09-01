@@ -29,21 +29,17 @@
 
 - name: Install the certificate for the container registries
   ansible.builtin.command:
-    argv:
-      - "{{ acme_web_executable }}"
-      - --config-home
-      - "{{ acme_web_config_home }}"
-      - --install-cert
-      - -d
-      - "{{ acme_web_cert_name }}"
-      - --key-file
-      - "{{ acme_web_registry_key }}"
-      - --fullchain-file
-      - "{{ acme_web_registry_fullchain }}"
-      - --reloadcmd
-      - "{{ acme_web_registry_reload_hook }}"
+    argv: >-
+      {{ [acme_web_executable, '--home', acme_web_current_link,
+          '--config-home', acme_web_config_home,
+          '--install-cert', '-d', acme_web_cert_name]
+         + (['--ecc'] if acme_web_keylength is match('^ec-') else [])
+         + ['--key-file', acme_web_registry_key,
+            '--fullchain-file', acme_web_registry_fullchain,
+            '--reloadcmd', acme_web_registry_reload_hook] }}
   register: acme_web_install_registry
   changed_when: acme_web_install_registry.rc == 0
   when: >-
-    not acme_web_registry_cert_stat.stat.exists
+    acme_web_need_issue | default(false) | bool
+    or not acme_web_registry_cert_stat.stat.exists
     or acme_web_force_install_cert | bool

@@ -1,81 +1,82 @@
 ---
-# acme.sh, pinned to an upstream release tag.
-#
-# Two deliberate differences from v1, which cloned the default branch and then
-# turned acme.sh's own self-updater on:
-#   * `version: "{{ acme_sh_version }}"` on the clone, so the installed client
-#     is the one versions.yml names.
-#   * `--auto-upgrade 0`, so acme.sh never silently replaces itself with HEAD
-#     from cron and defeats the pin. v1 ran `--upgrade --auto-upgrade`, which
-#     made the pin decorative.
+# acme.sh from the pinned, checksum-verified release tarball. The upstream
+# installer never runs: its only jobs are a cron entry, shell-profile edits
+# and the self-upgrade machinery (`--upgrade` replaces the install with git
+# master), none of which belongs on these hosts. Renewal is the systemd timer
+# in acme_cert.yml; upgrades are a versions.yml bump, which unpacks a new
+# per-version directory and repoints the `current` symlink. State in
+# `data/` -- the ACME account key, DNS provider credentials, issued
+# certificates -- is untouched by a version change.
 
-- name: Read the installed acme.sh version
-  ansible.builtin.command:
-    argv:
-      - "{{ acme_web_executable }}"
-      - --version
-  register: acme_web_installed_version
-  changed_when: false
-  failed_when: false
+- name: Create the acme.sh directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ acme_web_home }}"
+    - "{{ acme_web_config_home }}"
 
-- name: Install acme.sh at the pinned tag
-  when: acme_sh_version not in (acme_web_installed_version.stdout | default(''))
+- name: Check for the pinned release
+  ansible.builtin.stat:
+    path: "{{ acme_web_release_dir }}/acme.sh"
+  register: acme_web_release_stat
+
+- name: Install the pinned release
+  when: not acme_web_release_stat.stat.exists
   block:
-    - name: Create the acme.sh directories
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
+    - name: Download the acme.sh release tarball
+      ansible.builtin.get_url:
+        url: "{{ acme_web_tarball_url }}"
+        dest: "{{ acme_web_home }}/acme.sh-{{ acme_sh_version }}.tar.gz"
+        checksum: "sha256:{{ acme_sh_tarball_sha256 }}"
         owner: root
         group: root
-        mode: "0700"
-      loop:
-        - "{{ acme_web_home }}"
-        - "{{ acme_web_config_home }}"
-
-    - name: Clone acme.sh at {{ acme_sh_version }}
-      ansible.builtin.git:
-        repo: "{{ acme_web_repo }}"
-        dest: "{{ acme_web_install_src }}"
-        version: "{{ acme_sh_version }}"
-        depth: 1
-        force: true
-      register: acme_web_clone
+        mode: "0600"
+      register: acme_web_tarball
       retries: 5
       delay: 5
-      until: acme_web_clone is succeeded
+      until: acme_web_tarball is succeeded
 
-    - name: Run the acme.sh installer
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/bash
-          - "{{ acme_web_install_src }}/acme.sh"
-          - --install
-          - --nocron
-          - --noprofile
-          - --home
-          - "{{ acme_web_home }}"
-          - --config-home
-          - "{{ acme_web_config_home }}"
-          - --accountemail
-          - "{{ acme_web_account_email }}"
-        chdir: "{{ acme_web_install_src }}"
-      changed_when: true
+    - name: Unpack the release
+      ansible.builtin.unarchive:
+        src: "{{ acme_web_home }}/acme.sh-{{ acme_sh_version }}.tar.gz"
+        remote_src: true
+        dest: "{{ acme_web_home }}"
+        owner: root
+        group: root
+        creates: "{{ acme_web_release_dir }}/acme.sh"
 
-    - name: Remove the acme.sh clone
+    - name: Remove the tarball
       ansible.builtin.file:
-        path: "{{ acme_web_install_src }}"
+        path: "{{ acme_web_home }}/acme.sh-{{ acme_sh_version }}.tar.gz"
         state: absent
 
-- name: Disable the acme.sh self-upgrade
-  ansible.builtin.command:
-    argv:
-      - "{{ acme_web_executable }}"
-      - --config-home
-      - "{{ acme_web_config_home }}"
-      - --upgrade
-      - --auto-upgrade
-      - "0"
-  changed_when: false
+- name: Point `current` at the pinned version
+  ansible.builtin.file:
+    src: "{{ acme_web_release_dir }}"
+    dest: "{{ acme_web_current_link }}"
+    state: link
+    owner: root
+    group: root
+
+- name: Find superseded acme.sh versions
+  ansible.builtin.find:
+    paths: "{{ acme_web_home }}"
+    file_type: directory
+    patterns: "acme.sh-*"
+    excludes: "acme.sh-{{ acme_sh_version }}"
+  register: acme_web_old_releases
+
+- name: Remove superseded acme.sh versions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ acme_web_old_releases.files }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Assert the EAB credentials come as a pair
   ansible.builtin.assert:
@@ -90,6 +91,8 @@
   ansible.builtin.command:
     argv:
       - "{{ acme_web_executable }}"
+      - --home
+      - "{{ acme_web_current_link }}"
       - --config-home
       - "{{ acme_web_config_home }}"
       - --set-default-ca
@@ -97,13 +100,26 @@
       - "{{ acme_web_ca }}"
   changed_when: false
 
+# Belt and braces: nothing enables acme.sh's self-upgrade (the upstream
+# installer, which defaults it on for curl-pipe installs, never runs and the
+# fresh account.conf carries it only as a comment), but the renewal timer
+# runs `--cron`, which WOULD replace the install with git master if this were
+# ever "1". Pin it. account.conf exists by now -- --set-default-ca above
+# created it.
+- name: Pin the acme.sh self-upgrade off
+  ansible.builtin.lineinfile:
+    path: "{{ acme_web_config_home }}/account.conf"
+    regexp: '^#?AUTO_UPGRADE='
+    line: AUTO_UPGRADE="0"
+
 # no_log only when EAB is in play: the HMAC key rides in the argv. Without
 # EAB the output stays visible, because "why did registration fail" is the
 # question this task usually answers.
 - name: Register the ACME account
   ansible.builtin.command:
     argv: >-
-      {{ [acme_web_executable, '--config-home', acme_web_config_home,
+      {{ [acme_web_executable, '--home', acme_web_current_link,
+          '--config-home', acme_web_config_home,
           '--register-account', '--server', acme_web_ca,
           '-m', acme_web_account_email]
          + (['--eab-kid', acme_web_eab_kid, '--eab-hmac-key', acme_web_eab_hmac_key]

@@ -133,6 +133,10 @@ pgdg_key_checksum: "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e
 # acme.sh: pinned release tag, cloned at that tag, --auto-upgrade DISABLED.
 # Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release
 # (acmesh-official/acme.sh releases/latest). Note the tag carries NO leading
-# 'v' on the 3.x line, unlike the old v2.x tags -- the role clones this string
-# verbatim, so do not add one.
+# 'v' on the 3.x line, unlike the old v2.x tags -- the role downloads the
+# release tarball named by this string verbatim, so do not add one. The
+# checksum is of https://github.com/acmesh-official/acme.sh/archive/refs/tags/<version>.tar.gz
+# (verified 2026-08-31); bump both together -- a version bump with a stale
+# checksum fails the download on purpose.
 acme_sh_version: "3.1.4"
+acme_sh_tarball_sha256: e5f8e187bbf5251e0cd8891f2622daab9850366bd17bea9f92c2fe2ee091fd32

@@ -2,21 +2,66 @@
 # Issue the host certificate, install it where nginx (and, on the registry
 # host, the registry containers) read it, and arm the renewal timer.
 #
-# Issuance is gated on the certificate being absent. Renewal is acme.sh's job,
-# driven by the systemd timer below — not by a converge.
+# Issuance converges on the SAN set: a certificate is (re)issued when none is
+# installed, when the names it covers stop matching acme_web_domains (a host
+# joined or left the metrics/registry group, a domain var changed), or when
+# acme_web_force_issue is set (the CA-switch case -- the SAN set alone cannot
+# see letsencrypt_test -> letsencrypt). EXPIRY is deliberately not ansible's
+# job: the systemd timer below renews, and re-running the playbook must not
+# race it.
 
 - name: Check for an existing certificate
   ansible.builtin.stat:
     path: "{{ acme_web_cert_fullchain }}"
   register: acme_web_cert_stat
 
-- name: Bootstrap the ACME validation vhost and issue the certificate
+- name: Read the installed certificate
+  ansible.builtin.slurp:
+    src: "{{ acme_web_cert_fullchain }}"
+  register: acme_web_cert_pem
+  when: acme_web_cert_stat.stat.exists
+
+# On the control machine (docs/contracts.md: the fleet carries no python
+# crypto libraries). The fullchain is leaf-first, and the module parses the
+# first certificate in the content.
+- name: Inspect the installed certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ acme_web_cert_pem.content | b64decode }}"
+  delegate_to: localhost
+  become: false
+  register: acme_web_cert_info
+  when: acme_web_cert_stat.stat.exists
+
+- name: Decide whether to issue
+  ansible.builtin.set_fact:
+    acme_web_need_issue: >-
+      {{ not acme_web_cert_stat.stat.exists
+         or acme_web_force_issue | bool
+         or ((acme_web_cert_info.subject_alt_name | default([])
+              | map('regex_replace', '^DNS:', '') | list)
+             | symmetric_difference(acme_web_domains) | length > 0) }}
+
+- name: Report a SAN mismatch
+  ansible.builtin.debug:
+    msg: >-
+      Re-issuing: the installed certificate covers
+      [{{ acme_web_cert_info.subject_alt_name | default([]) | join(', ') }}]
+      but this host's groups call for [{{ acme_web_domains | join(', ') }}].
+  when:
+    - acme_web_cert_stat.stat.exists
+    - acme_web_need_issue | bool
+    - not acme_web_force_issue | bool
+
+# First certificate only: the real vhosts reference the certificate that does
+# not exist yet, so nginx cannot start with them. This plain :80 vhost serves
+# nothing but the challenge path; vhosts.yml overwrites it once the
+# certificate is in place. A RE-issue never comes through here -- nginx is
+# already serving the old certificate, and every vhost includes
+# common/acme.conf, so the HTTP-01 challenge is reachable without touching
+# the running configuration.
+- name: Bootstrap the ACME validation vhost
   when: not acme_web_cert_stat.stat.exists
   block:
-    # The real vhosts reference the certificate that does not exist yet, so
-    # nginx cannot start with them. This plain :80 vhost serves nothing but
-    # the challenge path; vhosts.yml overwrites it once the certificate is in
-    # place.
     - name: Render the bootstrap ACME vhost
       ansible.builtin.template:
         src: acme-bootstrap.conf.j2
@@ -32,11 +77,15 @@
         enabled: true
         daemon_reload: true
 
+- name: Issue the certificate
+  when: acme_web_need_issue | bool
+  block:
     - name: Confirm nginx is active before requesting the certificate
       ansible.builtin.systemd_service:
         name: nginx
       register: acme_web_nginx_state
       failed_when: acme_web_nginx_state.status.ActiveState != 'active'
+      when: acme_web_challenge_method == 'http'
 
     - name: Write the nsupdate TSIG key
       ansible.builtin.template:
@@ -47,16 +96,6 @@
         mode: "0600"
       no_log: true
       when: acme_web_challenge_method == 'nsupdate'
-
-    - name: Request the certificate (HTTP-01 webroot)
-      ansible.builtin.command:
-        argv: >-
-          {{ [acme_web_executable, '--config-home', acme_web_config_home, '--issue']
-             + acme_web_domain_args
-             + ['-w', acme_web_webroot] }}
-      register: acme_web_issue_http
-      changed_when: acme_web_issue_http.rc == 0
-      when: acme_web_challenge_method == 'http'
 
     - name: Assert the selected DNS-01 provider is known
       ansible.builtin.assert:
@@ -69,13 +108,34 @@
           docs/acme-providers.md.
       when: acme_web_challenge_method != 'http'
 
+    # --force whenever a certificate already exists: we only get here on SAN
+    # drift or an explicit force_issue, and acme.sh's own "not due yet" skip
+    # must not veto either.
+    - name: Request the certificate (HTTP-01 webroot)
+      ansible.builtin.command:
+        argv: >-
+          {{ [acme_web_executable, '--home', acme_web_current_link,
+              '--config-home', acme_web_config_home, '--issue',
+              '--keylength', acme_web_keylength]
+             + acme_web_domain_args
+             + ['-w', acme_web_webroot]
+             + (['--force'] if acme_web_cert_stat.stat.exists else []) }}
+      register: acme_web_issue_http
+      changed_when: acme_web_issue_http.rc == 0
+      when: acme_web_challenge_method == 'http'
+
     - name: Request the certificate (DNS-01)
       ansible.builtin.command:
         argv: >-
-          {{ [acme_web_executable, '--config-home', acme_web_config_home, '--issue']
+          {{ [acme_web_executable, '--home', acme_web_current_link,
+              '--config-home', acme_web_config_home, '--issue',
+              '--keylength', acme_web_keylength]
              + acme_web_domain_args
              + ['--dns', acme_web_dns_providers[acme_web_challenge_method].plugin]
-             + (acme_web_dns_providers[acme_web_challenge_method].extra_args | default([])) }}
+             + (acme_web_dns_providers[acme_web_challenge_method].extra_args | default([]))
+             + (['--challenge-alias', acme_web_challenge_alias]
+                if acme_web_challenge_alias | length > 0 else [])
+             + (['--force'] if acme_web_cert_stat.stat.exists else []) }}
       environment: "{{ acme_web_dns_providers[acme_web_challenge_method].env }}"
       register: acme_web_issue_dns
       changed_when: acme_web_issue_dns.rc == 0
@@ -88,29 +148,27 @@
   register: acme_web_key_stat
 
 # --install-cert copies the certificate to its destination AND records the
-# reload command acme.sh runs after every renewal. Gated, because on the
-# registry host the reload hook restarts every running registry container.
+# reload command acme.sh runs after every renewal. Runs after every (re)issue
+# because --issue writes only acme.sh's own store; gated otherwise, because
+# on the registry host the reload hook restarts every running registry
+# container. --ecc: an ec-* keylength stores under <name>_ecc, and relying on
+# acme.sh's fallback lookup breaks the day an RSA cert appears beside it.
 - name: Install the certificate for nginx
   ansible.builtin.command:
-    argv:
-      - "{{ acme_web_executable }}"
-      - --config-home
-      - "{{ acme_web_config_home }}"
-      - --install-cert
-      - -d
-      - "{{ acme_web_cert_name }}"
-      - --key-file
-      - "{{ acme_web_cert_key }}"
-      - --fullchain-file
-      - "{{ acme_web_cert_fullchain }}"
-      - --reloadcmd
-      - systemctl reload nginx
+    argv: >-
+      {{ [acme_web_executable, '--home', acme_web_current_link,
+          '--config-home', acme_web_config_home,
+          '--install-cert', '-d', acme_web_cert_name]
+         + (['--ecc'] if acme_web_keylength is match('^ec-') else [])
+         + ['--key-file', acme_web_cert_key,
+            '--fullchain-file', acme_web_cert_fullchain,
+            '--reloadcmd', 'systemctl reload nginx'] }}
   register: acme_web_install_nginx
   changed_when: acme_web_install_nginx.rc == 0
   when: >-
-    not acme_web_key_stat.stat.exists
+    acme_web_need_issue | bool
+    or not acme_web_key_stat.stat.exists
     or acme_web_force_install_cert | bool
-    or not acme_web_cert_stat.stat.exists
 
 - name: Install the container registry certificate
   ansible.builtin.include_tasks: registry_cert.yml

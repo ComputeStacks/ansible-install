@@ -13,16 +13,19 @@
       playbooks/group_vars/all/versions.yml. 'latest'/'stable'/'mainline'
       float and would silently change the TLS terminator under the fleet.
 
-- name: Assert acme_sh_version is pinned to a release tag
+- name: Assert acme_sh_version is pinned to a checksummed release
   ansible.builtin.assert:
     that:
       - acme_sh_version is defined
       - acme_sh_version | length > 0
       - acme_sh_version not in ['master', 'main', 'HEAD']
+      - acme_sh_tarball_sha256 is defined
+      - acme_sh_tarball_sha256 | length == 64
     fail_msg: >-
-      acme_sh_version must be an upstream acme.sh RELEASE TAG (see
-      playbooks/group_vars/all/versions.yml). This role clones at that tag and
-      disables acme.sh's self-upgrade; tracking a branch would defeat both.
+      acme_sh_version must be an upstream acme.sh RELEASE TAG with its tarball
+      sha256 beside it (see playbooks/group_vars/all/versions.yml). This role
+      installs from the checksum-verified release tarball; bump the version
+      and the checksum together.
 
 - name: Assert this host has a certificate domain
   ansible.builtin.assert:
@@ -51,7 +54,6 @@
     name:
       - python3-passlib      # community.general.htpasswd
       - rsync                # the registry certificate reload hook
-      - git                  # acme.sh clone
     state: present
     update_cache: true
     cache_valid_time: 3600

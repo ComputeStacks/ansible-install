@@ -13,11 +13,22 @@ acme_web_cert_key: "{{ acme_web_ssl_dir }}/privkey.pem"
 acme_web_dhparam_url: https://ssl-config.mozilla.org/ffdhe2048.txt
 
 # --- acme.sh --------------------------------------------------------------
+# Layout: the pinned release tarball is unpacked to a per-version directory
+# and `current` symlinks to it; all state (ACME account key, DNS provider
+# credentials, issued certificates) lives in `data/`, which survives version
+# bumps. There is no git clone and the upstream installer never runs -- its
+# only jobs are a cron entry, shell-profile edits and the self-upgrade
+# machinery, all of which this role deliberately does not want.
+#
+#   /opt/acme/acme.sh-<version>/   the release tree (tarball's own layout)
+#   /opt/acme/current              symlink to the version in use
+#   /opt/acme/data/                state; 0700, account.conf 0600
 acme_web_home: /opt/acme
 acme_web_config_home: "{{ acme_web_home }}/data"
-acme_web_install_src: "{{ acme_web_home }}/src"
-acme_web_executable: "{{ acme_web_home }}/acme.sh"
-acme_web_repo: https://github.com/acmesh-official/acme.sh.git
+acme_web_release_dir: "{{ acme_web_home }}/acme.sh-{{ acme_sh_version }}"
+acme_web_current_link: "{{ acme_web_home }}/current"
+acme_web_executable: "{{ acme_web_current_link }}/acme.sh"
+acme_web_tarball_url: "https://github.com/acmesh-official/acme.sh/archive/refs/tags/{{ acme_sh_version }}.tar.gz"
 # HTTP-01 webroot. nginx serves /.well-known/acme-challenge/ from here on
 # port 80 for every vhost.
 acme_web_webroot: /var/www/acme-sh
@@ -50,6 +61,24 @@ acme_web_eab_hmac_key: "{{ acme_eab_hmac_key | default('') }}"
 # HTTP-01 by default. Any other value selects a DNS-01 provider — see
 # docs/acme-providers.md for the per-provider credential variables.
 acme_web_challenge_method: "{{ acme_challenge_method | default('http') }}"
+
+# DNS alias mode (DNS-01 only): validate through a permanent CNAME
+# `_acme-challenge.<domain>` -> `_acme-challenge.<this zone>`, so the DNS
+# credential above only needs write access to the alias zone, never the real
+# ones. https://github.com/acmesh-official/acme.sh/wiki/DNS-alias-mode
+acme_web_challenge_alias: "{{ acme_challenge_alias | default('') }}"
+
+# acme.sh's own default, made explicit. `ec-256` = ECDSA P-256; every TLS
+# client in this stack (browsers, docker, prometheus, the controller's
+# faraday) accepts it. Set `acme_keylength: "2048"` for RSA if something
+# ancient must connect.
+acme_web_keylength: "{{ acme_keylength | default('ec-256') }}"
+
+# Re-issue even when the installed certificate already covers exactly
+# acme_web_domains. The one real use is switching CAs (letsencrypt_test ->
+# letsencrypt): the SAN set does not change, so nothing else triggers the
+# re-issue. One-shot -- set it, converge, unset it.
+acme_web_force_issue: false
 
 # The certificate this host requests, derived from group membership (an
 # inventory predicate, never a gathered fact). A host in more than one group

@@ -22,6 +22,13 @@ vaulted `secrets.yml`). Google Trust Services requires EAB; ZeroSSL accepts it
 as the alternative to email registration. Set both or neither — the role
 asserts the pairing.
 
+**DNS alias mode.** With any DNS-01 provider, `acme_challenge_alias: <zone>`
+validates through a permanent CNAME you create once —
+`_acme-challenge.<each domain> IN CNAME _acme-challenge.<zone>` — so the DNS
+credential above only ever writes TXT records in the alias zone, never in the
+zones the real domains live in. Scope the credential accordingly; that is the
+point. See the [acme.sh wiki](https://github.com/acmesh-official/acme.sh/wiki/DNS-alias-mode).
+
 **Default challenge is HTTP-01** over the webroot `/var/www/acme-sh`, served
 by nginx on port 80. To use DNS-01 instead, set `acme_challenge_method` and
 the provider's credentials as group/host vars in your inventory (put the
