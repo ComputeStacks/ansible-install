@@ -1,0 +1,57 @@
+---
+# Private container registry credentials, and the one composed list every role
+# reads. This lives at play scope rather than inside roles/docker_config
+# because two roles in two different plays need the same answer:
+# roles/preflight verifies the credentials before any host is touched, and
+# roles/docker_config writes them to /root/.docker/config.json — and a role's
+# vars/ are not visible to a role that ran in an earlier play.
+
+# Operator-facing. One entry per registry host; put the passwords in the
+# vaulted secrets file, not here:
+#
+#   docker_registries:
+#     - registry: registry.gitlab.com
+#       username: gitlab+deploy-token-42
+#       password: "{{ gitlab_deploy_token }}"
+#
+# `registry` is the host[:port] exactly as it appears in the image reference.
+# A Docker Hub reference carries no host — write `docker.io` for those.
+docker_registries: []
+
+# --- composition ----------------------------------------------------------
+# The registry host of the controller image reference, by docker's own rule:
+# the first slash-separated component is a registry host only when it contains
+# a '.' or a ':', or is exactly 'localhost'. Everything else is a Docker Hub
+# namespace — `cmptstks/controller` is Hub's `cmptstks` org, not a host called
+# `cmptstks`, which is what a naive split('/')[0] would try to log in to.
+cs_controller_registry_head: "{{ (controller_image_repo | default('')).split('/')[0] }}"
+
+cs_controller_registry_derived: >-
+  {{ cs_controller_registry_head
+     if ('/' in (controller_image_repo | default(''))
+         and (cs_controller_registry_head is search('[.:]')
+              or cs_controller_registry_head == 'localhost'))
+     else 'docker.io' }}
+
+# `controller_registry_url` overrides the derivation, for a reference it
+# cannot read.
+cs_controller_registry: "{{ controller_registry_url | default(cs_controller_registry_derived, true) }}"
+
+# controller_registry_username / controller_registry_password are the older,
+# single-registry spelling of the same thing. They are folded in on controller
+# hosts rather than handled separately, so there is exactly one login
+# implementation. An explicit docker_registries entry for the same host wins.
+cs_controller_registry_entries: >-
+  {{ [{'registry': cs_controller_registry,
+       'username': controller_registry_username | default(''),
+       'password': controller_registry_password | default('')}]
+     if ('controller' in group_names
+         and (controller_registry_username | default('')) | length > 0)
+     else [] }}
+
+# Every registry this host authenticates to.
+cs_registry_logins: >-
+  {{ docker_registries
+     + (cs_controller_registry_entries
+        | rejectattr('registry', 'in', docker_registries | map(attribute='registry') | list)
+        | list) }}

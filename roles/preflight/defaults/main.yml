@@ -9,3 +9,38 @@ preflight_required_node_vars:
   - az
   - container_network
   - container_network_name
+
+# Groups whose hosts run a docker daemon, and therefore pull images. Mirrors
+# the `hosts:` line of the "Docker hosts" play in playbooks/site.yml — a host
+# outside these groups never logs in to a registry, so probing one from there
+# would only assert egress it does not need.
+preflight_docker_groups:
+  - controller
+  - metrics
+  - registry
+  - nodes
+
+# The controller image existence check reaches the registry over the network.
+# Set false for an air-gapped converge where the image is already loaded on the
+# host, or where egress goes through something the ansible control path cannot
+# see.
+preflight_verify_controller_image: true
+
+# The two ways a manifest read fails, told apart by status so the operator is
+# pointed at the right file.
+preflight_registry_manifest_hint_404: >-
+  No such repository or tag — check controller_image_repo and
+  controller_image_tag in playbooks/group_vars/all/versions.yml, and that the
+  tag really exists in that repository.
+preflight_registry_manifest_hint_denied: >-
+  The credentials were accepted but do not grant pull access to this
+  repository.
+
+# Manifest media types the registry may answer with. Both the OCI and the
+# older docker spellings, index and single-manifest, because which one comes
+# back depends on how the image was built and pushed.
+preflight_registry_manifest_accept: >-
+  application/vnd.oci.image.index.v1+json,
+  application/vnd.docker.distribution.manifest.list.v2+json,
+  application/vnd.oci.image.manifest.v1+json,
+  application/vnd.docker.distribution.manifest.v2+json

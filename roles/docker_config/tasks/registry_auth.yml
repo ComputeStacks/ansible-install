@@ -1,0 +1,50 @@
+---
+# `docker login` for every private registry this host pulls from, written to
+# /root/.docker/config.json. That file is what every later root-run `docker
+# pull` reads -- roles/controller's container create, `cstacks upgrade` run by
+# hand months later, roles/node_observability's image preload -- so the login
+# has to happen here, on the host, and not as a one-shot in whichever role
+# happens to pull first.
+#
+# Credentials are NOT verified here: roles/preflight already proved them
+# against the registry's token endpoint before any host was touched, and it
+# does so with a readable failure message. This task is deliberately no_log,
+# which means a failure here prints nothing useful -- if one ever does, run
+# the play again and read preflight's assertion.
+
+- name: Assert every registry entry is a complete triple
+  ansible.builtin.assert:
+    that:
+      - (item.registry | default('')) | length > 0
+      - (item.username | default('')) | length > 0
+      - (item.password | default('')) | length > 0
+    fail_msg: >-
+      Each docker_registries entry needs a non-empty `registry`, `username`
+      and `password`. The offending entry names registry
+      '{{ item.registry | default('(unset)') }}'. A half-set entry is almost
+      always a vault variable that did not resolve.
+    quiet: true
+  loop: "{{ docker_config_registries }}"
+  loop_control:
+    label: "{{ item.registry | default('(unset)') }}"
+
+- name: Report the registries this host will authenticate to
+  ansible.builtin.debug:
+    msg: >-
+      docker login: {{ docker_config_registries | map(attribute='registry') | join(', ') }}
+  when: docker_config_registries | length > 0
+
+# No `reauthorize`: it forces the write and reports `changed` on every single
+# converge (community.docker 4.6.1, docker_login.update_credentials). Without
+# it the module compares the stored username and secret against the configured
+# ones, so a rotated password still updates and an unchanged one is a no-op.
+- name: Log in to the private registries
+  community.docker.docker_login:
+    registry_url: >-
+      {{ 'https://index.docker.io/v1/'
+         if item.registry in ['docker.io', 'index.docker.io', 'registry-1.docker.io']
+         else item.registry }}
+    username: "{{ item.username }}"
+    password: "{{ item.password }}"
+  loop: "{{ docker_config_registries }}"
+  no_log: true

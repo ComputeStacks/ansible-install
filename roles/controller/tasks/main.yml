@@ -142,17 +142,14 @@
     group: root
     mode: "0600"
 
-- name: Log in to the controller image registry
-  community.docker.docker_login:
-    registry_url: "{{ controller_image_repo.split('/')[0] }}"
-    username: "{{ controller_registry_username }}"
-    password: "{{ controller_registry_password }}"
-    reauthorize: true
-  no_log: true
-  when:
-    - controller_registry_username is defined
-    - controller_registry_password is defined
-
+# `docker login` for a private controller image repo is NOT done here. It is
+# roles/docker_config's job, in the earlier "Docker hosts" play, because the
+# credential has to be in /root/.docker/config.json for every later root-run
+# pull -- the container create below, and `cstacks upgrade` run by hand months
+# from now -- not only for a pull this role performs.
+# controller_registry_username / controller_registry_password still name the
+# controller's own credentials; docker_config folds them into
+# `docker_registries` on controller hosts.
 - name: Install the cstacks CLI
   ansible.builtin.copy:
     src: cstacks.sh

@@ -1,0 +1,47 @@
+---
+# Prove the container registries are reachable and the credentials work before
+# anything is installed. Without this a bad or expired deploy token surfaces
+# deep in the controller play, as a `docker pull` denial under a `no_log` task,
+# after most of a converge has already run.
+
+- name: Verify every configured registry accepts its credentials
+  ansible.builtin.include_tasks: registry_probe.yml
+  vars:
+    preflight_probe_registry: "{{ preflight_registry_entry.registry }}"
+    preflight_probe_username: "{{ preflight_registry_entry.username | default('') }}"
+    preflight_probe_password: "{{ preflight_registry_entry.password | default('') }}"
+    preflight_probe_repository: ""
+    preflight_probe_tag: ""
+  loop: "{{ cs_registry_logins | default([]) }}"
+  loop_control:
+    loop_var: preflight_registry_entry
+    label: "{{ preflight_registry_entry.registry | default('(unset)') }}"
+  when: group_names | intersect(preflight_docker_groups) | length > 0
+
+# The controller image is checked by name, tag and all, and on every
+# controller — public repository or not. A typo in controller_image_tag is as
+# fatal as a bad credential, and both fail here rather than at `cstacks
+# upgrade` on a half-built host.
+- name: Verify the controller image is pullable
+  ansible.builtin.include_tasks: registry_probe.yml
+  vars:
+    preflight_controller_login: >-
+      {{ (cs_registry_logins | default([])
+          | selectattr('registry', 'equalto', cs_controller_registry)
+          | list | first) | default({}, true) }}
+    preflight_probe_registry: "{{ cs_controller_registry }}"
+    preflight_probe_username: "{{ preflight_controller_login.username | default('') }}"
+    preflight_probe_password: "{{ preflight_controller_login.password | default('') }}"
+    # The registry host is stripped from the reference to leave the repository
+    # path the API wants. Derived, not overridden: controller_registry_url
+    # names the host credentials are stored under, not what is in the
+    # reference.
+    preflight_probe_repository: >-
+      {{ controller_image_repo.split('/', 1)[1]
+         if controller_image_repo.startswith(cs_controller_registry_derived ~ '/')
+         else controller_image_repo }}
+    preflight_probe_tag: "{{ controller_image_tag }}"
+  when:
+    - "'controller' in group_names"
+    - not (existing_env | default(false))
+    - preflight_verify_controller_image | bool

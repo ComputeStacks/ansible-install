@@ -132,6 +132,35 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
   needs the interface name and the playbook will not guess it.
 * **`haproxy_stats_password`.** Optional, recommended: without it the
   controller's column default is used, which is the same on every install.
+* **A private controller image.** If `controller_image_repo` points at a
+  registry that needs credentials, add them to `secrets.yml`:
+
+  ```yaml
+  docker_registries:
+    - registry: registry.gitlab.com
+      username: "gitlab+deploy-token-42"
+      password: "CHANGEME"
+  ```
+
+  `registry` is the host as it appears in the image reference. The login is
+  written to `/root/.docker/config.json` on every docker host, so nodes can
+  pull privately mirrored images from the same list, and `cstacks upgrade`
+  still works months later.
+
+  On GitLab, use a **deploy token** with the `read_registry` scope (project or
+  group, Settings → Repository → Deploy tokens). Its username is the whole
+  `gitlab+deploy-token-<n>` string, and its password is shown once. Deploy
+  tokens can be given an expiry date — when one lapses, every pull and every
+  `cstacks upgrade` fails until it is replaced, so record the date somewhere.
+  A personal access token with `read_registry` also works but ties the fleet
+  to one person's account; a CI job token is far too short-lived.
+
+  The registry must serve a publicly-trusted TLS certificate — the provisioner
+  writes no `/etc/docker/certs.d` material and enables no insecure registries.
+
+  Preflight proves the repository, the tag and the credentials before anything
+  is installed, so a wrong tag or an expired token stops the run on the first
+  task rather than half way through the controller.
 
 ## 5. Check connectivity
 

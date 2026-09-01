@@ -1,0 +1,113 @@
+---
+# One registry probe, over the registry HTTP API rather than `docker pull`:
+# preflight runs before geerlingguy.docker, so there is no docker daemon on a
+# greenfield host yet. Reads only — nothing here changes the host.
+#
+# Caller sets, via `vars:`:
+#   preflight_probe_registry    host[:port] as written in the image reference
+#   preflight_probe_username    '' for an anonymous probe
+#   preflight_probe_password    ''
+#   preflight_probe_repository  repository path, '' to check credentials only
+#   preflight_probe_tag         tag, required when repository is set
+#
+# The flow is the standard token handshake every OCI registry implements:
+# GET /v2/ answers 401 with a `WWW-Authenticate: Bearer realm=...,service=...`
+# challenge; the realm mints a token from the credentials; the token reads the
+# manifest.
+
+- name: "Resolve the registry API endpoint for {{ preflight_probe_registry }}"
+  ansible.builtin.set_fact:
+    # Docker Hub's API host is not the name that appears in an image
+    # reference, and a single-segment Hub repository is really `library/<name>`.
+    preflight_probe_api_host: >-
+      {{ 'registry-1.docker.io'
+         if preflight_probe_registry in ['docker.io', 'index.docker.io', 'registry-1.docker.io']
+         else preflight_probe_registry }}
+    preflight_probe_path: >-
+      {{ ('library/' ~ preflight_probe_repository)
+         if (preflight_probe_registry in ['docker.io', 'index.docker.io', 'registry-1.docker.io']
+             and '/' not in preflight_probe_repository)
+         else preflight_probe_repository }}
+
+- name: "Query the registry API of {{ preflight_probe_registry }}"
+  ansible.builtin.uri:
+    url: "https://{{ preflight_probe_api_host }}/v2/"
+    status_code: [200, 401]
+    timeout: 20
+  register: preflight_probe_root
+
+- name: "Read the authentication challenge from {{ preflight_probe_registry }}"
+  ansible.builtin.set_fact:
+    preflight_probe_realm: >-
+      {{ (preflight_probe_root.www_authenticate | default('')
+          | regex_search('realm="([^"]+)"', '\1') | default([], true)) | join('') }}
+    preflight_probe_service: >-
+      {{ (preflight_probe_root.www_authenticate | default('')
+          | regex_search('service="([^"]+)"', '\1') | default([], true)) | join('') }}
+
+# Scope is omitted for a credentials-only probe: every registry this supports
+# mints an unscoped token for valid credentials and refuses one for invalid
+# credentials, which is exactly the question being asked.
+- name: "Request a pull token from {{ preflight_probe_registry }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ preflight_probe_realm }}?service={{ preflight_probe_service | urlencode }}{{
+         ('&scope=' ~ ('repository:' ~ preflight_probe_path ~ ':pull') | urlencode)
+         if preflight_probe_repository | length > 0 else '' }}
+    url_username: "{{ preflight_probe_username if preflight_probe_username | length > 0 else omit }}"
+    url_password: "{{ preflight_probe_password if preflight_probe_username | length > 0 else omit }}"
+    force_basic_auth: "{{ preflight_probe_username | length > 0 }}"
+    status_code: [200, 401, 403]
+    timeout: 20
+  register: preflight_probe_token_result
+  when: preflight_probe_realm | length > 0
+
+- name: "Assert the credentials are accepted by {{ preflight_probe_registry }}"
+  ansible.builtin.assert:
+    that:
+      - preflight_probe_token_result.status == 200
+    fail_msg: >-
+      {{ preflight_probe_registry }} refused to issue a pull token for
+      {{ preflight_probe_username | default('(anonymous)', true) }}
+      (HTTP {{ preflight_probe_token_result.status }}). The credentials are
+      wrong, expired, or lack pull access. On GitLab this must be a deploy
+      token (project or group, Settings -> Repository -> Deploy tokens) with
+      the `read_registry` scope, and its username is the full
+      `gitlab+deploy-token-<n>` string, not your account name. Deploy tokens
+      expire — check the expiry date before assuming the password is wrong.
+    success_msg: >-
+      {{ preflight_probe_registry }}: credentials accepted
+    quiet: true
+  when: preflight_probe_realm | length > 0
+
+- name: "Read the manifest of {{ preflight_probe_path }}"
+  ansible.builtin.uri:
+    url: >-
+      https://{{ preflight_probe_api_host }}/v2/{{ preflight_probe_path }}/manifests/{{ preflight_probe_tag }}
+    headers: >-
+      {{ {'Accept': preflight_registry_manifest_accept}
+         | combine({'Authorization': 'Bearer ' ~ preflight_probe_token}
+                   if preflight_probe_token | length > 0 else {}) }}
+    status_code: [200, 401, 403, 404]
+    timeout: 20
+  vars:
+    preflight_probe_token: >-
+      {{ (preflight_probe_token_result.json | default({})).token
+         | default((preflight_probe_token_result.json | default({})).access_token | default(''), true) }}
+  register: preflight_probe_manifest
+  when: preflight_probe_repository | length > 0
+
+- name: "Assert the image is pullable: {{ preflight_probe_path ~ ':' ~ preflight_probe_tag }}"
+  ansible.builtin.assert:
+    that:
+      - preflight_probe_manifest.status == 200
+    fail_msg: >-
+      {{ preflight_probe_registry }}/{{ preflight_probe_path }}:{{ preflight_probe_tag }}
+      is not pullable (HTTP {{ preflight_probe_manifest.status }}).
+      {{ preflight_registry_manifest_hint_404
+         if preflight_probe_manifest.status == 404
+         else preflight_registry_manifest_hint_denied }}
+    success_msg: >-
+      {{ preflight_probe_registry }}/{{ preflight_probe_path }}:{{ preflight_probe_tag }} is pullable
+    quiet: true
+  when: preflight_probe_repository | length > 0

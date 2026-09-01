@@ -20,3 +20,11 @@ docker_config_registry_mirrors: []
 # Escape hatch, merged last. Everything added here MUST be SIGHUP-reloadable
 # (this role reloads, it never restarts dockerd) -- see README.
 docker_config_extra_options: {}
+
+# Private registries this host authenticates to, as {registry, username,
+# password} triples. Composed in playbooks/group_vars/all/registries.yml from
+# the operator-facing `docker_registries` plus, on controller hosts, the
+# controller's own controller_registry_username / _password pair -- that file
+# documents the shape and explains why the composition is not done here.
+# Defaulted to [] so the role still works outside these playbooks.
+docker_config_registries: "{{ cs_registry_logins | default([]) }}"

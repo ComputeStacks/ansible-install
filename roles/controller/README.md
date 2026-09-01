@@ -22,19 +22,17 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 3. Generates the application ssh keypair at
    `/etc/computestacks/.ssh/id_ed25519` (`regenerate: never`).
 4. Generates the self-signed tenant wildcard **once**.
-5. Optional `docker login` when `controller_registry_username` /
-   `controller_registry_password` are set (`no_log`).
-6. Installs the `cstacks` CLI and its bash completion.
-7. Renders `/etc/default/computestacks` — **only when not
+5. Installs the `cstacks` CLI and its bash completion.
+6. Renders `/etc/default/computestacks` — **only when not
    `existing_env`** (`no_log`, mode 0600).
-8. Creates the peer-auth postgres `root` superuser and its database
+7. Creates the peer-auth postgres `root` superuser and its database
    (`tasks/postgres.yml`).
-9. Records the docker client certificate's checksum, so a rotation by
+8. Records the docker client certificate's checksum, so a rotation by
    `roles/vault` restarts the portal.
-10. `cstacks bootstrap-db` on a greenfield database (`creates:` the sentinel).
-11. `cstacks upgrade` when the running container's image no longer matches the
-    configured tag.
-12. Flushes handlers, then starts the portal if it is not already running.
+9. `cstacks bootstrap-db` on a greenfield database (`creates:` the sentinel).
+10. `cstacks upgrade` when the running container's image no longer matches the
+   configured tag.
+11. Flushes handlers, then starts the portal if it is not already running.
 
 ## Directory layout
 
@@ -189,7 +187,8 @@ Assert first, then act:
 | `controller_sentry_dsn` | `{{ sentry_dsn \| default('') }}` | Empty disables bug reporting. v1 defaulted to ComputeStacks' own DSN. |
 | `controller_postgres_*` | `computestacks` / `cloudportal` / `127.0.0.1` / pool 40 | Composed into `DATABASE_URL`. |
 | `controller_rails_*`, `controller_puma_workers`, `controller_queue_*` | v1 values | Concurrency. |
-| `controller_registry_username` / `_password` | unset | Optional enterprise image-repo pull credentials, in `secrets.yml`. `docker login` runs `no_log` when both are set. |
+| `controller_registry_username` / `_password` | unset | Optional pull credentials for a private image repo, in `secrets.yml`. This role does **not** log in — `playbooks/group_vars/all/registries.yml` folds the pair into `docker_registries` and `roles/docker_config` performs the login, one play earlier. |
+| `controller_registry_url` | derived from `controller_image_repo` | The registry host those credentials are stored under. Only needed when the derivation cannot read the reference. |
 
 Consumed, not owned: `cs_ports.redis`, `secret_key_base`, `user_auth_secret`,
 `node_enrollment_token`, `postgres_password`, `cs_app_zone`, `locale`,
@@ -242,8 +241,7 @@ restarted the portal by hand.
 
 ## Requirements
 
-`community.crypto` (ssh keypair), `community.docker` (`docker_login`),
-`community.postgresql` (root role/db) — all pinned in `requirements.yml`.
+`community.crypto` (ssh keypair), `community.postgresql` (root role/db) — all pinned in `requirements.yml`.
 Runs after `geerlingguy.docker`, `docker_config`, `vault`,
 `geerlingguy.postgresql`, `geerlingguy.redis` and `acme_web` on the controller
 (`playbooks/site.yml`).

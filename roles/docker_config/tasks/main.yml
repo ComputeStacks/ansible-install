@@ -24,3 +24,7 @@
     group: root
     mode: "0644"
   notify: Reload docker
+
+- name: Authenticate to the private registries
+  ansible.builtin.include_tasks: registry_auth.yml
+  when: docker_config_registries | length > 0

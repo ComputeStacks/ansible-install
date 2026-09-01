@@ -9,8 +9,12 @@
 controller_image_repo: "ghcr.io/computestacks/controller"
 controller_image_tag: "9.7"
 # Optional enterprise repo override + pull credentials (vaulted):
-# controller_image_repo: "registry.example.com/computestacks/controller-enterprise"
+# controller_image_repo: "registry.gitlab.com/computestacks/controller-enterprise"
 # controller_registry_username / controller_registry_password in secrets.yml
+# (or a docker_registries entry — see playbooks/group_vars/all/registries.yml).
+# roles/preflight proves the repo, the tag and the credentials before anything
+# is installed, so a wrong tag here fails on the first task rather than at
+# `cstacks upgrade`.
 
 # cs-agent — apt PACKAGE version. Historically this was NOT the agent's
 # self-reported version (package 1.5.0 shipped backup-agent 2.0.0), but since

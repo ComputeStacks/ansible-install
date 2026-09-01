@@ -167,3 +167,9 @@
     - (tailscale_authkey | default('')) | length > 0
     - (preflight_tailscale_disabled_hosts | default([])) | length > 0
   run_once: true
+
+# Network checks last: everything above is a pure inventory/facts assertion
+# that costs nothing, and there is no point reaching out to a registry for a
+# run that a missing host var was going to stop anyway.
+- name: Verify the container registries and the controller image
+  ansible.builtin.include_tasks: registry.yml
