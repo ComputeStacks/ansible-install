@@ -81,14 +81,25 @@ controller_seed_create_clients: true
 controller_seed_dns_username: admin
 controller_seed_pdns_zone_type: master
 controller_seed_pdns_server: localhost
-# PowerDNS API path (schema doc: the full API server path). The controller
-# must reach the leader on an address that pdns.conf's `webserver-allow-from`
-# lists -- roles/powerdns puts the controller's primary_ip and public_ip
-# there, NOT its tailnet address, so this is deliberately not a tailscale
-# derivation.
+# The controller must reach the leader on an address that pdns.conf's
+# `webserver-allow-from` lists -- roles/powerdns puts the controller's
+# primary_ip and public_ip there, NOT its tailnet address, so this is
+# deliberately not a tailscale derivation.
 controller_seed_dns_primary_ip: >-
   {{ ((groups['ns_primary'] | default([]) | map('extract', hostvars, 'primary_ip') | list) + ['']) | first }}
-controller_seed_dns_endpoint: "http://{{ controller_seed_dns_primary_ip }}:{{ cs_ports.pdns_api }}/api/v1/servers/localhost"
+# Ends at `/servers`, NOT `/servers/localhost`, even though the latter is what
+# the PowerDNS API docs call the server path. powerdns-ruby appends the server
+# id itself -- Pdns::Client#exec! builds
+#
+#   path      = "#{Pdns.config[:server]}/#{path}" unless path.include?(server)
+#   url_base  = "#{endpoint}/#{path}"
+#
+# so an endpoint that already ends in `localhost` produces
+# `/api/v1/servers/localhost/localhost`, which is a 404, which the gem raises
+# as Pdns::UnknownObject. That is what `rake test_connection:all` hit: it calls
+# Client#version, whose only job is to GET the server object. Confirmed against
+# the live API -- the doubled path returns 404 and this one returns 200.
+controller_seed_dns_endpoint: "http://{{ controller_seed_dns_primary_ip }}:{{ cs_ports.pdns_api }}/api/v1/servers"
 controller_seed_dns_zone: "{{ cs_app_zone }}"
 
 # --- locations / regions --------------------------------------------------
