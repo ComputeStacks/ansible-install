@@ -21,11 +21,14 @@ template that drifted from the controller's models across releases.
 
 ## What it does, in order (`tasks/main.yml`)
 
-1. Asserts the inputs: the domains, one node minimum, the admin account, the
-   metric/log client credentials, the region tunables (against the *model's*
-   validations), the required per-node inventory vars, a single registry host,
-   a dns driver it can seed, and — for PowerDNS — the API keys and a unique
-   `powerdns_name` per nameserver.
+1. Asserts the inputs: the domains, **one NEW node minimum** (`cs_new_nodes`,
+   see "Sites" below), the admin account, the metric/log client credentials
+   **for every site this run seeds**, the region tunables (against the
+   *model's* validations), the required inventory vars on each node it will
+   render, a single registry host, a dns driver it can seed, and — for
+   PowerDNS — the API keys and a unique `powerdns_name` per nameserver. It
+   also fails on a retired `controller_seed_{prometheus,loki}_{username,password}`
+   still set in an inventory, rather than ignoring it silently.
 2. Reads the self-signed tenant wildcard `sharedcert.pem` (`no_log`).
 3. Renders `templates/manifest.yml.j2` **in memory** and asserts it parses as
    YAML, carries `schema_version: 1`, has at least one location, and uses no
@@ -57,8 +60,65 @@ role is the only place the mapping exists (docs/contracts.md §Vocabulary).
 | `container_network` | `…regions[].networks[].subnet` | Must be RFC-1918 and at least a `/28`. |
 | `container_network_name` | `…regions[].networks[].name` | Passed **raw**; the model normalises it (`net-exm-001` is stored as `netexm001`). The apply matches on the normalised form, so the raw value is stable and readable in the diff. |
 | the az's single node | `…regions[].load_balancer` | `ext_ip`/`internal_ip` = that node's `primary_ip`, `public_ip` = its `public_ip`. |
-| `cs_metrics_domain` + `cs_ports.metrics_*` | `metric_clients[]` / `log_clients[]` | Lists, one entry each; regions reference them by **exact endpoint string**. |
+| `site` host var | *(nothing — the controller has no column for it)* | Decides **which** client each az names. One `metric_clients[]`/`log_clients[]` entry per site this run seeds nodes into, deduped by endpoint. |
+| that site's `metrics_domain`, else `cs_metrics_domain`, + `cs_ports.metrics_*` | `metric_clients[].endpoint` / `log_clients[].endpoint` | Regions reference them by **exact endpoint string**. A single-site inventory renders the same one-element lists it always did. |
 | `dns_driver: powerdns` + `groups['nameservers']` | `dns.driver` / `dns.zones` | Omitted entirely when `dns_driver: none`. |
+
+## Sites, and which nodes reach the apply
+
+`Region belongs_to :metric_client` / `:log_client` in the controller, and the
+manifest takes `metric_clients:` / `log_clients:` as **lists** with each region
+naming its own by exact endpoint string. Production has been in that shape for
+years — two metrics servers across four Locations. The provisioner was the only
+thing flattening it to one.
+
+* **The client lists carry one entry per SITE this run seeds nodes into,
+  deduped by endpoint string.** The apply matches a client on the exact
+  string, so two sites resolving to the same endpoint must produce one row,
+  not two: two rows with the same endpoint would leave regions pointing at the
+  first and split the placement metrics the scheduler reads.
+* **Each az names its own site's endpoints** —
+  `loki_endpoint`, `metric_client_endpoint`, `log_client_endpoint` come from
+  `cs_site_metrics_domains[hostvars[host].cs_site]`. The site MAPS are read
+  **locally**, here on the controller, and keyed by the cross-host-safe
+  `cs_site`; `hostvars[h].cs_site_metrics_domains` is silently Undefined and is
+  a hard-rule violation (docs/contracts.md §Variable scope, rule 10).
+* **Credentials are per site**, with the guard on the SUBSCRIPT and never the
+  field: `(cs_site_metrics_credentials[<site>] | default(cs_metrics_credentials_default))`.
+  The two production metrics servers do not share a password, and a wrong
+  username is a 401 with exactly the same symptom as a wrong password.
+* **When two sites do collide on an endpoint**, the first site in sorted order
+  supplies the credentials. They are naming the same physical nginx vhost, so
+  disagreeing about its basic-auth is a misconfiguration of the metrics hosts,
+  not something this template can resolve — and `roles/preflight` is where a
+  site's metrics host is validated.
+* **A site with no metrics host in the inventory** falls back to
+  `controller_seed_{metric,log}_endpoint`, the single-site defaults. An
+  inventory that never mentions `site` is exactly that case, and renders the
+  manifest it always rendered, byte for byte.
+
+### `cs_new_nodes`, never `groups['nodes']`
+
+The `locations:` loop, the `metric_clients`/`log_clients` site list, the
+required-node-var assert and the `acme_server` warning all iterate
+**`cs_new_nodes`** — `groups['nodes']` minus every host flagged `existing_env`.
+
+An already-provisioned node must not reach the apply at all.
+`Bootstrap::Writer#create_or_report!` rotates a load balancer's
+`stats_password` **and** `shared_certificate` unconditionally on a row that
+already exists (controller repo `doc/bootstrap_manifest.md`, *Credential
+rotation*) — there is no flag for it and no preview beyond the DRY_RUN text.
+Rendering an existing az here therefore pushes a **new haproxy stats password
+to a production node** at its next load balancer update. `--limit` does not
+protect against this: it removes hosts from *plays*, not from `groups[]`, and
+this document is rendered from `groups[]`.
+
+`difference` does not preserve inventory order, so every consumer sorts —
+manifest output order is visible in the DRY_RUN diff.
+
+If every node in the inventory is an existing one there is nothing to seed and
+the role fails at its first assert, rather than rendering a `locations:` list
+of empty regions.
 
 ## The two derivations worth reading twice
 
@@ -171,10 +231,18 @@ reported as drift, not applied. Do it deliberately anyway: it is how a
 still-unconfigured setting gets seeded, and how the fuller drift report gets
 printed.
 
-The regions still reference the metric/log clients **by endpoint**. The match
-is exact and a miss aborts the apply — which is the wanted behaviour: it means
-the existing controller's client endpoint is not what this inventory says it
-is, and creating a second client would silently split the placement metrics.
+The regions still reference the metric/log clients **by endpoint**, now that
+site's own endpoint. The match is exact and a miss aborts the apply — which is
+the wanted behaviour: it means the existing controller's client endpoint is not
+what this inventory says it is, and creating a second client would silently
+split the placement metrics. Check the rendered strings against the live
+`MetricClient.endpoint` / `LogClient.endpoint` character for character before
+the run; in attach mode the client sections are not even emitted, so the
+strings in the regions are all there is.
+
+Hosts flagged `existing_env` are **not** in the document — see "`cs_new_nodes`,
+never `groups['nodes']`" above. The attach inventory is a partial view by
+convention (docs/contracts.md rule 9), and this is the belt to that braces.
 
 Attach mode always runs `DRY_RUN=1` first, prints the diff, and waits at a
 `pause` prompt. Set `controller_seed_confirm: false` in CI (the pause module
@@ -192,9 +260,9 @@ needs a tty); `controller_seed_dry_run_first: false` skips the preview.
 | `controller_seed_registry_node` | first registry host's `primary_ip` | `Setting.registry_node`. Empty ⇒ the registry settings are omitted. |
 | `controller_seed_cr_le` | `{{ cs_registry_domain }}` | `Setting.cr_le`. |
 | `controller_seed_settings_extra` | `{}` | Extra `Setting` rows (`company_name`, `app_name`, `general_support`, `acme_email`, …). **Seed-only** — written only while nobody has configured that setting yet, and an unknown name aborts the apply. |
-| `controller_seed_metric_endpoint` / `_log_endpoint` | `https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus / metrics_loki }}` | Matched exactly by the apply. |
-| `controller_seed_prometheus_username` / `_loki_username` | `promuser` / `loguser` | Follow `acme_web_*_username` when the operator overrides those. |
-| `controller_seed_dns_endpoint` | `http://<ns_primary primary_ip>:{{ cs_ports.pdns_api }}/api/v1/servers/localhost` | Full PowerDNS API server path. |
+| `controller_seed_metric_endpoint` / `_log_endpoint` | `https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus / metrics_loki }}` | The **single-site fallback**, unchanged. Used for a site with no metrics host in the inventory — which is every host of an inventory that never mentions `site`. A site whose metrics host *is* in the inventory uses that host's own `metrics_domain` instead, so on an attach run this pair is normally **not** consulted at all. The apply matches a client on the exact endpoint string, and the lever for making that string match an existing row is `metrics_domain` on the metrics host plus `cs_ports.metrics_prometheus` / `_loki` — not these. If a live `MetricClient.endpoint` has a shape those cannot produce (a path, a trailing slash, plain http), stop and add an explicit per-site override rather than bending `cs_metrics_domain`, which also names the certificate and the loki push URL. |
+| `controller_seed_prometheus_username` / `_password`, `controller_seed_loki_username` / `_password` | **retired** | The client basic-auth is per site now, with one spelling (docs/contracts.md §Site scoping). Set `prometheus_basic_auth_password` / `loki_basic_auth_password` and `acme_web_{prometheus,loki}_username` for the environment-wide values, and `metrics_site_credentials` in the vaulted secrets for a per-site override. `tasks/main.yml` **fails** if one of the four is still set, rather than ignoring it — the apply rotates a client's username/password unconditionally on an existing row, so a silently-dropped override would put the wrong password on a live controller. |
+| `controller_seed_dns_endpoint` | `http://<ns_primary primary_ip>:{{ cs_ports.pdns_api }}/api/v1/servers` | Ends at `/servers`, NOT `/servers/localhost`: `powerdns-ruby` appends the server id itself, and the doubled path is a 404 the gem raises as `Pdns::UnknownObject`. |
 | `controller_seed_pdns_zone_type` | `master` | `settings.config.zone_type`. |
 | `controller_seed_p_net_size` | `27` | 24–29 (model validation). |
 | `controller_seed_pid_limit` | `300` | v1 value. Column name is `pid_limit`, singular. |
@@ -210,10 +278,15 @@ Consumed, not owned: `cs_portal_domain`, `cs_registry_domain`,
 `cs_metrics_domain`, `cs_app_zone`, `cs_admin_email`, `cs_admin_password`,
 `currency`, `dns_driver`, `pdns_api_key`, `pdns_web_key`,
 `prometheus_basic_auth_password`, `loki_basic_auth_password`,
-`secret_key_base`, `tailscale_authkey`, `existing_env`, `cs_ports`.
+`secret_key_base`, `tailscale_authkey`, `existing_env`, `cs_ports`, and the
+site contract (`playbooks/group_vars/all/sites.yml`): `cs_site`,
+`cs_site_metrics_domains`, `cs_site_metrics_credentials`,
+`cs_metrics_credentials_default`, `cs_new_nodes`.
 
 `vars/main.yml` holds the frozen schema section list — a mirror of the
-controller's `Bootstrap::Manifest::SECTIONS`, not an operator knob.
+controller's `Bootstrap::Manifest::SECTIONS` — plus the pairwise tailnet
+predicate and the two derived site values (`controller_seed_manifest_sites`,
+`controller_seed_site_endpoints`). None of them are operator knobs.
 
 ## Inventory requirements this role adds
 

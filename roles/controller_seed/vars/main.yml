@@ -20,6 +20,50 @@ controller_seed_controller_tailnet: >-
      and (hostvars[controller_seed_controller_host].tailscale_enabled | default(true) | bool)
      and ((controller_seed_controller_ts | trim) | length > 0) }}
 
+### Site scoping (docs/contracts.md §Site scoping). Role vars, not defaults:
+# they mirror the frozen contract and are not operator knobs. Every one of
+# them reads the site maps LOCALLY (rule 10) -- this role runs on the
+# controller, which is the host rendering the manifest.
+
+# The sites this run actually seeds, sorted. Derived from `cs_new_nodes`, NOT
+# from groups['nodes']: an existing host's az is not in the document (its load
+# balancer would be re-rendered, and Bootstrap::Writer#create_or_report!
+# rotates stats_password and shared_certificate unconditionally on a row that
+# already exists), so a client row for a site that contributes no new node
+# would be created with nothing referencing it.
+controller_seed_manifest_sites: >-
+  {{ cs_new_nodes | map('extract', hostvars, 'cs_site') | list | unique | sort }}
+
+# site -> {"metric": <endpoint>, "log": <endpoint>} -- the exact strings the
+# apply matches clients on. A site whose metrics host is in this inventory
+# uses that host's own domain (`cs_site_metrics_domains`, which is
+# `metrics_domain` on the metrics host falling back to `cs_metrics_domain`);
+# a site with no metrics host in the inventory -- which is every host of an
+# inventory that never mentions `site` -- falls back to the role's
+# single-site `controller_seed_{metric,log}_endpoint` defaults, so a
+# single-site inventory renders exactly the strings it always rendered.
+#
+# Built as JSON and parsed back, the same idiom and for the same reason as
+# playbooks/group_vars/all/sites.yml: the per-site fallback needs a `{% for %}`,
+# a template carrying one renders to a string, and the round-trip is what
+# turns it back into a mapping.
+controller_seed_site_endpoints_json: >-
+  {
+  {% for cs_seed_site in controller_seed_manifest_sites %}
+  {{ cs_seed_site | to_json }}: {
+  "metric":
+  {{ (('https://' ~ cs_site_metrics_domains[cs_seed_site] ~ ':' ~ cs_ports.metrics_prometheus)
+      if cs_seed_site in cs_site_metrics_domains
+      else controller_seed_metric_endpoint) | to_json }},
+  "log":
+  {{ (('https://' ~ cs_site_metrics_domains[cs_seed_site] ~ ':' ~ cs_ports.metrics_loki)
+      if cs_seed_site in cs_site_metrics_domains
+      else controller_seed_log_endpoint) | to_json }}
+  }{{ ',' if not loop.last else '' }}
+  {% endfor %}
+  }
+controller_seed_site_endpoints: "{{ controller_seed_site_endpoints_json | from_json }}"
+
 controller_seed_schema_sections:
   - schema_version
   - settings

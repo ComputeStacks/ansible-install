@@ -69,12 +69,32 @@ controller_seed_settings_extra: {}
 # The endpoints the CONTROLLER reads metrics and logs back from: the nginx TLS
 # vhosts roles/acme_web publishes on the metrics host. Matched EXACTLY by the
 # apply -- a changed port or scheme is a different client, not a rename.
+#
+# Both lists carry ONE ENTRY PER SITE this run seeds nodes into, deduped by
+# endpoint string, and each az names its own site's endpoint. The two
+# variables below are the SINGLE-SITE fallback and are unchanged: a site
+# whose metrics host is in the inventory uses that host's own
+# `metrics_domain` instead (vars/main.yml, `controller_seed_site_endpoints`),
+# and an inventory that never mentions `site` has exactly one site with no
+# metrics-host domain of its own, so it renders these strings and nothing
+# else -- byte for byte what it rendered before sites existed.
 controller_seed_metric_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus }}"
 controller_seed_log_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_loki }}"
-controller_seed_prometheus_username: "{{ acme_web_prometheus_username | default('promuser') }}"
-controller_seed_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
-controller_seed_loki_username: "{{ acme_web_loki_username | default('loguser') }}"
-controller_seed_loki_password: "{{ loki_basic_auth_password | default('') }}"
+# The basic-auth credentials are deliberately NOT role knobs. They are per
+# site, and there is exactly one spelling for them (docs/contracts.md
+# §Site scoping):
+#
+#   (cs_site_metrics_credentials[<site>] | default(cs_metrics_credentials_default))
+#
+# Environment-wide values still come from `prometheus_basic_auth_password` /
+# `loki_basic_auth_password` and `acme_web_{prometheus,loki}_username`;
+# per-site overrides come from the vaulted `metrics_site_credentials`. The
+# four `controller_seed_{prometheus,loki}_{username,password}` variables this
+# role used to own were single-site by construction and are RETIRED --
+# tasks/main.yml fails loudly if an inventory still sets one, rather than
+# ignoring it silently and writing the wrong password to a live client (the
+# apply rotates a client's username/password unconditionally on an existing
+# row -- controller repo doc/bootstrap_manifest.md §Credential rotation).
 controller_seed_create_clients: true
 
 # --- dns ------------------------------------------------------------------

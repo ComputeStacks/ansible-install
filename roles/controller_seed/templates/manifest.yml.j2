@@ -13,13 +13,25 @@
 
   Every jinja control tag sits at column 0 on purpose -- ansible renders with
   trim_blocks but not lstrip_blocks, so an indented tag would leak its own
-  indentation into the YAML.
+  indentation into the YAML. A `#` line in here is OUTPUT (a comment in the
+  rendered manifest); a note to the reader of the TEMPLATE goes in a jinja
+  comment block like this one, or it changes the rendered bytes. (And never
+  write a jinja comment's own closing delimiter inside one -- it closes the
+  block right there and the rest of the note lands in the manifest.)
+
+  SITE SCOPING (docs/contracts.md §Site scoping). This document is rendered on
+  the controller, so it is the one host that may read the site MAPS -- which
+  it does through the cross-host-safe `hostvars[h].cs_site` (rule 10):
+  `cs_site_metrics_domains[hostvars[h].cs_site]`, never
+  `hostvars[h].cs_site_metrics_domains`. It renders `cs_new_nodes`, never
+  `groups['nodes']`: an already-provisioned host in the inventory must not
+  reach the apply at all.
 --------------------------------------------------------------------------- #}
 {% set controller_host = groups['controller'] | first %}
 {% set controller_ts = hostvars[controller_host].tailscale_ip | default(hostvars[controller_host].ansible_local.computestacks.tailscale_ip | default('')) %}
 {% set controller_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
 {% set include_globals = (not (existing_env | default(false) | bool)) or (controller_seed_full_manifest | bool) %}
-{% set node_regions = groups['nodes'] | map('extract', hostvars, 'region') | list | unique | sort %}
+{% set node_regions = cs_new_nodes | map('extract', hostvars, 'region') | list | unique | sort %}
 # Rendered by ansible (roles/controller_seed) -- do not hand-edit.
 # Carries secrets: root 0600, deleted after a successful apply.
 schema_version: 1
@@ -41,17 +53,45 @@ settings:
 
 # What the CONTROLLER reads metrics/logs back from (the acme_web nginx vhosts
 # on the metrics host). Matched by EXACT endpoint string.
+{# ONE ENTRY PER SITE this run seeds nodes into, DEDUPED BY ENDPOINT STRING:
+   the apply matches a client on the exact string, so two sites resolving to
+   the same endpoint must produce one row, not two. When they do collide the
+   first site in sorted order supplies the credentials -- the colliding sites
+   are naming the same physical nginx vhost, so disagreeing about its
+   basic-auth is a misconfiguration of the metrics hosts and not something a
+   template can resolve. A single-site inventory has exactly one site and
+   renders the one-element list it always rendered, byte for byte.
+
+   The credential guard is on the SUBSCRIPT, never the field (contracts.md
+   §Site scoping): a missing site makes the whole subscript Undefined, while
+   guarding the field would swallow a genuinely misconfigured entry too. #}
 metric_clients:
-  - endpoint: {{ controller_seed_metric_endpoint | to_json }}
+{% set seen_metric = [] %}
+{% for seed_site in controller_seed_manifest_sites %}
+{% set metric_endpoint = controller_seed_site_endpoints[seed_site]['metric'] %}
+{% if metric_endpoint not in seen_metric %}
+{% set _ = seen_metric.append(metric_endpoint) %}
+{% set metric_creds = cs_site_metrics_credentials[seed_site] | default(cs_metrics_credentials_default) %}
+  - endpoint: {{ metric_endpoint | to_json }}
     create: {{ controller_seed_create_clients | bool | to_json }}
-    username: {{ controller_seed_prometheus_username | to_json }}
-    password: {{ controller_seed_prometheus_password | to_json }}
+    username: {{ metric_creds['prometheus_username'] | to_json }}
+    password: {{ metric_creds['prometheus_password'] | to_json }}
+{% endif %}
+{% endfor %}
 
 log_clients:
-  - endpoint: {{ controller_seed_log_endpoint | to_json }}
+{% set seen_log = [] %}
+{% for seed_site in controller_seed_manifest_sites %}
+{% set log_endpoint = controller_seed_site_endpoints[seed_site]['log'] %}
+{% if log_endpoint not in seen_log %}
+{% set _ = seen_log.append(log_endpoint) %}
+{% set log_creds = cs_site_metrics_credentials[seed_site] | default(cs_metrics_credentials_default) %}
+  - endpoint: {{ log_endpoint | to_json }}
     create: {{ controller_seed_create_clients | bool | to_json }}
-    username: {{ controller_seed_loki_username | to_json }}
-    password: {{ controller_seed_loki_password | to_json }}
+    username: {{ log_creds['loki_username'] | to_json }}
+    password: {{ log_creds['loki_password'] | to_json }}
+{% endif %}
+{% endfor %}
 {% if dns_driver | default('none') == 'powerdns' %}
 
 dns:
@@ -90,7 +130,15 @@ locations:
     fill_strategy: {{ controller_seed_fill_strategy | to_json }}
     fill_by_qty: true
     regions:
-{% for host in (groups['nodes'] | sort) %}
+{# cs_new_nodes, NOT groups['nodes']: an existing host must never reach this
+   document. Bootstrap::Writer#create_or_report! rotates a load balancer's
+   stats_password and shared_certificate UNCONDITIONALLY on a row that already
+   exists (controller repo doc/bootstrap_manifest.md, Credential rotation) --
+   there is no flag and no preview beyond the DRY_RUN text, so rendering an
+   existing az here pushes a new haproxy stats password to a production node
+   at its next LB update. `difference` does not preserve order, hence the
+   sort. #}
+{% for host in (cs_new_nodes | sort) %}
 {% if hostvars[host].region == location %}
 {% set node_ts = hostvars[host].tailscale_ip | default(hostvars[host].ansible_local.computestacks.tailscale_ip | default('')) %}
 {% set node_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[host].tailscale_enabled | default(true)) and (node_ts | length > 0) %}
@@ -107,12 +155,15 @@ locations:
         # the controller's tailnet address when both ends are on the tailnet,
         # otherwise its primary_ip. host:port, no scheme.
         acme_server: {{ (acme_address ~ ':' ~ cs_ports.controller_acme_backend) | to_json }}
+{# The three endpoints below are THIS NODE'S OWN SITE's, keyed by the
+   cross-host-safe hostvars[host].cs_site -- the site MAPS themselves are read
+   locally, here on the controller (contracts.md rule 10). #}
         # Where CONTAINERS ship logs to. Credentials are spliced in
         # controller-side from the log client (Region#loki_container_endpoint),
         # so this carries none.
-        loki_endpoint: {{ controller_seed_log_endpoint | to_json }}
-        metric_client_endpoint: {{ controller_seed_metric_endpoint | to_json }}
-        log_client_endpoint: {{ controller_seed_log_endpoint | to_json }}
+        loki_endpoint: {{ controller_seed_site_endpoints[hostvars[host].cs_site]['log'] | to_json }}
+        metric_client_endpoint: {{ controller_seed_site_endpoints[hostvars[host].cs_site]['metric'] | to_json }}
+        log_client_endpoint: {{ controller_seed_site_endpoints[hostvars[host].cs_site]['log'] | to_json }}
         nodes:
           - label: {{ hostvars[host].hostname | to_json }}
             hostname: {{ hostvars[host].hostname | to_json }}

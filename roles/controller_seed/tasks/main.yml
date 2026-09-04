@@ -10,11 +10,14 @@
       - (cs_portal_domain | default('')) | length > 0
       - (cs_metrics_domain | default('')) | length > 0
       - (cs_app_zone | default('')) | length > 0
-      - (groups['nodes'] | default([])) | length > 0
+      - (cs_new_nodes | default([])) | length > 0
     fail_msg: >-
       cs_portal_domain, cs_metrics_domain and cs_app_zone must be set in the
-      inventory, and groups['nodes'] must contain at least one node -- the
-      manifest's locations/regions are derived entirely from the node group.
+      inventory, and at least one node must be one this run is BUILDING -- the
+      manifest's locations/regions are derived entirely from `cs_new_nodes`
+      (groups['nodes'] minus every host flagged `existing_env`), because an
+      already-provisioned az must never be re-rendered into the apply. If
+      every node in the inventory is an existing one there is nothing to seed.
     quiet: true
 
 - name: Assert the admin account inputs are present
@@ -32,18 +35,48 @@
     quiet: true
   when: not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
 
-- name: Assert the metric and log client credentials are present
+- name: Assert no inventory still sets the retired single-site client credentials
+  # They were single-site by construction. Ignoring them silently would let an
+  # operator believe they had set a password that the manifest never carried --
+  # and the apply ROTATES a client's username/password unconditionally on a row
+  # that already exists, so the wrong value lands on a live controller.
   ansible.builtin.assert:
     that:
-      - (controller_seed_prometheus_password | default('')) | length > 0
-      - (controller_seed_loki_password | default('')) | length > 0
+      - controller_seed_prometheus_username is not defined
+      - controller_seed_prometheus_password is not defined
+      - controller_seed_loki_username is not defined
+      - controller_seed_loki_password is not defined
     fail_msg: >-
-      prometheus_basic_auth_password and loki_basic_auth_password must be set
-      in the vaulted secrets. They are the credentials the controller uses
-      against the acme_web nginx vhosts on the metrics host; blank ones make
-      every placement query return no data and every order fail with "no
-      capacity".
+      controller_seed_{prometheus,loki}_{username,password} are retired: the
+      metric/log client basic-auth is per SITE now. Set the environment-wide
+      values as `prometheus_basic_auth_password` / `loki_basic_auth_password`
+      (and `acme_web_prometheus_username` / `acme_web_loki_username`), and any
+      per-site override in the vaulted `metrics_site_credentials`
+      (docs/contracts.md §Site scoping).
     quiet: true
+
+- name: Assert every site this run seeds has metric and log client credentials
+  # One entry per site in the manifest's client lists, so the check is per
+  # site too: an inventory that sets `metrics_site_credentials` for its
+  # second site is entitled to leave the environment-wide password blank, and
+  # one that sets neither must still fail here rather than write a blank
+  # password the controller then authenticates with. The guard is on the
+  # SUBSCRIPT, never the field (docs/contracts.md §Site scoping). Only the
+  # expression text is ever printed on failure, never the value.
+  ansible.builtin.assert:
+    that:
+      - ((cs_site_metrics_credentials[item] | default(cs_metrics_credentials_default))['prometheus_password'] | default('')) | length > 0
+      - ((cs_site_metrics_credentials[item] | default(cs_metrics_credentials_default))['loki_password'] | default('')) | length > 0
+    fail_msg: >-
+      Site '{{ item }}' has no prometheus/loki basic-auth password. Set
+      prometheus_basic_auth_password and loki_basic_auth_password in the
+      vaulted secrets, or give this site an entry in
+      `metrics_site_credentials`. They are the credentials the controller uses
+      against the acme_web nginx vhosts on that site's metrics host; blank
+      ones make every placement query return no data and every order fail with
+      "no capacity".
+    quiet: true
+  loop: "{{ controller_seed_manifest_sites }}"
   when: not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
 
 - name: Assert the region tunables are inside the ranges the models validate
@@ -76,7 +109,10 @@
       manifest maps region -> Location, az -> Region, and cannot be rendered
       without it (see inventories/example/hosts.yml).
     quiet: true
-  loop: "{{ groups['nodes'] | product(controller_seed_required_node_vars) | list }}"
+  # cs_new_nodes, not groups['nodes']: an existing host is not rendered into
+  # the document, so demanding the manifest's node vars on it would fail a run
+  # over something the manifest never reads.
+  loop: "{{ cs_new_nodes | sort | product(controller_seed_required_node_vars) | list }}"
   loop_control:
     label: "{{ item.0 }}.{{ item.1 }}"
 
@@ -164,7 +200,7 @@
          + ([item] if (hostvars[item].controller_acme_address is not defined
                        and not ((controller_seed_controller_tailnet | bool) and (controller_seed_node_tailnet | bool)))
             else []) }}
-  loop: "{{ groups['nodes'] | default([]) }}"
+  loop: "{{ cs_new_nodes | sort }}"
   vars:
     controller_seed_node_ts: >-
       {{ hostvars[item].tailscale_ip
