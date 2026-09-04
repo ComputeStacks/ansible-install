@@ -1,6 +1,18 @@
 ---
 # Environment-level settings (non-secret). Secrets live in secrets.yml (vault).
 
+# The playbooks connect as root and use no privilege escalation — there is no
+# play-level `become` in this repo. ansible.cfg sets no remote_user, so without
+# this ansible connects as your local username and every task fails.
+#
+# Ubuntu cloud images block root by default: cloud-init installs your key into
+# /root/.ssh/authorized_keys behind a forced command that prints "Please login
+# as the user ubuntu". Pass `disable_root: false` in the instance's cloud-init
+# user-data. Root SSH has to be open on the nodes in any case — the controller
+# uses it at runtime for volumes, haproxy certificate deploys and load balancer
+# reloads (docs/control-plane.md row 4), and roles/validate asserts it.
+ansible_user: root
+
 # Portal / domains
 cs_portal_domain: portal.example.com
 cs_registry_domain: cr.example.com

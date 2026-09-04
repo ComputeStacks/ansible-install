@@ -1,4 +1,32 @@
 ---
+# How to get a root connection, as an operator-facing sentence. Kept here
+# rather than inline so the assert's name stays within the line length.
+preflight_root_connection_hint: >-
+  Set `ansible_user: root` in the inventory (ansible.cfg sets no remote_user,
+  so ansible otherwise connects as your local username). On an Ubuntu cloud
+  image root is additionally blocked by cloud-init, which installs your key
+  into /root/.ssh/authorized_keys behind a forced command — pass
+  `disable_root: false` in the instance's user-data. Root is not only an
+  install-time convenience: the controller reaches every node over root SSH at
+  runtime for volumes, haproxy certificate deploys and load balancer reloads
+  (docs/control-plane.md row 4), and roles/validate asserts that connection.
+
+# Why a floating controller tag is refused, as an operator-facing sentence.
+# Kept here so the assert's fail_msg stays readable.
+preflight_image_pin_hint: >-
+  The minor line (e.g. '9.7') is the intended rolling channel — `cstacks
+  upgrade` pulls the newest patch within it, so a pin costs you nothing in
+  currency and buys you the ability to say which build a host is running.
+  Defaults live in playbooks/group_vars/all/versions.yml; to point one
+  environment at a different image, set controller_image_repo and
+  controller_image_tag as inventory HOST VARS on the controller host (or pass
+  -e). An inventory group_vars/all entry is silently ignored, because playbook
+  group_vars outrank it. If the image genuinely publishes no immutable line —
+  an internal controller build cut on demand — set
+  `controller_image_allow_floating_tag: true` as a host var beside the repo
+  override, and accept that neither this inventory nor a converge can then
+  tell whether the running container is current.
+
 # Inventory vars every node in groups['nodes'] must define (docs/contracts.md
 # rule 1). Templates elsewhere in the provisioner assume these are present.
 preflight_required_node_vars:

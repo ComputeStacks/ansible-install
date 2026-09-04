@@ -4,6 +4,21 @@
 # before any other role touches a host. See docs/contracts.md for the rules
 # this role enforces.
 
+# First, because every other role in this repo runs as root and none of them
+# escalate — there is no play-level `become` anywhere. A non-root connection
+# otherwise passes all of preflight (facts gather as any user) and then dies
+# partway through roles/common on a permission error, after this role has
+# already promised nothing was changed.
+- name: Assert the connection is root
+  ansible.builtin.assert:
+    that:
+      - ansible_user_id == 'root'
+    fail_msg: >-
+      Connected to {{ inventory_hostname }} as '{{ ansible_user_id }}', not
+      root. The playbooks use no privilege escalation, so every task that
+      writes to the host would fail. {{ preflight_root_connection_hint }}
+    success_msg: "{{ inventory_hostname }}: connected as root"
+
 - name: Assert Ubuntu 26.04 amd64 (skipped on existing_env hosts, which are Debian)
   ansible.builtin.assert:
     that:
@@ -74,17 +89,25 @@
     success_msg: "groups['metrics'] has exactly one host"
   run_once: true
 
+# Zero is allowed and means "no backups": cs_agent skips its borg tasks and
+# renders `backups.enabled: false`, and validate skips its borg reachability
+# checks. Two or more is the real error — every node shares ONE repository
+# host, and both roles resolve it with `groups['backup'] | first`.
+# Asserted unconditionally rather than gated on a non-empty group, so the
+# message and the condition say the same thing.
 - name: Assert at most one backup host
   ansible.builtin.assert:
     that:
-      - (groups['backup'] | default([])) | length == 1
+      - (groups['backup'] | default([])) | length <= 1
     fail_msg: >-
-      groups['backup'] must contain exactly one host (found
-      {{ (groups['backup'] | default([])) | length }}) — cs_agent delegates
-      borg key installation to `groups['backup'] | first`. Fix the
-      inventory so 'backup' has exactly one host.
-    success_msg: "groups['backup'] has exactly one host"
-  when: (groups['backup'] | default([])) | length > 0
+      groups['backup'] holds {{ (groups['backup'] | default([])) | length }}
+      hosts and nothing can choose between them — cs_agent delegates borg key
+      installation to `groups['backup'] | first`. Name exactly one backup
+      host, or none at all to install without backups.
+    success_msg: >-
+      {{ "backup host: " ~ (groups['backup'] | first)
+         if ((groups['backup'] | default([])) | length == 1)
+         else "no backup host — nodes will be configured with backups disabled" }}
   run_once: true
 
 - name: Assert exactly one primary nameserver when using the powerdns driver
@@ -167,6 +190,54 @@
     - (tailscale_authkey | default('')) | length > 0
     - (preflight_tailscale_disabled_hosts | default([])) | length > 0
   run_once: true
+
+# Here rather than only in roles/controller: that role's copy is the backstop,
+# and it does not run until the sixth play, by which time docker, vault,
+# postgres, redis and a real ACME certificate have all been installed on the
+# controller. The tag is a pure inventory value, so checking it costs nothing
+# and belongs with the other local assertions — a typo or an unintended
+# `latest` should cost seconds, not most of a converge.
+#
+# Not gated on preflight_verify_registries: that switch turns off NETWORK
+# reads, and this one reaches nothing.
+- name: Assert the controller image is repo + a non-floating tag
+  ansible.builtin.assert:
+    that:
+      - controller_image_repo | default('') | length > 0
+      - controller_image_tag | default('') | length > 0
+      - >-
+        controller_image_tag not in ['latest', 'stable', 'main', 'master']
+        or (controller_image_allow_floating_tag | default(false) | bool)
+    fail_msg: >-
+      controller_image_tag is
+      '{{ controller_image_tag | default("(unset)") }}', which does not name a
+      fixed build. {{ preflight_image_pin_hint }}
+    success_msg: >-
+      controller image {{ controller_image_repo | default('') }}:{{ controller_image_tag | default('') }}
+    quiet: true
+  when:
+    - "'controller' in group_names"
+    # Attach mode never reads these: roles/controller's attach_prep recreates
+    # the portal from the existing environment file's CS_REG.
+    - not (existing_env | default(false))
+
+- name: Warn that the controller image tag floats
+  ansible.builtin.debug:
+    msg: >-
+      controller_image_tag is
+      '{{ controller_image_tag }}' and controller_image_allow_floating_tag is
+      true, so the pin check is being skipped deliberately. This host's
+      controller build is whatever that tag pointed at the last time the image
+      was pulled, and nothing here can tell you what that was. A converge will
+      NOT notice the tag moving — the upgrade check compares the running
+      image's name to '{{ controller_image_repo }}:{{ controller_image_tag }}',
+      which still matches — so deploying a rebuild means running `cstacks
+      upgrade` on the controller.
+  when:
+    - "'controller' in group_names"
+    - not (existing_env | default(false))
+    - controller_image_tag | default('') in ['latest', 'stable', 'main', 'master']
+    - controller_image_allow_floating_tag | default(false) | bool
 
 # Network checks last: everything above is a pure inventory/facts assertion
 # that costs nothing, and there is no point reaching out to a registry for a

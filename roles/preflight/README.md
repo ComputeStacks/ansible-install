@@ -32,6 +32,12 @@ from the network, which is still not a change to a host.
   `existing_env` — in attach mode only the new nodes ever log in.
 - Every entry in `docker_registries` is a complete `{registry, username,
   password}` triple and no registry host is named twice.
+- `controller_image_tag` names a fixed build, not a floating tag
+  (`latest`/`stable`/`main`/`master`), unless
+  `controller_image_allow_floating_tag` is true. A local check, so it runs even
+  with `preflight_verify_registries: false`, and it runs here rather than only
+  in `roles/controller` so an unintended `latest` costs seconds instead of most
+  of a converge.
 - The controller image named by `controller_image_repo:controller_image_tag`
   exists and is pullable with whatever credentials apply — on controller hosts
   that are not `existing_env`, public repository or not, because a typo'd tag
@@ -88,13 +94,14 @@ not earn.
 | `preflight_verify_controller_image` | `true` | The image existence-and-tag check specifically; the credential probes stay on. |
 | `preflight_registry_manifest_hint_404` / `_denied` | see `defaults/main.yml` | The two ways a manifest read fails, as operator-facing sentences. |
 | `preflight_registry_credentials_hint` | see `defaults/main.yml` | What a `401` from the token endpoint means, as an operator-facing sentence. |
+| `preflight_image_pin_hint` | see `defaults/main.yml` | Why a floating controller tag is refused, and how to override, as an operator-facing sentence. |
 | `preflight_registry_manifest_accept` | OCI + docker, index + manifest | `Accept` header for the manifest read. Which type comes back depends on how the image was built and pushed. |
 
 Consumed from elsewhere in the inventory (not owned by this role):
 `existing_env`, `secret_key_base`, `user_auth_secret`, `tailscale_authkey`,
 `tailscale_enabled`, `cs_registry_logins` / `cs_controller_registry` (composed
 in `playbooks/group_vars/all/registries.yml`), `controller_image_repo`,
-`controller_image_tag`.
+`controller_image_tag`, `controller_image_allow_floating_tag`.
 
 ## Failure messages
 
