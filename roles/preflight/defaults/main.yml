@@ -27,6 +27,48 @@ preflight_image_pin_hint: >-
   override, and accept that neither this inventory nor a converge can then
   tell whether the running container is current.
 
+# What a `site` is and where to set it, as an operator-facing sentence.
+# Shared by all three site assertions so they stay readable.
+preflight_site_hint: >-
+  A `site` is the physical facility a host lives in (docs/contracts.md
+  §Vocabulary) — the grouping that decides which metrics host a node is
+  scraped by and which backup server it writes to. It is neither `region`
+  (controller Location) nor `az` (controller Region): two Locations can share
+  one metrics server, and a site holds one or more regions. Set `site` as an
+  inventory HOST var on each node, metrics host and backup host; a playbook
+  or inventory group_vars entry named `site` is the wrong place, because
+  playbook group_vars outrank inventory group_vars. A single-site inventory
+  sets it nowhere at all and every host lands in the site called 'default'.
+
+# The site values this run is working with, from the three groups that have
+# one. Read by the assertions in tasks/main.yml, which are all `run_once` —
+# these evaluate in the executing host's context, where `hostvars` is in
+# scope (docs/contracts.md §Variable scope).
+preflight_node_sites: >-
+  {{ (groups['nodes'] | default([])) | map('extract', hostvars, 'cs_site') | list | unique }}
+preflight_metrics_sites: >-
+  {{ (groups['metrics'] | default([])) | map('extract', hostvars, 'cs_site') | list }}
+preflight_backup_sites: >-
+  {{ (groups['backup'] | default([])) | map('extract', hostvars, 'cs_site') | list }}
+preflight_inventory_sites: >-
+  {{ (preflight_node_sites + preflight_metrics_sites + preflight_backup_sites) | unique }}
+
+# Sites that hold at least one node but no metrics host — the fatal case.
+preflight_sites_without_metrics: >-
+  {{ preflight_node_sites | difference(cs_site_metrics_hosts.keys() | list) }}
+
+# The public name each site's metrics host answers on. Two sites resolving to
+# the SAME name is the collision the assertion below rejects; the list keeps
+# duplicates so it stays visible, because the map has already collapsed them.
+preflight_metrics_domains: >-
+  {{ cs_site_metrics_domains.values() | list }}
+
+# Every value an operator can put in metrics_site_credentials, flattened.
+# Checked for jinja delimiters by the assertion in tasks/main.yml.
+preflight_metrics_credential_values: >-
+  {{ (metrics_site_credentials | default({})).values()
+     | map('dictsort') | flatten | select('string') | list }}
+
 # Inventory vars every node in groups['nodes'] must define (docs/contracts.md
 # rule 1). Templates elsewhere in the provisioner assume these are present.
 preflight_required_node_vars:

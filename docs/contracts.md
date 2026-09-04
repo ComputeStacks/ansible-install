@@ -9,12 +9,28 @@ Change requests go to the engineering manager, not into the code.
 (e.g. ams-005). Exactly ONE node per az — enforced by preflight, relied on
 everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
 
+`site` == the physical facility a host lives in. A provisioner-only concept:
+the controller has no column for it, and nothing about it is ever seeded. One
+metrics host and AT MOST one backup server per site (zero backup servers means
+that site's nodes install without backups). A site holds one or more `region`s;
+a `region` never spans sites. It is neither Region nor Location, and that is
+the whole point — in production the Locations `ams001` and `Internal-AMS` are
+two different Locations sharing one metrics server, so no controller-side
+grouping expresses it. Set as an inventory HOST var (`site`) on nodes, metrics
+hosts and backup hosts; unset everywhere means the single site called
+`default`, which is what every inventory that predates this concept is.
+
 ## Hard rules
 1. **Inventory vars only in shared-host and seed templates.** Never gathered
    facts (`ansible_hostname`, `ansible_default_ipv4`, …) — under `--limit`,
    un-targeted hosts have no facts and their regions silently vanish from
    rendered config. Required node vars: `hostname`, `primary_ip`, `public_ip`,
-   `region`, `az`, `container_network`, `container_network_name`.
+   `region`, `az`, `container_network`, `container_network_name`. Metrics and
+   backup hosts additionally require `site` — but ONLY when the inventory
+   holds more than one site, so a single-site inventory needs no edit. Nodes
+   take `site` too; a node that omits it falls into the site called `default`,
+   which preflight catches as "site `default` holds nodes but no metrics
+   host" the moment any other host names a real site.
 2. **Never index `[0]` in templates.** Iterate groups. (Delegating an ACTION
    to `groups['controller'][0]` is fine — single controller is architectural.)
 3. **Convergent roles.** No `when: service is not defined` install guards.
@@ -40,6 +56,10 @@ everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
    lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script and
    NEW per-az file_sd fragment files. `/etc/default/computestacks` is
    append-only, always.
+10. **A variable defined in `playbooks/group_vars/` that references
+    `hostvars` may only be read on the host currently executing.** NEVER
+    `hostvars[h].<that var>`. See §Variable scope — this one fails silently,
+    which is why it is a rule and not a style note.
 
 ## Ownership map (role -> wave -> owner)
 Wave 1A: preflight, common, ssh_trust, node_kernel
@@ -58,6 +78,76 @@ Single owners: `ops` docker network -> metrics role. `/etc/update-motd.d/
 `/etc/modules-load.d/cs-node.conf` -> node_kernel (separate files, no sharing).
 
 ## Cross-wave interface contracts
+
+### Variable scope (hard rule 10)
+
+A variable defined in `playbooks/group_vars/` that references `hostvars` may
+only be read on the host currently executing:
+
+    cs_site_metrics_hosts[cs_site]                # this host's site
+    cs_site_metrics_hosts[hostvars[h].cs_site]    # another host's site
+
+NEVER `hostvars[h].cs_site_metrics_hosts`. When ansible lazily templates
+another host's variable, `hostvars` is not in scope: the expression evaluates
+to Undefined, and any `| default(...)` guard then converts that into a
+wrong-but-plausible value — no error, no warning, nothing in a drift report.
+Verified on this repo's ansible-core: `hostvars['node2001'].cs_site_metrics_hosts`
+returns Undefined while `cs_site_metrics_hosts` in the same play returns the
+full map.
+
+This is not hypothetical. The first draft of the site-scoping work read
+`hostvars[h].cs_site_metric_endpoint` and would have pointed a new sjo region
+at the ams prometheus and loki — logs and metrics to the wrong facility, and
+nothing anywhere would have said so.
+
+The same rule has a second face, and it bites any playbook written outside
+`playbooks/`: **a var supplied through a play's `vars_files:` is play scope,
+not host scope, so it never enters another host's `hostvars`.** Load these
+names through `group_vars/` or every map built with
+`map('extract', hostvars, 'cs_site')` fails with `object of type
+'HostVarsVars' has no attribute 'cs_site'`. That is why `tests/group_vars` is
+a symlink to `playbooks/group_vars` rather than a `vars_files:` list — the
+harness then loads exactly what the real playbooks load, with nothing to keep
+in sync.
+
+A variable that references only `groups`, plain inventory host vars, and other
+hostvars-free variables IS safe to read cross-host — that is exactly why
+`cs_site` exists as its own trivial variable rather than being folded into the
+maps. Keep the same shape when you add one: the value read across hosts stays
+hostvars-free, and anything needing `hostvars` becomes a map that the
+rendering host indexes locally.
+
+### Site scoping (spellings are frozen — `playbooks/group_vars/all/sites.yml`)
+
+Roles CONSUME these names. Do not re-derive any of them inline, the same way
+the tailnet-membership predicate has exactly one spelling.
+
+| Name | Shape | Cross-host read |
+|---|---|---|
+| `cs_site` | this host's site, `site` or `default` | **safe** — `hostvars[h].cs_site` |
+| `cs_site_metrics_hosts` | site -> metrics inventory_hostname | local only |
+| `cs_site_backup_hosts` | site -> backup inventory_hostname (site may be absent = no backups) | local only |
+| `cs_site_metrics_domains` | site -> `metrics_domain` of that site's metrics host, else `cs_metrics_domain` | local only |
+| `cs_existing_hosts` | hosts flagged `existing_env` truthy | local only |
+| `cs_new_nodes` | `groups['nodes']` minus the above, unordered — `\| sort` at the point of use | local only |
+| `cs_metrics_credentials_default` | the four environment-wide basic-auth values as one dict | safe |
+| `cs_site_metrics_credentials` | site -> the same four, resolved per site | safe |
+
+Per-site nginx basic-auth credentials have ONE spelling, and the fallback goes
+on the SUBSCRIPT, never on the field:
+
+    (cs_site_metrics_credentials[<site>] | default(cs_metrics_credentials_default)).loki_password
+
+Only sites named in the optional vaulted `metrics_site_credentials` appear in
+the map; every other site resolves entirely to the defaults. Guarding the
+field instead (`…[<site>].loki_password | default(x)`) swallows a
+misconfigured entry along with the absent one.
+
+`cs_existing_hosts` uses a two-stage `selectattr('existing_env', 'defined')`
+then `selectattr('existing_env')`, NOT `rejectattr('existing_env', 'defined')`:
+the latter also drops a host that explicitly says `existing_env: false`, which
+every other consumer in the repo (`existing_env | default(false)`) counts as
+new.
 
 ### Controller invocation helper (used by cs_agent enroll; provided by cstacks)
 The v2 `cstacks` CLI provides:

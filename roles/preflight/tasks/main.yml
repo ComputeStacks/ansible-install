@@ -76,37 +76,152 @@
     success_msg: "groups['controller'] has exactly one host"
   run_once: true
 
-- name: Assert exactly one metrics host
+# Metrics and backup hosts are SITE-scoped (docs/contracts.md §Vocabulary):
+# one metrics host and at most one backup server per physical site. A
+# single-site inventory sets `site` nowhere, every host lands in the site
+# called `default`, and the three assertions below reduce to exactly the
+# "exactly one metrics host / at most one backup host" they replaced.
+#
+# This one first, so a multi-site inventory that forgot `site` on a shared
+# host is told to add it rather than being told its nodes have no metrics
+# host. Nodes are not looped: a node missing `site` falls into `default` and
+# is caught by the metrics-host assertion below, which names the site.
+- name: Assert metrics and backup hosts declare a site when the inventory holds more than one
   ansible.builtin.assert:
     that:
-      - (groups['metrics'] | default([])) | length == 1
+      - hostvars[item].site is defined
     fail_msg: >-
-      groups['metrics'] must contain exactly one host (found
-      {{ (groups['metrics'] | default([])) | length }}). A second/multi
-      metrics host is not supported — prometheus/loki/alertmanager and the
-      per-AZ file_sd fragments assume a single metrics host. Fix the
-      inventory so 'metrics' has exactly one host.
-    success_msg: "groups['metrics'] has exactly one host"
+      This inventory holds more than one site
+      ({{ preflight_inventory_sites | sort | join(', ') }}) but '{{ item }}'
+      declares no 'site' host var, so it falls into the site called
+      'default'. {{ preflight_site_hint }}
+    success_msg: "{{ item }}: site '{{ hostvars[item].cs_site }}'"
+  loop: "{{ (groups['metrics'] | default([])) + (groups['backup'] | default([])) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: (preflight_inventory_sites | length) > 1
   run_once: true
 
-# Zero is allowed and means "no backups": cs_agent skips its borg tasks and
-# renders `backups.enabled: false`, and validate skips its borg reachability
-# checks. Two or more is the real error — every node shares ONE repository
-# host, and both roles resolve it with `groups['backup'] | first`.
-# Asserted unconditionally rather than gated on a non-empty group, so the
-# message and the condition say the same thing.
-- name: Assert at most one backup host
+- name: Assert no site has more than one metrics host
   ansible.builtin.assert:
     that:
-      - (groups['backup'] | default([])) | length <= 1
+      - (preflight_metrics_sites | unique | length) == (preflight_metrics_sites | length)
     fail_msg: >-
-      groups['backup'] holds {{ (groups['backup'] | default([])) | length }}
-      hosts and nothing can choose between them — cs_agent delegates borg key
-      installation to `groups['backup'] | first`. Name exactly one backup
-      host, or none at all to install without backups.
+      Two metrics hosts share a site —
+      {{ dict((groups['metrics'] | default([])) | zip(preflight_metrics_sites)) }}.
+      Prometheus, loki,
+      alertmanager and the per-AZ file_sd fragments assume ONE metrics host
+      per site, and nothing can choose between two. Name exactly one metrics
+      host per site, or split them onto separate sites.
+      {{ preflight_site_hint }}
     success_msg: >-
-      {{ "backup host: " ~ (groups['backup'] | first)
-         if ((groups['backup'] | default([])) | length == 1)
+      metrics hosts, one per site: {{ cs_site_metrics_hosts }}
+  run_once: true
+
+# A node whose site has no metrics host is not a degraded install, it is a
+# broken one: the controller's placement queries go to that site's prometheus
+# and there is none, so every order for the region is rejected.
+- name: Assert every site holding a node has a metrics host
+  ansible.builtin.assert:
+    that:
+      - (preflight_sites_without_metrics | length) == 0
+    fail_msg: >-
+      No metrics host for site(s)
+      {{ preflight_sites_without_metrics | sort | join(', ') }}, which hold
+      these nodes:
+      {{ groups['nodes'] | default([]) | map('extract', hostvars)
+         | selectattr('cs_site', 'in', preflight_sites_without_metrics)
+         | map(attribute='inventory_hostname') | sort | join(', ') }}.
+      The controller cannot query a node whose site has no prometheus, and
+      container placement for its regions breaks. Add a metrics host to that
+      site, or correct the 'site' host var on those nodes.
+      {{ preflight_site_hint }}
+    success_msg: >-
+      every site holding a node has a metrics host
+      ({{ preflight_node_sites | sort | join(', ') }})
+  run_once: true
+
+# Two sites answering on the same metrics name is a copy-paste error in the
+# `metrics_domain` host vars, and it is silent everywhere else. roles/
+# controller_seed dedupes `metric_clients` / `log_clients` by exact endpoint
+# string — because the controller matches a client that way — so a collision
+# collapses two sites onto one row and the first site in sorted order supplies
+# its credentials. The second site's nodes then authenticate against the wrong
+# basic-auth pair, and the only symptom is a 401 at the end of a converge.
+# The template cannot resolve this (both sites genuinely name one vhost), so
+# it is caught here, before anything is installed.
+# A vaulted value is still a jinja template, and this assertion's real work is
+# FORCING EVERY ONE OF THEM TO EVALUATE, here, before any host is touched.
+#
+# Downstream, `cs_site_metrics_credentials` resolves through a chain of
+# `default(..., true)` filters (playbooks/group_vars/all/sites.yml). That chain
+# is what makes the username/password shorthand work, and it also swallows a
+# value that fails to template: the site falls back to the environment-wide
+# password and the only symptom is a 401 at the very end of a converge, from a
+# vault entry that looks perfectly correct. Referencing every value here, with
+# no `default` in the way, turns that into a loud failure in the first play —
+# verified: a password containing an unknown variable stops the run with
+# `'<name>' is undefined`, and one containing a statement tag with
+# `Unexpected end of template`.
+#
+# The `search` below then catches what still renders: a jinja COMMENT is
+# stripped silently rather than raising, so a password containing one would be
+# quietly truncated instead of replaced.
+#
+# Either way the fix is the same and it is not in this repo: change the
+# basic-auth credential on the metrics host. No escaping survives the round
+# trip intact.
+- name: Assert no metrics credential contains jinja delimiters
+  ansible.builtin.assert:
+    that:
+      - preflight_metrics_credential_values | select('search', '\\{[#%\\{]') | list | length == 0
+    fail_msg: >-
+      A value in metrics_site_credentials contains a jinja delimiter — an
+      opening brace followed by another brace, a percent sign, or a hash.
+      Ansible templates vaulted values, so such a value cannot survive: it
+      either fails to render and is silently replaced by the environment-wide
+      credential, or is stripped outright as a comment. Change the basic-auth
+      credential on the metrics host to one without those character pairs.
+      (The value itself is deliberately not printed.)
+    success_msg: "metrics credentials carry no jinja delimiters"
+  run_once: true
+
+- name: Assert no two sites answer on the same metrics domain
+  ansible.builtin.assert:
+    that:
+      - (preflight_metrics_domains | unique | length) == (preflight_metrics_domains | length)
+    fail_msg: >-
+      Two sites resolve to the same metrics domain —
+      {{ cs_site_metrics_domains }}. Each site's metrics host answers on its
+      own name: set a distinct `metrics_domain` host var on the metrics host
+      whose name is wrong, or leave exactly one site on the environment-wide
+      `cs_metrics_domain` ({{ cs_metrics_domain | default('unset') }}) and
+      name the others. {{ preflight_site_hint }}
+    success_msg: >-
+      metrics domains are distinct per site: {{ cs_site_metrics_domains }}
+  run_once: true
+
+# Zero backup hosts in a site is allowed and means "no backups for that
+# site's nodes": cs_agent skips its borg tasks and renders
+# `backups.enabled: false`, and validate skips its borg reachability checks.
+# Two in ONE site is the real error — every node in a site shares ONE
+# repository host, resolved as cs_site_backup_hosts[cs_site].
+# Asserted unconditionally rather than gated on a non-empty group, so the
+# message and the condition say the same thing.
+- name: Assert no site has more than one backup host
+  ansible.builtin.assert:
+    that:
+      - (preflight_backup_sites | unique | length) == (preflight_backup_sites | length)
+    fail_msg: >-
+      Two backup hosts share a site —
+      {{ dict((groups['backup'] | default([])) | zip(preflight_backup_sites)) }}.
+      Every node in a site backs
+      up to ONE repository host and nothing can choose between two. Name at
+      most one backup host per site, or none at all in a site whose nodes
+      install without backups. {{ preflight_site_hint }}
+    success_msg: >-
+      {{ "backup hosts, at most one per site: " ~ cs_site_backup_hosts
+         if ((groups['backup'] | default([])) | length > 0)
          else "no backup host — nodes will be configured with backups disabled" }}
   run_once: true
 

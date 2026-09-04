@@ -15,6 +15,27 @@ from the network, which is still not a change to a host.
   `public_ip`, `region`, `az`, `container_network`, `container_network_name`.
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
+- Exactly one host in `groups['controller']`, and — when
+  `dns_driver == 'powerdns'` — exactly one in `groups['ns_primary']`.
+- **Site scoping** (docs/contracts.md §Vocabulary), three assertions:
+  - Every metrics host and backup host declares a `site` host var, checked
+    **only when the inventory holds more than one site**. A single-site
+    inventory sets `site` nowhere, every host falls into the site called
+    `default`, and this check does not fire — no existing inventory needs an
+    edit.
+  - No site holds more than one metrics host, and every site holding a node
+    holds one. A node whose site has no metrics host fails the run: the
+    controller's placement queries go to that site's prometheus, and with
+    none, every order for its regions is rejected. Nodes are not checked for
+    `site` directly — a node that omits it falls into `default` and is named
+    by this assertion, which is the more useful message.
+  - No site holds more than one backup host. **Zero is legal** and means that
+    site's nodes install without backups (`cs_agent` renders
+    `backups.enabled: false`); two in one site is the error, because every
+    node in a site shares one repository host.
+
+  Together these reduce to the "exactly one metrics host / at most one backup
+  host" they replaced whenever the inventory has a single site.
 - Every host's `hostname` (where defined), including nodes and shared hosts,
   is a single lowercase word — letters, digits, hyphens only, no dots, no
   uppercase (not an FQDN).
@@ -89,6 +110,11 @@ not earn.
 | Variable | Default | Purpose |
 |---|---|---|
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
+| `preflight_site_hint` | see `defaults/main.yml` | What a `site` is and where to set it, as an operator-facing sentence. Shared by all three site assertions. |
+| `preflight_node_sites` | derived | Distinct `cs_site` values across `groups['nodes']`. |
+| `preflight_metrics_sites` / `preflight_backup_sites` | derived | The `cs_site` of each metrics / backup host, **not** deduped — comparing against its own `unique` is how "more than one per site" is detected. |
+| `preflight_inventory_sites` | derived | Distinct sites across nodes, metrics and backup hosts. `> 1` is what makes `site` a required var. |
+| `preflight_sites_without_metrics` | derived | Sites holding at least one node but no metrics host — the fatal case. |
 | `preflight_verify_registries` | `true` | Every network read in this role, in one switch. False makes preflight purely local, for an air-gapped converge. |
 | `preflight_docker_groups` | `controller`, `metrics`, `registry`, `nodes` | Groups whose hosts run a docker daemon. Mirrors the `hosts:` line of site.yml's "Docker hosts" play; a host outside them never logs in to a registry. |
 | `preflight_verify_controller_image` | `true` | The image existence-and-tag check specifically; the credential probes stay on. |
@@ -97,7 +123,14 @@ not earn.
 | `preflight_image_pin_hint` | see `defaults/main.yml` | Why a floating controller tag is refused, and how to override, as an operator-facing sentence. |
 | `preflight_registry_manifest_accept` | OCI + docker, index + manifest | `Accept` header for the manifest read. Which type comes back depends on how the image was built and pushed. |
 
+The five derived variables above all reference `hostvars`, so every assertion
+that reads them is `run_once` and evaluates in the executing host's own
+context — the only place such a variable is valid (docs/contracts.md
+§Variable scope).
+
 Consumed from elsewhere in the inventory (not owned by this role):
+`site` and the `cs_site` / `cs_site_metrics_hosts` / `cs_site_backup_hosts`
+derivations in `playbooks/group_vars/all/sites.yml`,
 `existing_env`, `secret_key_base`, `user_auth_secret`, `tailscale_authkey`,
 `tailscale_enabled`, `cs_registry_logins` / `cs_controller_registry` (composed
 in `playbooks/group_vars/all/registries.yml`), `controller_image_repo`,

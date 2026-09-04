@@ -1,0 +1,178 @@
+---
+# THE site contract (frozen). A `site` is the physical facility a host lives
+# in — see docs/contracts.md §Vocabulary. One metrics host and at most one
+# backup server per site; a `region` never spans sites. The controller has no
+# column for it, so nothing here is ever seeded; it exists to answer "which
+# metrics host and which backup server does THIS node use".
+#
+# Operators set `site` as an inventory HOST var on nodes, metrics hosts and
+# backup hosts. Nothing in this file defaults an operator input (the
+# registries.yml rule): playbook group_vars outrank inventory group_vars, so
+# assigning `site` here would silently discard what the inventory said.
+#
+# Single-site installs set `site` nowhere and every host lands in the site
+# called `default` — the maps below then have exactly one key and every
+# consumer resolves to the same single host it resolved to before sites
+# existed.
+
+# ---------------------------------------------------------------------------
+# Cross-host safe (no `hostvars` reference)
+# ---------------------------------------------------------------------------
+
+# `cs_site` is deliberately separate from the maps below, and deliberately
+# trivial. It references only the plain inventory host var `site`, so it is
+# the ONE site value that survives a cross-host read: `hostvars[h].cs_site`
+# works from any rendering host, for any host in the inventory, in or out of
+# the current `--limit`. Every map below is keyed by it, and every cross-host
+# lookup starts from it. See docs/contracts.md §Variable scope for why the
+# maps themselves cannot be read that way.
+cs_site: "{{ site | default('default') }}"
+
+# ---------------------------------------------------------------------------
+# Site -> host / domain maps. LOCAL USE ONLY.
+# ---------------------------------------------------------------------------
+# These reference `hostvars`, so they may only ever be read on the host
+# currently executing:
+#
+#     cs_site_metrics_hosts[cs_site]                      # this host's site
+#     cs_site_metrics_hosts[hostvars[h].cs_site]          # some other host's
+#
+# NEVER `hostvars[h].cs_site_metrics_hosts`. When ansible lazily templates
+# another host's variable, `hostvars` is not in scope, the expression
+# evaluates to Undefined, and a `| default(...)` guard turns that into a
+# wrong-but-plausible value with no error and no drift report. Verified:
+# `hostvars['node2001'].cs_site_metrics_hosts` -> Undefined.
+#
+# A site with no metrics host has no key here; roles/preflight fails the run
+# when a site holding a node has none, so a missing key on a node's site is
+# already impossible by the time any role renders anything.
+
+cs_site_metrics_hosts: >-
+  {{ dict((groups['metrics'] | default([]) | map('extract', hostvars, 'cs_site') | list)
+          | zip(groups['metrics'] | default([]))) }}
+
+# Zero backup hosts in a site is legal and means that site's nodes run without
+# backups (cs_agent renders `backups.enabled: false`). Consumers must expect a
+# missing key here and must NOT treat it as an error.
+cs_site_backup_hosts: >-
+  {{ dict((groups['backup'] | default([]) | map('extract', hostvars, 'cs_site') | list)
+          | zip(groups['backup'] | default([]))) }}
+
+# The public name a site's prometheus/loki vhosts answer on. Per-site override
+# is the `metrics_domain` HOST var on that site's metrics host; the fallback is
+# the environment-wide `cs_metrics_domain`, which is what a single-site install
+# has always used.
+cs_site_metrics_domains: >-
+  {{ dict((groups['metrics'] | default([]) | map('extract', hostvars, 'cs_site') | list)
+          | zip(groups['metrics'] | default([]) | map('extract', hostvars)
+                | map(attribute='metrics_domain', default=cs_metrics_domain) | list)) }}
+
+# Hosts already provisioned by v1 and being attached to (contracts rule 9).
+#
+# The predicate is `existing_env | default(false) | bool`, character for
+# character what roles/firewall's v1_append and add-region.yml's node assert
+# use. That agreement is the whole point: a raw truthiness test would call the
+# string "false" existing while those two called the same host new, and the
+# node would then be built and firewalled but left out of the manifest and out
+# of every file_sd fragment — with cs_agent failing later on a Node row that
+# was never seeded.
+#
+# Built through JSON because a filtered comprehension needs a jinja for-loop,
+# and a template carrying one renders to a string; the round-trip turns it
+# back into a list. Same idiom as the credential map below.
+cs_existing_hosts_json: >-
+  [
+  {% for cs_eh in (groups['all'] | sort)
+     if (hostvars[cs_eh].existing_env | default(false) | bool) %}
+  {{ cs_eh | to_json }}{{ ',' if not loop.last else '' }}
+  {% endfor %}
+  ]
+cs_existing_hosts: "{{ cs_existing_hosts_json | from_json }}"
+
+# The nodes this run is actually building. `difference` does not preserve
+# inventory order — `| sort` at the point of use whenever the order is visible
+# in rendered output.
+cs_new_nodes: "{{ groups['nodes'] | default([]) | difference(cs_existing_hosts) }}"
+
+# ---------------------------------------------------------------------------
+# Per-site metrics credentials. Cross-host safe (no `hostvars` reference).
+# ---------------------------------------------------------------------------
+# Each metrics VM has its own nginx basic-auth credentials. A v1-built host
+# has ONE password covering both the prometheus and the loki vhost; v2's
+# two-credential model is a superset, so the attach case just sets both halves
+# to the same value.
+#
+# The optional operator input is `metrics_site_credentials` in the vaulted
+# secrets, keyed by site:
+#
+#     metrics_site_credentials:
+#       ams:
+#         username: promuser        # fills BOTH usernames
+#         password: "<the ams nginx basic-auth password>"
+#       sjo:
+#         prometheus_username: promuser
+#         prometheus_password: "..."
+#         loki_username: loguser
+#         loki_password: "..."
+#
+# Resolution order per value: the specific key, then the generic
+# `username`/`password` shorthand, then the environment-wide global. An empty
+# string counts as absent at every stage — a blank password is a mistake, not
+# a credential.
+#
+# THE USERNAMES MATTER AS MUCH AS THE PASSWORDS. A wrong username is a 401
+# with exactly the same symptom as a wrong password: logs silently dropped,
+# and roles/validate failing at the very end of a converge.
+
+# The environment-wide fallback, as one dict so no consumer re-derives it.
+# `acme_web_*_username` are role defaults, in scope only on a host running
+# roles/acme_web, hence the literal defaults here (same spelling as
+# roles/controller_seed/defaults/main.yml and roles/validate/defaults/main.yml).
+cs_metrics_credentials_default:
+  prometheus_username: "{{ acme_web_prometheus_username | default('promuser') }}"
+  prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
+  loki_username: "{{ acme_web_loki_username | default('loguser') }}"
+  loki_password: "{{ loki_basic_auth_password | default('') }}"
+
+# Built as JSON and parsed back, because a template carrying a `{% for %}`
+# renders to a string: the loop is unavoidable (per-site shorthand expansion
+# cannot be expressed with `combine`, which always lets the RIGHT-hand dict
+# win), so the round-trip is what turns it back into a mapping. `to_json` on
+# every scalar is what makes an arbitrary password safe to embed.
+cs_site_metrics_credentials_json: >-
+  {
+  {% for cs_cred_site, cs_cred in (metrics_site_credentials | default({})).items() %}
+  {{ cs_cred_site | to_json }}: {
+  "prometheus_username":
+  {{ cs_cred.prometheus_username | default(cs_cred.username, true)
+     | default(cs_metrics_credentials_default.prometheus_username, true) | to_json }},
+  "prometheus_password":
+  {{ cs_cred.prometheus_password | default(cs_cred.password, true)
+     | default(cs_metrics_credentials_default.prometheus_password, true) | to_json }},
+  "loki_username":
+  {{ cs_cred.loki_username | default(cs_cred.username, true)
+     | default(cs_metrics_credentials_default.loki_username, true) | to_json }},
+  "loki_password":
+  {{ cs_cred.loki_password | default(cs_cred.password, true)
+     | default(cs_metrics_credentials_default.loki_password, true) | to_json }}
+  }{{ ',' if not loop.last else '' }}
+  {% endfor %}
+  }
+
+# Site -> {prometheus_username, prometheus_password, loki_username,
+# loki_password}, fully resolved. Only sites named in
+# `metrics_site_credentials` appear, so the ONE spelling every consumer uses
+# supplies the fallback dict at the subscript:
+#
+#     (cs_site_metrics_credentials[<site>] | default(cs_metrics_credentials_default)).loki_password
+#
+# The guard goes on the SUBSCRIPT, never on the field — a missing site makes
+# the whole subscript Undefined, and
+# `cs_site_metrics_credentials[s].loki_password | default(x)` would swallow a
+# genuinely misconfigured entry along with it.
+#
+# `hostvars`-free by construction, so unlike the maps above this one IS safe
+# to read as `hostvars[h].cs_site_metrics_credentials`. Reading it locally and
+# keying by `hostvars[h].cs_site` is still the house style — one pattern for
+# all five maps.
+cs_site_metrics_credentials: "{{ cs_site_metrics_credentials_json | from_json }}"
