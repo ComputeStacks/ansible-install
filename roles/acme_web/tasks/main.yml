@@ -37,15 +37,24 @@
       (controller), cs_metrics_domain (metrics) and/or cs_registry_domain
       (registry) in the inventory.
 
-- name: Assert the metrics basic-auth passwords are set
+# The usernames are asserted alongside the passwords: a blank `name:` makes
+# htpasswd write an entry nginx can never match, which fails identically to a
+# wrong password (401) but looks like a working converge. No `no_log` here on
+# purpose -- assert reports the unrendered condition text, not the values, so
+# nothing leaks, and the operator needs to be told WHICH site is short.
+- name: Assert the metrics basic-auth credentials are set
   ansible.builtin.assert:
     that:
-      - acme_web_prometheus_password | length > 0
-      - acme_web_loki_password | length > 0
+      - acme_web_metrics_credentials.prometheus_username | length > 0
+      - acme_web_metrics_credentials.prometheus_password | length > 0
+      - acme_web_metrics_credentials.loki_username | length > 0
+      - acme_web_metrics_credentials.loki_password | length > 0
     fail_msg: >-
-      prometheus_basic_auth_password and loki_basic_auth_password must be set
-      in the vaulted secrets file. They are the ONLY thing standing between
-      the public internet and prometheus/loki on
+      No complete prometheus/loki basic-auth credential for site
+      "{{ cs_site }}". Set prometheus_basic_auth_password and
+      loki_basic_auth_password in the vaulted secrets file, or give this site
+      its own entry under metrics_site_credentials. They are the ONLY thing
+      standing between the public internet and prometheus/loki on
       {{ cs_ports.metrics_prometheus }}/{{ cs_ports.metrics_loki }}.
   when: "'metrics' in group_names"
 

@@ -44,11 +44,19 @@
 # mode 0644, not 0640: nginx's worker processes run as uid 101 (`user nginx`
 # in nginx.conf) and read these at request time. See the note on the htpasswd
 # directory in tasks/main.yml for the tradeoff.
+#
+# Credentials are this host's SITE's, not the environment's -- production's
+# metrics VMs each have their own. Both the username and the password come
+# out of the one resolved dict; a wrong username is a 401 with exactly the
+# same symptom as a wrong password (logs silently dropped, roles/validate
+# failing at the very end of the converge), so they must not be sourced
+# separately. `no_log` on both tasks: htpasswd echoes its parameters,
+# password included, on a failure.
 - name: Create the prometheus basic-auth file
   community.general.htpasswd:
     path: "{{ acme_web_htpasswd_dir }}/prometheus.htpasswd"
-    name: "{{ acme_web_prometheus_username }}"
-    password: "{{ acme_web_prometheus_password }}"
+    name: "{{ acme_web_metrics_credentials.prometheus_username }}"
+    password: "{{ acme_web_metrics_credentials.prometheus_password }}"
     owner: root
     group: root
     mode: "0644"
@@ -58,8 +66,8 @@
 - name: Create the loki basic-auth file
   community.general.htpasswd:
     path: "{{ acme_web_htpasswd_dir }}/loki.htpasswd"
-    name: "{{ acme_web_loki_username }}"
-    password: "{{ acme_web_loki_password }}"
+    name: "{{ acme_web_metrics_credentials.loki_username }}"
+    password: "{{ acme_web_metrics_credentials.loki_password }}"
     owner: root
     group: root
     mode: "0644"

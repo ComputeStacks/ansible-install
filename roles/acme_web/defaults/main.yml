@@ -87,9 +87,24 @@ acme_web_force_issue: false
 # inventory predicate, never a gathered fact). A host in more than one group
 # gets one certificate covering every name; the first is the acme.sh cert
 # name, which is how acme.sh identifies it for --install-cert and renewal.
+#
+# The metrics name is THIS host's SITE's name, not the environment-wide one:
+# a two-site estate has two metrics hosts answering on two different names
+# (metrics.example.com and metrics.sjo.example.com), and a certificate for
+# the wrong one fails every node's fluentd push and every scrape through
+# nginx with a hostname mismatch. `cs_site_metrics_domains` is the frozen
+# spelling (docs/contracts.md "Site scoping"); the guard sits on the
+# SUBSCRIPT so a site with no entry falls back to `cs_metrics_domain`, which
+# is what a single-site install has always used and is also what the map
+# itself would have yielded. Read locally, on the host being certified --
+# never `hostvars[h].cs_site_metrics_domains` (hard rule 10).
+#
+# The `X if C else Y` conditionals are lazy in Jinja, so a controller or
+# registry host never evaluates the metrics branch at all.
 acme_web_domains: >-
   {{ (([cs_portal_domain] if 'controller' in group_names else [])
-      + ([cs_metrics_domain] if 'metrics' in group_names else [])
+      + ([cs_site_metrics_domains[cs_site] | default(cs_metrics_domain)]
+         if 'metrics' in group_names else [])
       + ([cs_registry_domain] if 'registry' in group_names else []))
      | reject('equalto', '') | list }}
 acme_web_cert_name: "{{ acme_web_domains | first | default('') }}"
@@ -126,10 +141,42 @@ acme_web_registry_images:
 
 # --- basic auth (metrics host) -------------------------------------------
 acme_web_htpasswd_dir: "{{ acme_web_config_dir }}/passwords"
+
+# The ENVIRONMENT-WIDE usernames. These two are not read by this role's own
+# tasks any more (see acme_web_metrics_credentials below); they are read BY
+# NAME, from here, by playbooks/group_vars/all/sites.yml when it builds
+# `cs_metrics_credentials_default`, which is the fallback every site without
+# its own entry resolves to. That is why they stay plain literals: point
+# either of them at the site map instead and the template recurses (the map's
+# own default reads them back) and ansible aborts the whole run with
+# "recursive loop detected in template string".
+#
+# There is deliberately no `acme_web_prometheus_password` /
+# `acme_web_loki_password` any more. They were pure aliases for the vaulted
+# `prometheus_basic_auth_password` / `loki_basic_auth_password`, which
+# sites.yml now reads directly; keeping them would have left two spellings
+# of the environment-wide password and only one of them site-aware.
 acme_web_prometheus_username: promuser
 acme_web_loki_username: loguser
-acme_web_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
-acme_web_loki_password: "{{ loki_basic_auth_password | default('') }}"
+
+# What the htpasswd files are ACTUALLY built from: the credentials for THIS
+# metrics host's own site. Production's two metrics VMs do not share a
+# password -- each v1-built host has one nginx basic-auth credential covering
+# both its prometheus and its loki vhost -- so a single global password would
+# have to be rolled on both VMs at once to converge either.
+#
+# Frozen spelling, docs/contracts.md "Site scoping". The guard is on the
+# SUBSCRIPT, never on a field: only sites named in the optional vaulted
+# `metrics_site_credentials` appear in the map, so a missing site must fall
+# back as a WHOLE dict. Guarding a field instead
+# (`...[cs_site].loki_password | default(x)`) would silently paper over a
+# site entry that IS present but misconfigured.
+#
+# Non-metrics hosts never reference this: every consumer is gated on
+# `'metrics' in group_names`.
+acme_web_metrics_credentials: >-
+  {{ cs_site_metrics_credentials[cs_site] | default(cs_metrics_credentials_default) }}
+
 # Loopback upstreams, published by roles/metrics and roles/loki on this host.
 acme_web_prometheus_upstream: 127.0.0.1:9090
 acme_web_loki_upstream: 127.0.0.1:3100

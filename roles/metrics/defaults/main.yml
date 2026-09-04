@@ -35,6 +35,19 @@ metrics_alertmanager_tls_skip_verify: true
 # indexed -- docs/contracts.md rule 2. Each group gets its own "region" label
 # (the group name) so these targets are visually distinct from real az
 # labels in Prometheus, never colliding with a real node's region="<az>".
+#
+# DECISION (site scoping): this list stays PLATFORM-WIDE, deliberately, and
+# is the one thing in this role that is not site-scoped. Every host in
+# groups['nodes'] has a `site`; the controller, the nameservers and the
+# registry do not, and there is nowhere sensible to put one -- they serve
+# the whole estate, not a facility. Scope this the way
+# `metrics_file_sd_nodes` is scoped and they land in the site called
+# `default`, which on a two-site estate is a site NO metrics host belongs
+# to: the controller would then be scraped by nobody at all, and its
+# node_exporter series would simply stop, quietly, with nothing failing.
+# Two Prometheis each scraping the controller is the alternative, and it is
+# harmless -- duplicate series in two separate TSDBs that nothing joins
+# across, and one extra scrape every 10s. Do not "fix" this.
 metrics_infra_node_exporter_groups:
   - controller
   - registry
@@ -53,6 +66,41 @@ metrics_file_sd_jobs:
     port: "{{ cs_ports.cadvisor }}"
   - component: haproxy
     port: "{{ cs_ports.haproxy_stats }}"
+
+# The nodes THIS metrics host writes fragments for. Consumes the frozen site
+# contract (docs/contracts.md "Site scoping"); nothing here is re-derived.
+#
+# Two filters, both load bearing, and neither of them is `--limit`:
+#
+#   * OWN SITE ONLY. A site has exactly one metrics host (preflight-enforced)
+#     and a region never spans sites, so a node's fragments belong on exactly
+#     one Prometheus. Rendering another facility's nodes here does not just
+#     waste a scrape: the fragment carries the frozen `region: <az>` label the
+#     controller's placement queries match on, so both Prometheis would answer
+#     for that az and which one the controller believes depends on which
+#     endpoint the Region row happens to name.
+#   * NOT ALREADY PROVISIONED. `cs_existing_hosts` is the v1 estate an attach
+#     run is bolting onto. Those nodes are in the inventory so the seed and
+#     the firewall appends can see them (contracts rule 9), but the attach
+#     inventory is a PARTIAL view of them -- and each fragment is a
+#     whole-file write. Rendering one would overwrite a target v1 wrote and
+#     has been scraping for years with whatever a partial inventory says.
+#
+# `--limit` cannot do either job. It removes hosts from plays, not from
+# `groups[]`, and `cs_new_nodes` is built from `groups['nodes']`.
+#
+# `hostvars[h].cs_site` is the one cross-host-safe read in the contract
+# (hard rule 10) -- `cs_site` references no `hostvars` of its own.
+# `cs_new_nodes` does not preserve inventory order, hence `| sort`: the loop
+# order is what appears in the run's task labels.
+#
+# Single-site installs set `site` on nothing, so every host lands in the site
+# called `default`, every node matches, and outside attach mode this is
+# exactly `groups['nodes']` -- byte-identical output to before sites existed.
+metrics_file_sd_nodes: >-
+  {{ cs_new_nodes | map('extract', hostvars)
+     | selectattr('cs_site', 'equalto', cs_site)
+     | map(attribute='inventory_hostname') | sort | list }}
 
 # v1's container-name ignore list for the container-resource alert rule.
 # FROZEN for fleet compatibility (docs/contracts.md dispatch) -- ported

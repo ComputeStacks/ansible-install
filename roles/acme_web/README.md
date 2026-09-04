@@ -39,7 +39,8 @@ join the `ops` docker network.
 
 1. Asserts `nginx_image` is an exact pin and `acme_sh_version` is a release
    tag with its tarball checksum beside it; asserts this host has a
-   certificate domain; asserts the metrics basic-auth passwords are set.
+   certificate domain; asserts this site's metrics basic-auth credentials
+   (both usernames and both passwords) are set.
 2. Installs `python3-passlib` and `rsync`; creates the nginx tree.
 3. Installs `nginx.conf`, the error pages, the dhparam group and the ACME
    challenge snippet.
@@ -114,11 +115,74 @@ Operator-facing variable names are unchanged from v1 (`acme_challenge_method`,
 `acme_cf_token`, …); the role reads each through an `acme_web_`-prefixed
 variable so both the documented vocabulary and the role-prefix lint rule hold.
 
+### Which metrics name goes on the certificate (per site)
+
+A metrics host serves exactly one **site** (docs/contracts.md §Vocabulary),
+and each site answers on its own public name — production has
+`metrics.example.com` and `metrics.sjo.example.com`. `acme_web_domains`
+therefore puts **this host's site's** name on the certificate, not the
+environment-wide one:
+
+```
+cs_site_metrics_domains[cs_site] | default(cs_metrics_domain)
+```
+
+`cs_site_metrics_domains` is the frozen site-contract spelling
+(docs/contracts.md §Site scoping); the operator input behind it is the
+`metrics_domain` **host var** on the metrics host, and the fallback is
+`cs_metrics_domain`, which is what a single-site install has always used and
+what the map itself yields for a site that sets no override. The guard sits
+on the **subscript**, never on a field, and the map is read **locally** on
+the host being certified — never `hostvars[h].cs_site_metrics_domains`
+(hard rule 10: that read silently returns Undefined, and the `| default`
+then turns it into the other site's name with no error at all).
+
+Nothing else changes: a host in several groups still gets one certificate
+covering every name, and the SAN-set converge below re-issues by itself the
+first time a metrics host is given a `metrics_domain` it did not have.
+
+### Per-site basic-auth credentials
+
+The two production metrics VMs do **not** share a password: each v1-built
+host has one nginx basic-auth credential covering both its prometheus and
+its loki vhost. So the htpasswd files are built from
+`acme_web_metrics_credentials`, this host's own site's entry in the frozen
+`cs_site_metrics_credentials` map, with the whole dict falling back to
+`cs_metrics_credentials_default` when the site names no override:
+
+```yaml
+# vaulted secrets, optional, keyed by site
+metrics_site_credentials:
+  ams:
+    username: promuser        # fills BOTH usernames
+    password: "<the ams nginx basic-auth password>"
+  sjo:
+    prometheus_username: promuser
+    prometheus_password: "..."
+    loki_username: loguser
+    loki_password: "..."
+```
+
+**The usernames matter as much as the passwords.** v2 defaults to
+`promuser` / `loguser`; a v1-built metrics host being attached to may use
+neither, and a wrong username is a 401 with exactly the same symptom as a
+wrong password — logs silently dropped, and `roles/validate` failing at the
+very end of the converge. Both are asserted non-empty, and both come out of
+the same resolved dict so they cannot be sourced from different places.
+
+`acme_web_prometheus_username` / `acme_web_loki_username` survive as the
+**environment-wide** defaults. This role's tasks no longer read them;
+`playbooks/group_vars/all/sites.yml` does, by name, to build
+`cs_metrics_credentials_default`. That is why they must stay plain literals:
+resolving either of them through the site map makes the template recursive
+(the map's own default reads them back) and ansible aborts the run.
+
 ### Port 80 on the metrics and registry hosts
 
 `roles/firewall` opens `cs_ports.controller_http` on the controller, the
 metrics host and the registry host, so the default HTTP-01 challenge works
-for `cs_portal_domain`, `cs_metrics_domain` and `cs_registry_domain` alike.
+for `cs_portal_domain`, this site's metrics name and `cs_registry_domain`
+alike.
 A host that cannot expose 80 to the internet at all needs a DNS-01 provider
 (`docs/acme-providers.md`).
 
@@ -160,15 +224,25 @@ certificate directory before copying into it.
 | `acme_eab_kid` / `acme_eab_hmac_key` | unset | Inventory names. External Account Binding, for CAs that hand out account credentials out of band (Google Trust Services requires it; ZeroSSL accepts it instead of email registration). Both or neither; the HMAC key belongs in the vaulted `secrets.yml`. |
 | `acme_account_email` | `{{ cs_admin_email }}` | Inventory name. |
 | `acme_challenge_method` | `http` | Inventory name. See `docs/acme-providers.md`. |
-| `acme_web_domains` | derived from `group_names` | `cs_portal_domain` / `cs_metrics_domain` / `cs_registry_domain`. A host in several groups gets one certificate covering every name. |
+| `acme_web_domains` | derived from `group_names` | `cs_portal_domain` / this site's metrics name / `cs_registry_domain`. A host in several groups gets one certificate covering every name. See "Which metrics name goes on the certificate". |
 | `acme_web_cert_name` | first of the above | acme.sh's identifier for `--install-cert` and renewal. |
 | `acme_web_force_install_cert` | `false` | Re-run `--install-cert` even when the targets exist — needed after changing a `--reloadcmd`. Off by default because the hook restarts registry containers. |
 | `acme_web_prometheus_upstream` / `acme_web_loki_upstream` | `127.0.0.1:9090` / `127.0.0.1:3100` | Must match what `roles/metrics` and `roles/loki` publish. |
-| `acme_web_prometheus_password` / `_loki_password` | `{{ prometheus_basic_auth_password }}` / `{{ loki_basic_auth_password }}` | From the vaulted secrets. Asserted non-empty on the metrics host — they are the only thing gating 3101/3102. |
+| `acme_web_prometheus_username` / `_loki_username` | `promuser` / `loguser` | The **environment-wide** usernames. Not read by this role's tasks: `playbooks/group_vars/all/sites.yml` reads them by name to build `cs_metrics_credentials_default`. Must stay plain literals — see "Per-site basic-auth credentials". |
+| `acme_web_metrics_credentials` | `cs_site_metrics_credentials[cs_site]`, else `cs_metrics_credentials_default` | This site's four basic-auth values, and what the htpasswd files are actually built from. All four asserted non-empty on the metrics host — they are the only thing gating 3101/3102. Guard on the subscript, never on a field. |
 | `acme_web_registry_images` | `cmptstks/registry:latest`, `registry:2` | Which running containers the reload hook restarts. Deliberately not pinned: the controller hard-codes the image when it creates a tenant registry. |
 
 Consumed, not owned: `cs_ports.*`, `cs_portal_domain`, `cs_metrics_domain`,
-`cs_registry_domain`, `cs_admin_email`.
+`cs_registry_domain`, `cs_admin_email`, and the site contract `cs_site` /
+`cs_site_metrics_domains` / `cs_site_metrics_credentials` /
+`cs_metrics_credentials_default` (`playbooks/group_vars/all/sites.yml`,
+spellings frozen — this role re-derives none of them).
+
+Retired: `acme_web_prometheus_password` / `acme_web_loki_password`. They were
+aliases for the vaulted `prometheus_basic_auth_password` /
+`loki_basic_auth_password`, which `sites.yml` now reads directly; keeping
+them would have left two spellings of the environment-wide password with
+only one of them site-aware.
 
 ## Handlers
 
