@@ -1,0 +1,15 @@
+---
+# Auto-generates region_<name> and az_<name> groups from node host vars,
+# enabling e.g. `--limit region_exm001` with zero maintained nesting.
+#
+# The `zz_` prefix is load bearing: a directory inventory is parsed in
+# ALPHABETICAL order and this source must run AFTER the file that defines
+# the hosts, or it matches nothing and silently creates no groups. See
+# inventories/example/zz_constructed.yml for the full account.
+plugin: ansible.builtin.constructed
+strict: false
+keyed_groups:
+  - prefix: region
+    key: region
+  - prefix: az
+    key: az

@@ -1,0 +1,90 @@
+---
+# Does the site contract actually RESOLVE? — the check --syntax-check cannot do.
+#
+#   ansible-playbook -i inventories/example tests/site_contract.yml -c local
+#   ansible-playbook -i tests/fixtures/single-site tests/site_contract.yml -c local
+#
+# (both are run by `make check`)
+#
+# Every name below is frozen in playbooks/group_vars/all/sites.yml and listed
+# in docs/contracts.md §Site scoping. Three of them are built out of
+# `map('extract', hostvars, 'cs_site')`, which is precisely the thing that
+# stops working when the contract file is loaded the wrong way: play vars —
+# `vars_files:` — belong to the executing host and are NOT part of any other
+# host's `hostvars`, so the maps silently collapse to Undefined with
+# `object of type 'HostVarsVars' has no attribute 'cs_site'`. That is why
+# `tests/group_vars` is a symlink to `playbooks/group_vars` (see
+# tests/roles.yml), and this play is what proves the symlink is still doing
+# its job.
+#
+# Rendering, not asserting: what the values SHOULD be depends on the inventory
+# and belongs to roles/preflight. This play fails if a name does not resolve
+# at all, on any host, which is the failure that is otherwise invisible until
+# a converge is halfway through.
+- name: Render the frozen site-contract names on every host
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Render the site-contract names
+      ansible.builtin.debug:
+        msg:
+          cs_site: "{{ cs_site }}"
+          cs_site_metrics_hosts: "{{ cs_site_metrics_hosts }}"
+          cs_site_backup_hosts: "{{ cs_site_backup_hosts }}"
+          cs_site_metrics_domains: "{{ cs_site_metrics_domains }}"
+          cs_existing_hosts: "{{ cs_existing_hosts | sort }}"
+          cs_new_nodes: "{{ cs_new_nodes | sort }}"
+          cs_metrics_credentials_default: "{{ cs_metrics_credentials_default.keys() | list | sort }}"
+          cs_site_metrics_credentials: "{{ cs_site_metrics_credentials.keys() | list | sort }}"
+          # The cross-host read the contract blesses, exercised for real: this
+          # host asking about every OTHER host's site (docs/contracts.md
+          # §Variable scope).
+          sites_of_every_host: >-
+            {{ dict(groups['all'] | sort
+                    | zip(groups['all'] | sort | map('extract', hostvars, 'cs_site'))) }}
+
+# The credential map is the one contract name with real logic in it: a JSON
+# round-trip that expands the `username`/`password` shorthand and falls back
+# per field. Neither shipped inventory populates `metrics_site_credentials`
+# (it is commented out in the example's secrets), so the play above only ever
+# renders an empty map — the shorthand expansion and the round-trip itself go
+# untested by `make check` unless something supplies input.
+#
+# Supplied here as a play var deliberately. `metrics_site_credentials` is an
+# operator INPUT and the map built from it is hostvars-free, so it resolves
+# correctly from play scope — unlike the three maps above, which is the
+# distinction the header explains. Nothing here touches the inventory.
+- name: Prove the credential map expands the shorthand and falls back
+  hosts: localhost
+  gather_facts: false
+  vars:
+    metrics_site_credentials:
+      shorthand:
+        username: v1user
+        password: one-password-both-vhosts
+      explicit:
+        prometheus_username: promuser
+        prometheus_password: prom-only
+        loki_username: loguser
+        loki_password: loki-only
+      partial:
+        loki_password: loki-only-override
+  tasks:
+    - name: The shorthand fills both vhosts, explicit keys win, the rest falls back
+      ansible.builtin.assert:
+        that:
+          # `username`/`password` expand to all four fields.
+          - cs_site_metrics_credentials.shorthand.prometheus_username == 'v1user'
+          - cs_site_metrics_credentials.shorthand.loki_username == 'v1user'
+          - cs_site_metrics_credentials.shorthand.prometheus_password == cs_site_metrics_credentials.shorthand.loki_password
+          # Explicit keys are kept apart.
+          - cs_site_metrics_credentials.explicit.prometheus_password != cs_site_metrics_credentials.explicit.loki_password
+          # A partial entry takes the environment-wide value for what it omits.
+          - cs_site_metrics_credentials.partial.loki_password == 'loki-only-override'
+          - cs_site_metrics_credentials.partial.prometheus_username == cs_metrics_credentials_default.prometheus_username
+          - cs_site_metrics_credentials.partial.prometheus_password == cs_metrics_credentials_default.prometheus_password
+          # A site with no entry at all resolves through the subscript guard.
+          - (cs_site_metrics_credentials['absent'] | default(cs_metrics_credentials_default)).loki_username
+            == cs_metrics_credentials_default.loki_username
+        success_msg: "credential map: shorthand expands, explicit wins, omitted fields fall back"
+        quiet: true

@@ -15,16 +15,27 @@
 # It replaces the eight per-wave harnesses (tests/wave1a.yml … wave4i.yml)
 # that existed while site.yml was still a skeleton.
 #
-# group_vars under playbooks/ are not auto-loaded for a playbook that lives
-# outside that directory, so the two contract files are loaded explicitly in
-# every play.
+# `tests/group_vars` is a SYMLINK to `playbooks/group_vars`, and it has to be.
+#
+# Ansible auto-loads group_vars from the directory holding the playbook, so a
+# harness living outside playbooks/ sees none of the contract files. Loading
+# them per play with `vars_files:` looks equivalent and is not: play vars
+# belong to the host currently executing and are NOT part of any other host's
+# `hostvars`. `playbooks/group_vars/all/sites.yml` builds its site maps out of
+# `map('extract', hostvars, 'cs_site')`, so under `vars_files` every one of
+# them collapses to Undefined with
+# `object of type 'HostVarsVars' has no attribute 'cs_site'` — while
+# playbooks/site.yml, which gets the same file as real group_vars for `all`,
+# resolves it fine. Verified both ways.
+#
+# --syntax-check never templates a variable, so none of that is visible until
+# the harness is actually run. The symlink means there is nothing to keep in
+# step: every file under playbooks/group_vars/all/ (ports, versions,
+# registries, sites) is loaded here exactly as the real playbooks load it.
 
 - name: Every host — preflight, base system, firewall, validate
   hosts: all
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - preflight
     - common
@@ -38,9 +49,6 @@
 - name: Controller — vault, TLS terminator, portal, seeding, backfills
   hosts: controller
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - docker_config
     - vault
@@ -53,9 +61,6 @@
 - name: Nodes — kernel, docker TLS, haproxy, observability, agent
   hosts: nodes
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - node_kernel
     - docker_config
@@ -67,9 +72,6 @@
 - name: Metrics host — prometheus, alertmanager, loki
   hosts: metrics
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - acme_web
     - metrics
@@ -78,9 +80,6 @@
 - name: Registry host — TLS terminator and the registry filesystem
   hosts: registry
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - acme_web
     - registry
@@ -88,18 +87,12 @@
 - name: Backup server
   hosts: backup
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - backup_server
 
 - name: Nameservers
   hosts: nameservers
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   roles:
     - postgres_repo
     - powerdns
@@ -110,9 +103,6 @@
 - name: Reusable task-file entry points
   hosts: nodes
   gather_facts: false
-  vars_files:
-    - ../playbooks/group_vars/all/ports.yml
-    - ../playbooks/group_vars/all/versions.yml
   tasks:
     - name: Ensure the controller vault is unsealed
       ansible.builtin.include_role:

@@ -1,0 +1,29 @@
+---
+# Auto-generates region_<name> and az_<name> groups from node host vars,
+# enabling e.g. `--limit region_exm001` with zero maintained nesting.
+#
+# THE FILENAME IS LOAD BEARING. A directory inventory is parsed one file at a
+# time, in ALPHABETICAL order, and each source sees only what the sources
+# before it built. Named `constructed.yml` this file sorted BEFORE hosts.yml,
+# so the plugin ran against an empty inventory, matched no host, and created
+# no groups at all — silently, because `strict: false` and an inventory
+# plugin that produces nothing is not an error. Every `--limit region_*` in
+# this repository failed with "Could not match supplied host pattern" from
+# the day it was written. `zz_` is what makes it sort last; keep any future
+# constructed/plugin source sorting after the file that defines the hosts.
+#
+# Verify after touching either file — the region_*/az_* groups must appear:
+#
+#   ansible-inventory -i inventories/example --graph
+#
+# `--limit region_<name>` selects that region's NODES and nothing else. It
+# does not select the controller, metrics or backup hosts, so every play that
+# targets those runs against zero hosts and is skipped. See README.md
+# §Adding a region and the Makefile's LIMIT note before scoping a run.
+plugin: ansible.builtin.constructed
+strict: false
+keyed_groups:
+  - prefix: region
+    key: region
+  - prefix: az
+    key: az

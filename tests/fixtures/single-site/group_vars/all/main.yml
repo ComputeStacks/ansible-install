@@ -16,9 +16,6 @@ ansible_user: root
 # Portal / domains
 cs_portal_domain: portal.example.com
 cs_registry_domain: cr.example.com
-# The DEFAULT metrics/logging domain: the name used by any site whose metrics
-# host does not set a `metrics_domain` host var of its own (hosts.yml). A
-# single-site install has only this one.
 cs_metrics_domain: metrics.example.com
 cs_app_zone: usercontent.example.com     # tenant Dns::Zone
 cs_admin_email: admin@example.com
@@ -68,8 +65,6 @@ acme_account_email: admin@example.com
 # backup_borg_remote_path: /usr/bin/borg
 # In secrets.yml, these must ALSO be the existing environment's values, not
 # new ones — nothing on a shared host is re-rendered to match them:
-#   secret_key_base (asserted byte-for-byte), backups_key, and the metrics
-#   host's nginx basic-auth credentials (prometheus_basic_auth_password /
-#   loki_basic_auth_password, or a `metrics_site_credentials` entry for that
-#   site — see secrets.yml).
+#   secret_key_base (asserted byte-for-byte), backups_key,
+#   prometheus_basic_auth_password, loki_basic_auth_password.
 # See docs/attach-mode.md.

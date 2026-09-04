@@ -21,6 +21,16 @@
 #   * tailscale is OFF unless every host in the run says otherwise explicitly;
 #   * the controller prep play restarts the portal (~30s of downtime).
 #
+# DO NOT `--limit` this playbook, and in particular not with a `region_*` or
+# `az_*` pattern. Those groups are constructed from node host vars, so they
+# contain the new node and nothing else: the controller, metrics and backup
+# plays below would match zero hosts, and ansible SKIPS a play with no hosts
+# rather than failing it. The run would end green having built the node and
+# skipped the controller prep, the prometheus file_sd fragments, every v1
+# firewall append and the seed itself — a node nothing can reach and the
+# controller has never heard of. This inventory already describes exactly one
+# new region; that is the scoping.
+#
 # Why `include_role` and not `roles:` here. Four of these steps run a role's
 # alternate entry point (`tasks_from:`), which is a parameter of
 # include_role/import_role and NOT of a play's `roles:` keyword — ansible
@@ -194,9 +204,13 @@
         tasks_from: v1_append
 
 # roles/backup_server gates itself on `existing_env`: only tasks/account.yml
-# runs, so v2's borg is never installed over the server's existing one and
-# only the cstacks account, its ~/.ssh and the repository path's ownership are
-# touched. The per-node authorized_keys entry is added later, by cs_agent.
+# runs, so v2's borg is never installed over the server's existing one. What
+# it writes there is exactly one thing — `~cstacks/.ssh`, which cs_agent needs
+# to drop the new node's key into. The repository path is only `stat`ed (v1's
+# value is /mnt; chmod 0770 on it would clear world traverse for everything
+# mounted underneath), and the existing account's shell and shadow entry are
+# left as they are. The per-node authorized_keys entry is added later, by
+# cs_agent.
 - name: Existing backup server — account, repository path, firewall appends
   hosts: backup
   roles:

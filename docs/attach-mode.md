@@ -27,6 +27,17 @@ that first, the normal way:
 cstacks upgrade
 ```
 
+The controller prep play checks this before it changes anything: it reads the
+running portal container's rake task list and aborts if `bootstrap:apply` is
+not in it. That check exists because the failure used to arrive at the worst
+possible moment — after the database dump, the environment append, the
+`cstacks` swap, the portal restart *and* a fully built new node, with
+`cstacks seed` dying on `Don't know how to build task 'bootstrap:apply'`. It
+also asserts that every directory the v2 `cstacks` script bind-mounts already
+exists, so a key missing from `/etc/default/computestacks` cannot quietly take
+v2's default and have docker mount an empty directory over a populated one.
+Both checks are read-only, and both run before the `pg_dump`.
+
 **`secret_key_base` in your vaulted `secrets.yml` must be the existing
 controller's value, byte for byte.** Copy it out of
 `/etc/default/computestacks` on the controller. Never the other way around:
@@ -37,7 +48,8 @@ damage happens after the dump. The controller prep play asserts the match and
 aborts if it fails.
 
 **Three inputs describe the existing backup server** and have no safe default,
-because v2's defaults are not what a v1 server has:
+because v2's defaults are not what a v1 server has (the server itself is the
+one in the new node's `site` — see below):
 
 | Var | v1 value | Why it matters |
 | --- | --- | --- |
@@ -50,14 +62,30 @@ exists, not a new one.** Attach mode never re-renders a shared host's
 configuration, so a value that disagrees with the running environment is not
 corrected — it just fails, usually somewhere unhelpful:
 
-* `cs_portal_domain`, `cs_metrics_domain`, `cs_registry_domain` and
-  `cs_app_zone` are the existing environment's domains. The metric and log
-  clients are matched by exact endpoint string, which is built from
-  `cs_metrics_domain` and `cs_ports.metrics_*`.
-* `prometheus_basic_auth_password` and `loki_basic_auth_password` are the
-  existing metrics host's credentials. The htpasswd files there are not
-  rewritten, so a fresh password means the new node's fluentd cannot ship
-  logs and the controller cannot read metrics.
+* `cs_portal_domain`, `cs_registry_domain` and `cs_app_zone` are the existing
+  environment's domains.
+* **The metrics and logging endpoint is per site.** The metric and log clients
+  are matched by exact endpoint string, built from the metrics host's own
+  `metrics_domain` host var — falling back to the environment-wide
+  `cs_metrics_domain` when it sets none — and `cs_ports.metrics_*`. An
+  environment with one metrics host needs only `cs_metrics_domain`, exactly as
+  before. An environment with several needs `site` on the node being attached
+  and on each metrics and backup host in the inventory, and `metrics_domain`
+  on every metrics host that does not answer on `cs_metrics_domain`. Getting
+  the site wrong points the new region at another facility's prometheus and
+  loki, which is not an error anywhere — it is just the wrong data in the
+  wrong place.
+* **The nginx basic-auth credentials are per metrics host.** The htpasswd
+  files on the existing host are not rewritten, so a fresh password means the
+  new node's fluentd cannot ship logs and the controller cannot read metrics —
+  and a wrong *username* fails identically, silently, with a 401. Read both
+  off the existing host's nginx configuration. `prometheus_basic_auth_password`
+  and `loki_basic_auth_password` are the environment-wide values; where two
+  metrics hosts do not share credentials — and separately built ones do not —
+  name the site in `metrics_site_credentials` instead
+  (`inventories/example/group_vars/all/secrets.yml` shows both forms). A v1
+  metrics host has ONE password covering both vhosts, which is what the
+  `username`/`password` shorthand is for.
 * `cs_admin_email` / `cs_admin_password` are still asserted present even
   though an attach manifest carries no `admin_user` section. Any valid value
   will do; the existing admin account is not touched.
@@ -93,14 +121,15 @@ Exactly this, and nothing else:
 
 | Host | Write | Notes |
 | --- | --- | --- |
+| controller | *(nothing)* the `bootstrap:apply` probe and the bind-mount path assertions | Read-only gates, before the dump. See Prerequisites. |
 | controller | `cstacks database-backup` | The gate. Everything after it writes to the database. |
 | controller | `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH` appended to `/etc/default/computestacks` | `lineinfile`, append-only, only when the key is absent. No `regexp`, so an existing value can never be rewritten. |
 | controller | the v2 `cstacks` script | One of the two whole-file exceptions. It holds no environment-specific values and adds the `seed`, `runner` and `database-backup` subcommands plus the proxy_ips mount. |
 | controller | portal container recreated | ~30 seconds of downtime — see below. |
 | controller | firewall: one blanket accept per new node address | v1's own `lineinfile` idiom against `/usr/local/bin/cs-recover_iptables`, plus the same rules made live. |
-| metrics | `/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml` | New per-AZ fragment files, in v1's exact paths. Prometheus picks them up within one scrape interval; nothing is restarted. The other whole-file exception. |
+| metrics | `/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml` | New per-AZ fragment files, in v1's exact paths, on **the metrics host in the new node's site** and no other. Prometheus picks them up within one scrape interval; nothing is restarted. The other whole-file exception. |
 | metrics | firewall: the same node-address appends | |
-| backup | the `cstacks` account, its `~/.ssh`, and the repository path's ownership | v2's borg is **not** installed over the server's existing one. |
+| backup | the `cstacks` account's `~/.ssh` | On **the backup server in the new node's site**. The repository path is only `stat`ed, never chowned — v1's value is `/mnt`, and 0770 on it would clear world traverse for every unrelated process reading a filesystem mounted underneath. The existing account's shell and shadow entry are left alone. v2's borg is **not** installed over the server's existing one. |
 | backup | one `authorized_keys` entry for the new node | Added by `cs_agent`, commented with the node's hostname. |
 | backup | firewall: the same node-address appends | Latent on most v1 servers — their script's `default_allow_ssh` accepts 22 from anywhere, so borg already reaches them. On a server built with `default_allow_ssh: false` the appends are what keeps the new node's backups from failing silently. |
 | vault (on the controller) | nothing | The new node's docker certificate is *issued* from the existing PKI; the playbook unseals the vault if it is sealed and writes nothing. |
@@ -152,9 +181,9 @@ The regions still reference the existing metric and log clients **by exact
 endpoint string**, and a miss aborts the apply rather than creating a second
 client. That is wanted: a duplicate client with different credentials splits
 the placement metrics and every order in the new region is rejected for "no
-capacity" with nothing else to show for it. If it aborts, reconcile
-`controller_seed_metric_endpoint` / `_log_endpoint` with what the controller
-actually has.
+capacity" with nothing else to show for it. If it aborts, reconcile the endpoint the manifest built — from that site's
+`metrics_domain` or `cs_metrics_domain`, and `cs_ports.metrics_*` — with what
+the controller actually has.
 
 ## After the run
 

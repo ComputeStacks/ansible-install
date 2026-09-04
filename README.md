@@ -60,11 +60,13 @@ are Debian, they are flagged `existing_env: true`, and attach mode only ever
 adds to them.
 
 **DNS.** The portal, metrics and registry domains must resolve to their hosts
-before the run, because the TLS certificates are issued during it:
+before the run, because the TLS certificates are issued during it. Every
+metrics host needs its own name — one per site:
 
 ```
 portal.example.com.       IN A     <controller public ip>
 metrics.example.com.      IN A     <metrics public ip>
+metrics.west.example.com. IN A     <second site's metrics public ip>
 cr.example.com.           IN A     <registry public ip>
 usercontent.example.com.  IN NS    ns1.example.com.
 ```
@@ -87,9 +89,44 @@ cp -r inventories/example inventories/prod
 * `group_vars/all/main.yml` — domains, locale, currency, DNS driver, ACME
   settings.
 * `group_vars/all/secrets.yml` — everything secret. Encrypt it (below).
-* `constructed.yml` — generates `region_<name>` and `az_<name>` groups from
+* `zz_constructed.yml` — generates `region_<name>` and `az_<name>` groups from
   the node host vars, so `--limit region_exm001` works with no maintained
-  nesting.
+  nesting. **The `zz_` is load bearing**: a directory inventory is parsed in
+  alphabetical order and this file has to sort *after* the one that defines
+  the hosts, or the plugin matches nothing and silently creates no groups at
+  all. `make check` fails if the groups stop appearing.
+
+### Sites
+
+A **site** is the physical facility a host lives in. It is neither a `region`
+nor an `az`: two regions can share a facility, and the facility is what
+decides which metrics host scrapes a node and which backup server that node
+writes to. The controller has no column for it, so nothing about it is ever
+seeded — it exists only to answer that question.
+
+**One metrics host per site**, and every site holding a node must have one
+(preflight fails the run otherwise). **At most one backup server per site**;
+zero means that site's nodes install with backups disabled. A region never
+spans sites.
+
+Set `site` as a host var on each node, metrics host and backup host — not on
+the controller, the registry or the nameservers, which are platform-wide. A
+metrics host may also set `metrics_domain`, the public name its prometheus
+and loki vhosts answer on and the name its certificate covers; without one it
+uses the environment-wide `cs_metrics_domain`. `inventories/example` describes
+two sites and is the working reference.
+
+**A single-site install sets `site` nowhere at all.** Every host then lands in
+the site called `default`, and every role resolves the same single metrics
+host and single backup server it always did. No existing inventory needs an
+edit; `tests/fixtures/single-site` is exactly that inventory, kept frozen as
+the regression baseline.
+
+Per-site nginx basic-auth credentials for the prometheus and loki vhosts go in
+`metrics_site_credentials` in the vaulted secrets, keyed by site; anything not
+named there falls back to the environment-wide
+`prometheus_basic_auth_password` / `loki_basic_auth_password`. Metrics hosts
+built separately do not share a password.
 
 Templates read **inventory vars only**, never gathered facts. That is what
 makes `--limit` safe: a partial run still renders the full picture, instead of
@@ -152,9 +189,19 @@ Seeding has to precede enrolment (the token does not exist before it), and the
 backfills have to follow it (they call every node's agent, which rejects an
 unenrolled node). Re-ordering those three breaks the install.
 
-Useful flags: `--limit region_exm001` for one region, `--check` for a dry run
-(with the usual check-mode caveats around anything driven by a command's
-output), `--tags enroll` to re-enrol a node on its own.
+Useful flags: `--check` for a dry run (with the usual check-mode caveats
+around anything driven by a command's output), `--tags enroll` to re-enrol a
+node on its own, and `--limit` — with the caveat below.
+
+> **`--limit region_<name>` selects that region's nodes and nothing else.**
+> The `region_*` and `az_*` groups are built from node host vars, so they
+> contain no controller, no metrics host and no backup server. Every play that
+> targets one of those then matches zero hosts, and ansible skips a play with
+> no hosts rather than failing: the run ends green having built the node and
+> skipped `controller_seed`, the prometheus `file_sd` fragments, the shared
+> hosts' firewalls and ssh trust. That is fine for re-running node-only work
+> on an already-converged environment, and wrong for anything else — name what
+> you need, e.g. `--limit region_exm001:controller:metrics:backup`.
 
 ## Validating
 
@@ -175,9 +222,13 @@ list, what each failure means, and how to skip one.
 ## Adding a region
 
 For a v2 environment, add the node to the same inventory and re-run
-`site.yml` — optionally `--limit` scoped, which is safe once the fact cache
-has been populated by one un-limited run (see "Templates read inventory vars
-only", above).
+`site.yml`. Run it **un-limited**: a new region needs the controller (seed),
+its site's metrics host (scrape fragments) and the shared hosts' firewalls,
+and a `--limit region_<name>` excludes all three (see the caveat under
+"Running an install"). A limited run is for re-converging a node that is
+already seeded and scraped, and is safe only once the fact cache has been
+populated by one un-limited run (see "Templates read inventory vars only",
+above).
 
 For an environment built by the **v1** playbooks, use attach mode:
 
@@ -188,10 +239,13 @@ ansible-playbook -i inventories/prod playbooks/add-region.yml --ask-vault-pass
 It builds the new node in full and touches the existing shared hosts only
 additively — a prometheus `file_sd` fragment, firewall appends, a borg
 authorized_keys entry, and two appended environment keys on the controller. It
-never re-renders a file on a host it does not fully describe. Read
+never re-renders a file on a host it does not fully describe. Do not `--limit`
+it: the inventory already describes exactly one new region, and every other
+play in the run targets a shared host a `region_*` pattern would drop. Read
 [`docs/attach-mode.md`](docs/attach-mode.md) first: it has prerequisites,
 including a controller already upgraded to a release carrying
-`rake bootstrap:apply`, and it restarts the portal.
+`rake bootstrap:apply` (the run now checks for it before touching anything),
+and it restarts the portal.
 
 ## Upgrades
 
@@ -259,9 +313,11 @@ playbooks/site.yml              greenfield converge
 playbooks/add-region.yml        attach mode
 playbooks/group_vars/all/       versions.yml (pins) and ports.yml (the ports contract)
 playbooks/vars/                 platform vars a pinned galaxy role is missing
-inventories/example/            copy this
+inventories/example/            copy this -- two sites, the working reference
 roles/                          one README.md per role: what it owns and why
 tests/roles.yml                 per-role syntax harness
+tests/site_contract.yml         renders the frozen site variables on every host
+tests/fixtures/single-site/     frozen single-site inventory: the regression baseline
 docs/
 ```
 
