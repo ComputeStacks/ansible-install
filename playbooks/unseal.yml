@@ -1,0 +1,29 @@
+---
+# Unseal the controller's vault, and nothing else.
+#
+#   ansible-playbook -i inventories/<env> playbooks/unseal.yml --ask-vault-pass
+#
+# Reads the seal status and, when sealed, submits vault_key_threshold shares.
+# Everything is delegated to vault_host, so nothing is read onto or written
+# from the control node.
+#
+# You should rarely need to run this by hand: site.yml and add-region.yml both
+# unseal as part of their normal flow, so a converge after a controller reboot
+# already fixes a sealed vault. This exists for the case where a converge is
+# not what you want — the controller rebooted, the portal cannot issue
+# certificates, and you want the seal opened now without touching anything
+# else.
+#
+# Safe to run when vault is already unsealed: the whole submit block is gated
+# on the reported seal status, so an unsealed vault reports `ok` and changes
+# nothing.
+- name: Unseal the controller vault
+  hosts: controller
+  # Nothing here reads a fact, and a sealed vault is usually being fixed in a
+  # hurry. The docker modules run against vault_host, not the control node.
+  gather_facts: false
+  tasks:
+    - name: Ensure vault is unsealed
+      ansible.builtin.include_role:
+        name: vault
+        tasks_from: unseal

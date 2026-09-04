@@ -57,6 +57,18 @@ Both delegate every action to `vault_host`, so they work unchanged from a node
 **existing** v1 controller's vault. `unseal.yml` never creates or recreates the
 container; on an existing controller it will only `docker start` a stopped one.
 
+`playbooks/unseal.yml` is the same include on its own, for when a converge is
+not what you want:
+
+```
+ansible-playbook -i inventories/<env> playbooks/unseal.yml --ask-vault-pass
+```
+
+A rebooted controller comes back sealed, and nothing surfaces that until
+something asks vault for a certificate — the docker daemon certs already on
+disk are static files and keep working. Any normal converge unseals on its
+way past; that playbook is the shortcut.
+
 ### The TTL clamp
 
 Vault refuses — with an unhelpful error — to sign a leaf whose `notAfter` runs
@@ -81,6 +93,7 @@ failing loudly if that is ≤ 0. Every issuance in this repo passes that value a
 | `vault_command` | `docker exec vault-bootstrap vault` | |
 | `vault_storage_path` | `/etc/computestacks/.vault-bootstrap` | **v1 layout — do not change**, attach mode reads an existing controller's keys from here. |
 | `vault_certificates_path` | `/etc/computestacks/certificates` | |
+| `vault_container_uid` / `vault_container_gid` | `100` / `1000` | The `vault` user inside `vault_image`. `file` and `logs` are created with this ownership, not root's: the image entrypoint chowns them to `vault` at container START and then drops privileges, so a re-converge that reset them to root would lock the running server out of its own storage. Re-check if `vault_image` moves. |
 | `vault_docker_certs_path` | `…/certificates/docker` | Bind-mounted into portal as `/root/.docker`. |
 | `vault_listen_address` / `vault_listen_port` | `127.0.0.1` / `8200` | Loopback only. |
 | `vault_key_shares` / `vault_key_threshold` | `5` / `3` | v1 parity. |

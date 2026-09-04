@@ -182,9 +182,9 @@ checkpoints:
 1. **Preflight** — fails immediately on a missing node var, a duplicate `az`,
    a short `secret_key_base` or a non-Ubuntu host. Nothing has been changed at
    that point.
-2. **Controller infrastructure** — vault initialises and writes its unseal
-   keys to `/etc/computestacks/.vault-bootstrap/keys/`. Copy them somewhere
-   safe; a rebooted controller comes back with a sealed vault.
+2. **Controller infrastructure** — vault initialises and issues the docker
+   PKI. Nothing to do by hand: a converge unseals a sealed vault on its way
+   past, and `playbooks/unseal.yml` does only that if you need it sooner.
 3. **Seed controller** — renders `/var/lib/computestacks/manifest.yml` (root,
    0600) and applies it with `cstacks seed`. The file is deleted after a
    successful apply and kept after a failed one, because it is the thing to
@@ -200,8 +200,7 @@ checkpoints:
 
 * Log in at `https://<cs_portal_domain>` with `cs_admin_email` /
   `cs_admin_password`.
-* Copy the vault unseal keys and the vaulted `secrets.yml` off the
-  controller.
+* Copy the vaulted `secrets.yml` off the controller.
 * Schedule `cstacks database-backup` (see the README) and copy its output
   off-host. Tenant volumes go to the borg server; the controller's own
   database does not.

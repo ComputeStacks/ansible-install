@@ -14,6 +14,19 @@ vault_storage_path: /etc/computestacks/.vault-bootstrap
 vault_certificates_path: /etc/computestacks/certificates
 vault_docker_certs_path: "{{ vault_certificates_path }}/docker"
 
+# uid/gid of the `vault` user INSIDE vault_image, which is what the server
+# process runs as: docker-entrypoint.sh chowns the bind-mounted /vault/file
+# and /vault/logs to vault:vault while it is still root, then `su-exec vault`.
+# The storage directories below are created with this ownership so a re-converge
+# does not chown them back to root under a container that is already running --
+# the entrypoint only re-runs on a container START, so a root-owned 0700
+# /vault/file locks the server out of its own data and every write then fails
+# with `mkdir /vault/file/logical: permission denied`.
+# Confirmed against hashicorp/vault:1.21.4 (`vault:x:100:1000` in /etc/passwd,
+# `vault:x:1000` in /etc/group). Re-check these if vault_image moves.
+vault_container_uid: 100
+vault_container_gid: 1000
+
 # Loopback-only listener. Deliberately NOT in cs_ports: ports.yml is the
 # cross-host port contract (firewall/scrape/vhost inputs) and 8200 is never
 # reachable off the controller, never firewalled, never referenced by another

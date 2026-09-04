@@ -10,24 +10,39 @@
       vault_image must be an exact pin from playbooks/group_vars/all/versions.yml
       (got: {{ vault_image | default('undefined') }}).
 
+# The two directories vault itself writes are owned by the container's vault
+# user, not root -- see vault_container_uid in defaults/main.yml. Everything
+# else here is only ever written by ansible, so it stays root-owned; `keys` in
+# particular holds the unseal keys and is never bind-mounted as a directory
+# (only keys/rootkey, as a file).
 - name: Ensure the vault and certificate directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    owner: root
-    group: root
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
     mode: "{{ item.mode }}"
   loop:
+    # 0700, NOT 0755: roles/controller creates this same path in its own
+    # directory layout at 0700, so any other value here makes the two roles
+    # chmod it back and forth and both report `changed` on every converge
+    # forever. It holds docker daemon private keys; everything that reads them
+    # (dockerd, the portal container) is root, so nothing needs the traversal
+    # bit. Keep the two in step if either moves.
     - path: "{{ vault_certificates_path }}"
-      mode: "0755"
+      mode: "0700"
     - path: "{{ vault_docker_certs_path }}"
       mode: "0755"
     - path: "{{ vault_storage_path }}"
       mode: "0700"
     - path: "{{ vault_storage_path }}/file"
       mode: "0700"
+      owner: "{{ vault_container_uid }}"
+      group: "{{ vault_container_gid }}"
     - path: "{{ vault_storage_path }}/logs"
       mode: "0700"
+      owner: "{{ vault_container_uid }}"
+      group: "{{ vault_container_gid }}"
     - path: "{{ vault_storage_path }}/keys"
       mode: "0700"
   loop_control:
