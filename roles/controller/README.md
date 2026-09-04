@@ -43,7 +43,7 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 | `/etc/computestacks/.ssh` | **v2 change.** The application ed25519 keypair. v1 kept it in `/var/lib/computestacks/sshkeys`; it moved here because `roles/ssh_trust` reads `id_ed25519.pub` from this path to seed root's `authorized_keys` on every node and on the registry host. |
 | `/var/lib/computestacks` | State root. Holds the `.db_provisioned` sentinel and the docker-cert checksum. |
 | `/var/lib/computestacks/backups` | `cstacks database-backup` output. |
-| `/var/lib/computestacks/branding` | Mounted as `public/assets/custom`. Empty by default — drop custom assets here. |
+| `/var/lib/computestacks/branding` | Mounted as `public/assets/custom`. Seeded per-file from the image's `public/custom` (see below); drop your own assets here and they are never overwritten. |
 | `/var/lib/computestacks/proxy_ips` | **v2 new.** `ProxyIpList`'s persistent store, mounted as `lib/proxy_ips`. |
 | `/var/lib/computestacks/.ssl_wildcard` | `sharedcert.pem` (cert **and** key in one file — the form haproxy wants) plus the openssl config that produced it. |
 
@@ -180,6 +180,7 @@ Assert first, then act:
 | Var | Default | Notes |
 | --- | --- | --- |
 | `controller_image_repo` / `controller_image_tag` | `ghcr.io/computestacks/controller` / `9.7` | `versions.yml`. Composed into `CS_REG`. The **minor** tag is a deliberate rolling channel; a digest pin would make `cstacks upgrade` a permanent no-op. |
+| `controller_image_allow_floating_tag` | `false` | Permit a `latest`/`stable`/`main`/`master` tag. For an image that publishes no immutable line (an internal build cut on demand); set it as a host var beside the repo override. Costs reproducibility: nothing then records which build a host runs. |
 | `controller_auto_upgrade` | `true` | When the running container's image differs from `CS_REG`, run the full `cstacks upgrade` rather than recreating on an unmigrated schema. Set false to make tag bumps manual. |
 | `controller_wildcard_domain` | `{{ cs_app_zone }}` | CN and `*.` SAN of the shared certificate. |
 | `controller_wildcard_days` | `3650` | Generated once; never rotated by a converge. |
@@ -224,8 +225,18 @@ restarted the portal by hand.
 * **No consul mount, no `/root/.consul` directory, no consul token slurp.**
 * **The branding CDN downloads are gone.** v1 fetched `application.css`, its
   map and a login image from `f.cscdn.cc` on every bootstrap — unpinned
-  third-party content pulled into the portal's asset path. The directory is
-  still created and mounted, so an operator can drop their own assets in.
+  third-party content pulled into the portal's asset path. The same files are
+  copied out of the pinned controller image instead (`controller_image_branding_source`,
+  default `/usr/src/app/public/custom`), once the portal is up and only for
+  names the branding directory does not already have.
+
+  This is not cosmetic. The production layout links
+  `/assets/custom/application.css` unconditionally, and that path *is* the
+  mount — so an empty branding directory masks whatever the image had there
+  and the portal comes up unstyled, 404ing on its own stylesheet. Copying
+  per-file rather than per-directory means an operator's own
+  `logo-login.png` survives while the stylesheet is still filled in. Set
+  `controller_seed_default_branding: false` to own the directory outright.
 * **`/computestacks-mnt` is not created here.** v1 created the registry data
   root on the *controller*, where nothing uses it; `roles/registry` creates it
   on the registry host, where the registry containers bind-mount it.

@@ -15,6 +15,22 @@ controller_image_tag: "9.7"
 # roles/preflight proves the repo, the tag and the credentials before anything
 # is installed, so a wrong tag here fails on the first task rather than at
 # `cstacks upgrade`.
+#
+# Both roles refuse a floating tag ('latest'/'stable'/'main'/'master') unless
+# this is true. It is a reproducibility guard, not a correctness one: nothing
+# downstream parses the tag, and the converge's upgrade check compares the
+# running image STRING to repo:tag, so a pinned minor does not re-trigger on a
+# patch move either -- `cstacks upgrade` handles that out of band. What a
+# floating tag costs is the ability to say which build a host is running, and
+# to tell from the inventory whether it is current.
+#
+# Set it true only for an image that publishes no immutable line at all -- an
+# internal controller build cut on demand, where `latest` moves exactly when
+# someone decides to deploy. Set it as an inventory HOST VAR beside the repo
+# override, not here, so the opt-out is visible in the environment that takes
+# it. (Playbook group_vars outrank inventory group_vars, so an inventory
+# group_vars/all entry would be silently ignored; host vars do win.)
+controller_image_allow_floating_tag: false
 
 # cs-agent — apt PACKAGE version. Historically this was NOT the agent's
 # self-reported version (package 1.5.0 shipped backup-agent 2.0.0), but since

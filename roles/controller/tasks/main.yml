@@ -28,12 +28,16 @@
     that:
       - controller_image_repo | default('') | length > 0
       - controller_image_tag | default('') | length > 0
-      - controller_image_tag not in ['latest', 'stable', 'main', 'master']
+      - >-
+        controller_image_tag not in ['latest', 'stable', 'main', 'master']
+        or (controller_image_allow_floating_tag | default(false) | bool)
     fail_msg: >-
-      controller_image_repo and controller_image_tag must be set in
-      playbooks/group_vars/all/versions.yml, and the tag must not float
-      ('latest'/'stable'/'main'). The minor line (e.g. '9.7') is the intended
-      rolling channel — `cstacks upgrade` pulls the newest patch within it.
+      controller_image_repo and controller_image_tag must be set, and the tag
+      must not float ('latest'/'stable'/'main'/'master') unless
+      controller_image_allow_floating_tag is true. The minor line (e.g. '9.7')
+      is the intended rolling channel — `cstacks upgrade` pulls the newest
+      patch within it. (preflight asserts the same thing earlier and with more
+      detail; this is the role-local backstop.)
 
 - name: Assert the immutable application secrets are present
   ansible.builtin.assert:
@@ -80,6 +84,9 @@
     mode: "{{ item.mode }}"
   loop:
     - {path: "{{ controller_config_dir }}", mode: "0755"}
+    # roles/vault creates this same path (vault_certificates_path) and must
+    # keep the same mode, or the two roles chmod it back and forth and both
+    # report `changed` on every converge.
     - {path: "{{ controller_certificates_dir }}", mode: "0700"}
     - {path: "{{ controller_ssh_key_dir }}", mode: "0700"}
     - {path: "{{ controller_data_dir }}", mode: "0755"}
@@ -258,3 +265,43 @@
   register: controller_portal_run
   changed_when: controller_portal_run.rc == 0
   when: controller_portal_state.stdout | trim != 'true'
+
+# Runs here, at the end, because `docker cp` needs a container to copy out of
+# and the branding directory is bind-mounted into it — writing to the host
+# side of a live mount is what makes the assets visible without a restart.
+- name: Seed the default branding assets
+  when: controller_seed_default_branding | bool
+  block:
+    - name: List the branding assets the portal image ships
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ controller_container_name }}"
+          - ls
+          - -A
+          - "{{ controller_image_branding_source }}"
+      register: controller_branding_defaults
+      changed_when: false
+      # A controller image that ships no stock branding is not an error: the
+      # directory stays empty and the operator fills it themselves.
+      failed_when: false
+
+    - name: Find the branding assets already on the host
+      ansible.builtin.find:
+        paths: "{{ controller_branding_dir }}"
+        file_type: any
+        hidden: true
+      register: controller_branding_present
+
+    - name: Copy in the branding assets the host is missing
+      ansible.builtin.command:
+        argv:
+          - docker
+          - cp
+          - "{{ controller_container_name }}:{{ controller_image_branding_source }}/{{ item }}"
+          - "{{ controller_branding_dir }}/{{ item }}"
+      loop: "{{ controller_branding_defaults.stdout_lines | default([]) }}"
+      when: item not in (controller_branding_present.files
+                         | map(attribute='path') | map('basename') | list)
+      changed_when: true

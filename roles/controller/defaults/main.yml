@@ -23,6 +23,23 @@ controller_ssh_key: "{{ controller_ssh_key_dir }}/id_ed25519"
 controller_data_dir: /var/lib/computestacks
 controller_backups_dir: "{{ controller_data_dir }}/backups"
 controller_branding_dir: "{{ controller_data_dir }}/branding"
+# Where the portal image keeps the stock copies of the branding assets. The
+# image serves them from `public/custom` in development; in production the
+# layout links `/assets/custom/...`, which is where controller_branding_dir is
+# mounted, and the image ships nothing there. Seeding is what connects the two.
+controller_image_branding_source: /usr/src/app/public/custom
+# Copy any of those assets that the branding directory does not already have,
+# once the portal container is up. v1 downloaded them from f.cscdn.cc on every
+# bootstrap; v2 dropped that (unpinned third-party content in the portal's
+# asset path) but nothing replaced it, so a fresh install mounted an EMPTY
+# directory over public/assets/custom and every page 404'd on
+# `/assets/custom/application.css` — the portal came up unstyled.
+# Taking them from the pinned controller image instead keeps the fix inside
+# the image the operator already chose.
+# Per FILE, never a directory-level overwrite: an operator who drops their own
+# logo-login.png keeps it and still gets the stylesheet. Set false to manage
+# the directory entirely by hand.
+controller_seed_default_branding: true
 # v2 NEW: ProxyIpList's persistent store (app/services/proxy_ip_list.rb).
 # Bind-mounted onto /usr/src/app/lib/proxy_ips; without it the CDN proxy IP
 # lists are re-fetched into a throwaway container filesystem on every restart.
