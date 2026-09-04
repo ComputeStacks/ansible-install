@@ -295,6 +295,14 @@ bootstrap_db()
 
 # Apply a bootstrap manifest (controller repo doc/bootstrap_manifest.md).
 # DRY_RUN=1 cstacks seed <manifest>  -> prints the diff, writes nothing.
+#
+# Both DRY_RUN and UPDATE_ADDRESSES have to be forwarded explicitly: `docker
+# run` starts a fresh environment, so a variable exported by the caller does
+# NOT reach the apply inside the container. UPDATE_ADDRESSES was missing here,
+# which made roles/controller_seed's `controller_seed_update_addresses` a
+# silent no-op -- the apply always ran with readdressing off, and reported
+# `manifest differs from database, database wins` no matter what the operator
+# asked for.
 seed()
 {
   local manifest="${1:-}"
@@ -318,6 +326,7 @@ seed()
     "${ENV_ARGS[@]}" \
     -v "${absolute}:/tmp/manifest.yml:ro" \
     -e "DRY_RUN=${DRY_RUN:-}" \
+    -e "UPDATE_ADDRESSES=${UPDATE_ADDRESSES:-}" \
     --net=host \
     --log-driver=journald \
     "$CS_REG" bundle exec rake "bootstrap:apply[/tmp/manifest.yml]"
