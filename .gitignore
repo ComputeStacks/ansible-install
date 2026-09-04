@@ -2,6 +2,10 @@
 inventory.yml
 inventory.*.yml
 inventory/
+# Real inventories carry hostnames, addresses and vaulted secrets. This repo is
+# public: only the documentation example is tracked.
+inventories/*
+!inventories/example/
 .vscode
 .claude/
 tmp
