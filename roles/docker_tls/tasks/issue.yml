@@ -55,15 +55,27 @@
 - name: Issue the docker daemon certificate
   when: docker_tls_issue_required | bool
   block:
+    # `public: true` on both, because the issue task below is a task of THIS
+    # role and reads vault's contract directly -- vault_command,
+    # vault_pki_docker_path and vault_host are all vault role defaults. Without
+    # it, include_role scopes the included role's defaults to the include
+    # itself, and the delegate_to fails with `'vault_host' is undefined`.
+    # (vault_effective_cert_ttl_hours is not affected: ca_ttl publishes it with
+    # set_fact, which is host-scoped and survives the include either way.)
+    # Duplicating those three into docker_tls' defaults would fork the contract;
+    # exposing vault's own values is the point. Every name vault exports is
+    # `vault_`-prefixed, so nothing here can be shadowed.
     - name: Ensure the controller vault is unsealed
       ansible.builtin.include_role:
         name: vault
         tasks_from: unseal
+        public: true
 
     - name: Compute the clamped certificate TTL
       ansible.builtin.include_role:
         name: vault
         tasks_from: ca_ttl
+        public: true
 
     - name: Request a server certificate from vault
       ansible.builtin.command: >-
@@ -73,7 +85,17 @@
         alt_names={{ docker_tls_alt_names | unique | join(',') | quote }}
         ip_sans={{ docker_tls_ip_sans | unique | join(',') | quote }}
         ttl={{ vault_effective_cert_ttl_hours | int }}h
-      delegate_to: "{{ vault_host }}"
+      # `delegate_to` is resolved when the task is SET UP, before the block's
+      # `when` is evaluated -- so it must template even on the converge where
+      # this block is skipped because the certificate is still valid. On that
+      # run the two include_role tasks above skip too and never publish
+      # vault_host, and the task dies with `'vault_host' is undefined` despite
+      # having nothing to do. (The `command:` args are not affected: task args
+      # are templated only if the task actually runs, which is why
+      # vault_command on the line above needs no such guard.)
+      # The fallback is the same single-controller fact vault itself encodes,
+      # blessed by docs/contracts.md rule 2.
+      delegate_to: "{{ vault_host | default(groups['controller'] | first) }}"
       register: docker_tls_issue
       changed_when: true
       no_log: true
