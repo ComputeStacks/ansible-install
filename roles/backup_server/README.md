@@ -39,6 +39,11 @@ exits 0 for a good signature by *any* key in the keyring, so the fingerprint
 check is what actually pins it). The role then asserts the installed wrapper
 reports the pinned version.
 
+The fingerprint compared is the **tenth** field of the `VALIDSIG` line, which
+is the primary key's. The first field is whichever key made the signature, and
+borg releases are signed by a subkey — so matching the pin against the first
+field rejects every genuine release.
+
 `borg_version` (server binary) and `borg_image` (client container) are pinned
 together in `versions.yml` and **must be bumped together**. When the real
 `computestacks-borg` deb ships it drops into these same paths.

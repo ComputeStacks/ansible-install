@@ -86,13 +86,37 @@
 
     # gpg exits 0 for a good signature by ANY key it holds, so the fingerprint
     # is checked explicitly against the machine-readable status output.
+    #
+    # The field being matched is the TENTH one on the VALIDSIG line, not the
+    # first. gpg reports:
+    #
+    #   VALIDSIG <signing-key-fpr> <date> <ts> <expire> <ver> <reserved> \
+    #            <pubkey-algo> <hash-algo> <sig-class> <primary-key-fpr>
+    #
+    # borg releases are signed by a SUBKEY (2F81AFFB…E01), so the first field is
+    # the subkey's fingerprint while the pinned value is the primary key's
+    # (6D5BEF9A…393), which appears tenth. Matching `VALIDSIG <pin>` therefore
+    # never succeeded -- this assert rejected genuine, correctly-signed releases
+    # and no backup server could install borg at all. Anchor on the tenth field
+    # rather than the last token so that future gpg versions appending fields
+    # (which the status-fd protocol explicitly reserves the right to do) do not
+    # silently change what is compared.
     - name: Assert the signature is by the pinned borg release key
+      vars:
+        backup_server_borg_primary_fpr: >-
+          {{ (backup_server_borg_verify.stdout
+              | regex_search('\[GNUPG:\] VALIDSIG (?:\S+\s+){9}(\S+)', '\1')
+              | default([], true) | first | default('')) }}
       ansible.builtin.assert:
         that:
-          - ('[GNUPG:] VALIDSIG ' ~ borg_release_gpg_fingerprint) in backup_server_borg_verify.stdout
+          - backup_server_borg_primary_fpr == borg_release_gpg_fingerprint
         fail_msg: >-
           The downloaded borg {{ borg_version }} binary is not signed by
-          {{ borg_release_gpg_fingerprint }}. Refusing to install it.
+          {{ borg_release_gpg_fingerprint }}
+          {{ "(gpg reports primary key " ~ backup_server_borg_primary_fpr ~ ")"
+             if backup_server_borg_primary_fpr | length > 0
+             else "(gpg reported no valid signature at all)" }}.
+          Refusing to install it.
         success_msg: "borg {{ borg_version }} signature verified against the pinned release key"
 
     - name: Install the verified borg binary
