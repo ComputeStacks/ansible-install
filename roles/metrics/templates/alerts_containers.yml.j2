@@ -1,10 +1,17 @@
 ---
+{% raw -%}
 # Managed by the metrics role -- do not hand-edit. Ported byte-for-byte from
 # v1 (roles/prometheus/templates/alerts_containers.yml.j2), only the source
 # var names changed. The double-escaped `{{ '{{ $labels... }}' }}` blocks are
 # intentional: this file is BOTH an ansible Jinja2 template AND a Prometheus
 # rule file that has its OWN `{{ }}` templating for alert annotations, so
 # Prometheus's literal braces must survive ansible's template pass unevaluated.
+#
+# This header is wrapped in raw because it says `{{ }}` out loud, and jinja
+# parses a `#` comment like any other text: an empty expression is a template
+# SYNTAX error, which fails at parse time before a single variable is looked
+# up. Describing the escaping tripped over the very thing being described.
+{% endraw %}
 groups:
 - name: ContainerHealth
   rules:
