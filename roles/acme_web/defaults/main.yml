@@ -10,7 +10,10 @@ acme_web_html_dir: "{{ acme_web_config_dir }}/html"
 acme_web_ssl_dir: "{{ acme_web_config_dir }}/ssl/acme"
 acme_web_cert_fullchain: "{{ acme_web_ssl_dir }}/fullchain.pem"
 acme_web_cert_key: "{{ acme_web_ssl_dir }}/privkey.pem"
-acme_web_dhparam_url: https://ssl-config.mozilla.org/ffdhe2048.txt
+# RFC 7919's ffdhe2048, vendored in files/. Point this at your own PEM (an
+# absolute path, or a filename in a files/ directory ansible searches) to use a
+# different group; there is no reason to unless a compliance regime names one.
+acme_web_dhparam_file: ffdhe2048.pem
 
 # --- acme.sh --------------------------------------------------------------
 # Layout: the pinned release tarball is unpacked to a per-version directory

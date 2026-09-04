@@ -40,6 +40,14 @@
 - name: Pull the loki image
   community.docker.docker_image_pull:
     name: "{{ loki_image }}"
+    pull: not_present
+    # Pinned tag, so a pull that already succeeded has nothing to fetch. The
+    # module's default (`pull: always`) re-pulls regardless, reports `changed`
+    # every single converge, and fires the restart handler below -- loki was
+    # bouncing on every run for no reason. Convergent by construction instead:
+    # the tag is baked into the unit, so a bump in versions.yml re-renders the
+    # unit and the handler restarts it then. Same rule as
+    # roles/node_observability.
   notify: Restart loki
 
 - name: Render the loki systemd unit

@@ -131,9 +131,16 @@
     group: root
     mode: "0644"
 
+# Shipped as a file, NOT fetched from ssl-config.mozilla.org at converge time.
+# ffdhe2048 is the fixed named group from RFC 7919 -- it is a constant, it has
+# never changed and cannot, so downloading it bought nothing and made every
+# converge depend on a third party being up. It was not: a 503 from that host
+# failed this task and took the whole run down with it. `openssl dhparam -text`
+# identifies the shipped copy as `GROUP: ffdhe2048`, which is the check that
+# matters. See defaults/main.yml for overriding it.
 - name: Install the dhparam group
-  ansible.builtin.get_url:
-    url: "{{ acme_web_dhparam_url }}"
+  ansible.builtin.copy:
+    src: "{{ acme_web_dhparam_file }}"
     dest: "{{ acme_web_config_dir }}/dhparam"
     owner: root
     group: root
@@ -152,6 +159,14 @@
 - name: Pull the nginx image
   community.docker.docker_image_pull:
     name: "{{ nginx_image }}"
+    pull: not_present
+    # Pinned tag, so a pull that already succeeded has nothing to fetch. The
+    # module's default (`pull: always`) re-pulls regardless, reports `changed`
+    # every single converge, and fires the restart handler below -- nginx was
+    # bouncing on every run for no reason. Convergent by construction instead:
+    # the tag is baked into the unit, so a bump in versions.yml re-renders the
+    # unit and the handler restarts it then. Same rule as
+    # roles/node_observability.
   notify: Restart nginx
 
 - name: Render the nginx systemd unit
