@@ -1,0 +1,87 @@
+---
+# Runs on both ns_primary and ns_followers, BEFORE postgres.yml/leader.yml.
+#
+# Ordering is load-bearing: leader.yml loads the pdns schema from
+# /usr/share/pdns-backend-pgsql/schema/schema.pgsql.sql, and that file arrives
+# with pdns-backend-pgsql. Installing the packages later (as this role used to,
+# from pdns.yml) meant the leader tried to restore a schema file that did not
+# exist yet and died with `cannot open ...: No such file`. The packages need
+# nothing from postgres, so they go first.
+
+- name: Gather service facts to detect systemd-resolved
+  ansible.builtin.service_facts:
+
+# --- port 53 ---------------------------------------------------------------
+# PowerDNS binds 0.0.0.0:53, which collides with systemd-resolved's stub
+# listener on 127.0.0.53:53.
+#
+# Do NOT solve that by stopping and disabling systemd-resolved. On Ubuntu the
+# stub IS the host's resolver: /etc/resolv.conf symlinks to
+# /run/systemd/resolve/stub-resolv.conf, whose only nameserver line is
+# 127.0.0.53. Killing resolved therefore leaves the host unable to resolve
+# anything at all, and the very next thing this role does -- install pdns from
+# the archive -- dies with `Temporary failure resolving 'archive.ubuntu.com'`.
+#
+# Instead, keep resolved running and turn off just the listener. resolved goes
+# on maintaining /run/systemd/resolve/resolv.conf, which lists the real upstream
+# servers it learned from DHCP, so glibc talks to those directly and the host
+# keeps working DNS with nothing holding port 53.
+- name: Ensure the resolved drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: powerdns_manage_resolved | bool
+
+- name: Disable the systemd-resolved stub listener so pdns can bind port 53
+  ansible.builtin.copy:
+    content: |
+      # Managed by roles/powerdns. PowerDNS binds 0.0.0.0:53 on this host, so
+      # the resolved stub must not hold 127.0.0.53:53. resolved itself stays
+      # running -- it is what keeps /run/systemd/resolve/resolv.conf current.
+      [Resolve]
+      DNSStubListener=no
+    dest: /etc/systemd/resolved.conf.d/10-computestacks-no-stub.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: powerdns_manage_resolved | bool
+  notify: Restart systemd-resolved
+
+# Explicitly started as well as enabled, because an earlier version of this
+# role stopped and disabled it. Re-converging a host it broke has to bring
+# resolved back, not just reconfigure it -- and /run/systemd/resolve/resolv.conf
+# does not exist until resolved runs, so the symlink below would dangle.
+- name: Ensure systemd-resolved is running
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: powerdns_manage_resolved | bool
+
+- name: Point /etc/resolv.conf at the upstream servers rather than the stub
+  ansible.builtin.file:
+    # Relative, matching the symlink Ubuntu ships (../run/... from /etc).
+    src: ../run/systemd/resolve/resolv.conf
+    dest: /etc/resolv.conf
+    state: link
+    force: true
+  when: powerdns_manage_resolved | bool
+
+# Before apt, not after: the drop-in only frees port 53 once resolved has been
+# restarted, and the symlink above is already in place, so there is no window
+# where the host cannot resolve.
+- name: Apply the resolver change before installing anything
+  ansible.builtin.meta: flush_handlers
+
+- name: Install PowerDNS packages
+  ansible.builtin.apt:
+    name:
+      - pdns-server
+      - pdns-backend-pgsql
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

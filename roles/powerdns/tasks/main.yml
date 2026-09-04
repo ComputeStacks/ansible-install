@@ -24,6 +24,12 @@
       - postgresql_version is defined
     fail_msg: "postgresql_version must be set (playbooks/group_vars/all/versions.yml)."
 
+# First: the pdns packages and the port-53 handover. leader.yml restores a
+# schema file that ships with pdns-backend-pgsql, so the package has to be on
+# disk before it runs.
+- name: Install the PowerDNS packages and free port 53
+  ansible.builtin.include_tasks: packages.yml
+
 - name: Install and start the distro PostgreSQL package
   ansible.builtin.include_tasks: postgres.yml
 

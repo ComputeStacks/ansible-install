@@ -43,52 +43,68 @@
   delay: 5
   failed_when: not powerdns_pg_up.is_available
 
-- name: Check whether the pdns database is already configured
-  community.postgresql.postgresql_ping:
-    login_db: pdns
-    login_host: 127.0.0.1
-    login_port: "{{ cs_ports.postgres }}"
-    login_user: pdns
-    login_password: "{{ pdns_db_password }}"
-  register: powerdns_db_ready
+# These three are individually convergent, so they run unconditionally.
+#
+# They used to sit in a block gated on "can I connect to the pdns database as
+# the pdns user", which conflated "the database exists" with "the database is
+# ready to serve". Anything that interrupted the first converge between
+# `Create the pdns database` and `Load the pdns base schema` -- a failure, a
+# network blip, ^C -- left a database that answered the ping while holding no
+# tables. Every later converge then skipped the whole block, including the
+# schema load, and pdns crash-looped forever on `relation "domains" does not
+# exist` with no way to recover short of dropping the database by hand.
+# Observed exactly that. Guard on the schema itself instead (below).
+- name: Create the pdns postgres role
+  community.postgresql.postgresql_user:
+    name: pdns
+    role_attr_flags: "superuser,login"
+    password: "{{ pdns_db_password }}"
+    state: present
+  become: true
+  become_user: postgres
   no_log: true
 
-- name: Create the pdns database and replication role
-  when: not powerdns_db_ready.is_available
+- name: Create the pdns database
+  community.postgresql.postgresql_db:
+    name: pdns
+    owner: pdns
+    encoding: UTF-8
+    template: template0
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Create the replication role
+  community.postgresql.postgresql_user:
+    name: "{{ powerdns_replication_user }}"
+    role_attr_flags: replication
+    state: present
+  become: true
+  become_user: postgres
+
+# `domains` is the first table the pdns schema creates and the one pdns itself
+# queries on startup, so its presence is the honest test of "schema loaded".
+- name: Check whether the pdns schema has been loaded
+  community.postgresql.postgresql_query:
+    db: pdns
+    query: "SELECT to_regclass('public.domains') IS NOT NULL AS present"
+  become: true
+  become_user: postgres
+  register: powerdns_schema
+  changed_when: false
+
+- name: Load the pdns base schema
+  when: not powerdns_schema.query_result[0].present
   block:
-    - name: Create the pdns postgres role
-      community.postgresql.postgresql_user:
-        name: pdns
-        role_attr_flags: "superuser,login"
-        password: "{{ pdns_db_password }}"
-        state: present
-      become: true
-      become_user: postgres
-      no_log: true
-
-    - name: Create the pdns database
-      community.postgresql.postgresql_db:
-        name: pdns
-        owner: pdns
-        encoding: UTF-8
-        template: template0
-        state: present
-      become: true
-      become_user: postgres
-
-    - name: Create the replication role
-      community.postgresql.postgresql_user:
-        name: "{{ powerdns_replication_user }}"
-        role_attr_flags: replication
-        state: present
-      become: true
-      become_user: postgres
-
-    - name: Load the pdns base schema
+    - name: Restore the schema into the pdns database
       community.postgresql.postgresql_db:
         name: pdns
         state: restore
-        target: /usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql
+        # Canonical path in the pdns-backend-pgsql package. The
+        # /usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql this used to name
+        # is only a symlink to it, and points at the same file; prefer the real
+        # one. tasks/packages.yml installs the package before this runs.
+        target: /usr/share/pdns-backend-pgsql/schema/schema.pgsql.sql
       become: true
       become_user: postgres
 

@@ -1,24 +1,9 @@
 ---
-# Runs on both ns_primary and ns_followers.
-
-- name: Gather service facts to detect systemd-resolved
-  ansible.builtin.service_facts:
-
-- name: Stop and disable systemd-resolved (it holds port 53)
-  ansible.builtin.systemd_service:
-    name: systemd-resolved
-    state: stopped
-    enabled: false
-  when: "'systemd-resolved.service' in ansible_facts.services"
-
-- name: Install PowerDNS packages
-  ansible.builtin.apt:
-    name:
-      - pdns-server
-      - pdns-backend-pgsql
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+# Runs on both ns_primary and ns_followers, AFTER the database exists.
+#
+# The packages themselves, and the port-53 handover from systemd-resolved, are
+# in tasks/packages.yml and have already run by this point -- the leader needs
+# pdns-backend-pgsql on disk before it can load the schema.
 
 - name: Remove the default bind backend files
   ansible.builtin.file:

@@ -19,6 +19,14 @@ powerdns_web_address: "0.0.0.0"
 
 powerdns_replication_user: repuser
 
+# Whether this role owns the host's resolver configuration. True whenever
+# systemd-resolved is present, which on Ubuntu means always: pdns cannot bind
+# 0.0.0.0:53 while the resolved stub holds 127.0.0.53:53, so tasks/packages.yml
+# turns the stub off (NOT resolved itself -- see the comment there) and points
+# /etc/resolv.conf at resolved's upstream list. Set false only if something
+# else on the host already manages /etc/resolv.conf and has freed port 53.
+powerdns_manage_resolved: "{{ 'systemd-resolved.service' in (ansible_facts.services | default({})) }}"
+
 # Run `pdnsutil create-zone` for cs_app_zone on the leader. Set false if the
 # zone is managed by hand or by another tool.
 powerdns_manage_zone: true
