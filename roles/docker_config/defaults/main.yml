@@ -6,10 +6,23 @@ docker_config_dir: /etc/docker
 # stops every container.
 docker_config_live_restore: true
 
-# Seconds the daemon waits for containers to exit on shutdown before SIGKILL.
-# Docker's default of 15 is too short for tenant databases to close cleanly on
-# a node running hundreds of containers.
-docker_config_shutdown_timeout: 120
+# Seconds the daemon waits for containers to exit on shutdown before killing
+# them. Docker's default of 15 is too short for tenant databases to close
+# cleanly on a node running hundreds of containers.
+#
+# Dormant while live-restore is on: dockerd's shutdown path returns early when
+# it finds running containers and live restore enabled, so it never stops them
+# and never spends this budget. It is the fallback for an operator who sets
+# docker_config_live_restore: false, where docker's 15s default would SIGKILL a
+# tenant postgres mid-write.
+#
+# Kept under 90 on purpose. Docker's packaged unit sets no TimeoutStopSec, so
+# systemd's DefaultTimeoutStopSec (90s) is the real ceiling -- a larger value
+# here cannot be honoured, because systemd kills dockerd first. 60 leaves the
+# daemon 30s to finish its own teardown after the last container exits. Raising
+# this past ~85 means also shipping a TimeoutStopSec drop-in for docker.service,
+# which this role deliberately does not own.
+docker_config_shutdown_timeout: 60
 
 # Optional pull-through cache(s), e.g. ["https://mirror.example.com"].
 # v1 passed this as a --registry-mirror ExecStart flag; daemon.json is the

@@ -10,19 +10,34 @@ registry and nodes — and the `docker login` credentials in
 by `geerlingguy.docker` (pinned in `requirements.yml`), and the node-only
 TCP/TLS listener lives in `roles/docker_tls`.
 
-Values ported from v1's `roles/docker`:
+Values ported from v1's `roles/docker`, one of them retuned:
 
 ```json
 {
     "live-restore": true,
-    "shutdown-timeout": 120
+    "shutdown-timeout": 60
 }
 ```
 
 * `live-restore` keeps containers running across a daemon restart (patch-level
-  daemon upgrades only — a major upgrade still stops everything).
-* `shutdown-timeout` 120s: docker's default 15s is too short for tenant
-  databases to close cleanly on a node running hundreds of containers.
+  daemon upgrades only — a major upgrade still stops everything, because the
+  new daemon cannot re-attach to the old version's shims).
+* `shutdown-timeout` is how long the daemon waits for containers to exit before
+  killing them; docker's default 15s is too short for tenant databases to close
+  cleanly on a node running hundreds of containers.
+
+`shutdown-timeout` does nothing while `live-restore` is on. dockerd's shutdown
+path returns early when live restore is enabled and containers are running — it
+leaves them alone rather than stopping them, so the budget is never spent. The
+value is here for the operator who sets `docker_config_live_restore: false`.
+
+v1 set 120. That number could never be honoured: docker's packaged unit sets no
+`TimeoutStopSec`, so systemd's `DefaultTimeoutStopSec` of 90s is the real
+ceiling and would kill dockerd first. 60 fits inside it with headroom for the
+daemon's own teardown. Anything past ~85 needs a `TimeoutStopSec` drop-in for
+`docker.service`, which this role does not own — `docker_tls` is node-only, so
+that would mean a new unit-file override on every docker host to serve a path
+that does not currently run.
 
 Both are SIGHUP-reloadable, which is why they live in `daemon.json` and not in
 an ExecStart flag, and why this role's handler **reloads** rather than restarts
@@ -124,7 +139,7 @@ either playbook). Other geerlingguy vars worth knowing:
 | --- | --- | --- |
 | `docker_config_dir` | `/etc/docker` | |
 | `docker_config_live_restore` | `true` | |
-| `docker_config_shutdown_timeout` | `120` | Seconds. |
+| `docker_config_shutdown_timeout` | `60` | Seconds. Dormant while `live_restore` is on. Keep under ~85: systemd's 90s `DefaultTimeoutStopSec` kills dockerd first. |
 | `docker_config_registry_mirrors` | `[]` | v1 passed a `--registry-mirror` ExecStart flag; `daemon.json` is reloadable and keeps the node ExecStart override clean. |
 | `docker_config_extra_options` | `{}` | Merged last. **Only SIGHUP-reloadable options** — this role never restarts dockerd. Anything else needs a restart path added here first. |
 | `docker_config_registries` | `{{ cs_registry_logins }}` | The composed `{registry, username, password}` list; the operator-facing name is `docker_registries`. Defaults to `[]` when the composition file is absent, so the role still works standalone. |
