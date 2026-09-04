@@ -13,6 +13,15 @@
 # routing, no TLS), so what is being asserted is that something answered at
 # all — a connection refused, a timeout or an unroutable address is the
 # failure this check exists for.
+#
+# Redirects are NOT followed, and that is load-bearing rather than tidiness.
+# `/` answers 302 to `http://<controller>/login` — port 80, the acme_web
+# vhost, which redirects again to https. Following that chain lands on a
+# certificate the node has no reason to trust and the probe dies with
+# CERTIFICATE_VERIFY_FAILED, reporting the ACME leg as unreachable when the
+# leg is fine. It also stops testing the hop we care about at the first
+# redirect: the assertion is about the node reaching :3000, not about what
+# the portal does with an unauthenticated request for its root.
 
 - name: Assert this node has an address for the controller ACME backend
   ansible.builtin.assert:
@@ -30,6 +39,7 @@
   ansible.builtin.uri:
     url: "http://{{ validate_acme_server | trim }}/"
     method: GET
+    follow_redirects: none
     timeout: "{{ validate_acme_timeout }}"
   register: validate_acme_probe
   changed_when: false
