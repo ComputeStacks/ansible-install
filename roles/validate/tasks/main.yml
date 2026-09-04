@@ -57,7 +57,12 @@
     - "'nodes' in group_names"
   tags: [validate, prometheus]
 
-- name: Assert this node can reach the backup server as the borg user
+# The empty-string case is a site with no backup server in it, which is legal
+# and means that site's nodes run without backups — cs_agent renders
+# `backups.enabled: false` for the same node. It is NOT the silent hole it
+# looks like: a node whose `site` is a typo has no metrics host in that site
+# either, and roles/preflight fails the run on that long before validate.
+- name: Assert this node can reach its site's backup server as the borg user
   ansible.builtin.include_tasks:
     file: borg.yml
     apply:

@@ -1,14 +1,24 @@
 # backup_server
 
-**Owner:** Wave 2D. **Hosts:** `backup` (one shared server for the whole fleet).
+**Owner:** Wave 2D. **Hosts:** `backup` (at most one server per **site**).
 
-The borg backup server every node's cs-agent SSHes into: the `cstacks` account,
+The borg backup server a node's cs-agent SSHes into: the `cstacks` account,
 the pinned upstream borg release, and the repository path.
+
+A fleet may hold several backup servers, one per `site`
+(docs/contracts.md §Site scoping). The role itself is site-agnostic — it runs
+on each `backup` host and configures that host — but the pairing is not:
+`roles/cs_agent` sends a node to `cs_site_backup_hosts[cs_site]`, the server in
+that node's own site, and `roles/validate` checks the same one. Put every
+`backup` host's `site` in the inventory alongside the nodes that use it. A
+single-site inventory sets `site` nowhere, every host lands in the site called
+`default`, and the one backup server serves everything exactly as before.
 
 ## What it does
 
 1. **`cstacks` system account**, shell `/bin/bash`, password locked (`!`) — key
-   auth only. Its `~/.ssh` is created 0700; the per-node `authorized_keys`
+   auth only (on an `existing_env` server, neither the shell nor the shadow
+   entry is written; see below). Its `~/.ssh` is created 0700; the per-node `authorized_keys`
    entries are added by the `cs_agent` role (delegated here), one per node.
    **No forced command**: the agent runs `mkdir -p` / `rm -rf` over this
    connection to create and tear down repositories, so a `borg serve`
@@ -22,7 +32,9 @@ the pinned upstream borg release, and the repository path.
    (`backups.borg.ssh_borg_remote_path`), so a version switch is a wrapper
    re-render, not a change on every node.
 3. **Repository path** (`backup_host_path`, default
-   `/var/lib/computestacks/backups`), owned `cstacks:cstacks`.
+   `/var/lib/computestacks/backups`), created `cstacks:cstacks` 0770 — on a
+   server these playbooks built. On an `existing_env` server it is only
+   `stat`ed.
 
 There is **no NFS**, no root SSH configuration, and no borg compaction cron:
 compaction runs in-agent since cs-agent v3.x.
@@ -50,10 +62,32 @@ together in `versions.yml` and **must be bumped together**. When the real
 
 ## Attach mode (`existing_env: true`)
 
-Only `tasks/account.yml` runs: the `cstacks` account, its `authorized_keys`
-directory, and the repository path's ownership. Everything else on a live
-server is left alone — in particular v2's borg is **not** installed over the
-server's existing one.
+Only `tasks/account.yml` runs, and the only thing it **writes** is
+`~cstacks/.ssh` (0700) — the directory `cs_agent` then drops the new node's
+`authorized_keys` entry into. Everything else on a live server is left alone;
+in particular v2's borg is **not** installed over the server's existing one.
+
+Two tasks that a greenfield converge performs are deliberately withheld there,
+because on a server these playbooks did not build, "ensure" means "overwrite":
+
+* **The repository root is not chowned or chmodded.** Attach mode requires
+  `backup_host_path` to be the existing server's value, which on a v1 server is
+  **`/mnt`**. The `file` task is non-recursive, so nothing underneath would be
+  touched — but `0770` on `/mnt` itself clears the world execute bit, and world
+  execute on a directory is what allows an unrelated process to *traverse* it.
+  Every filesystem mounted under `/mnt` becomes unreachable to anything not
+  root and not in the `cstacks` group: a monitoring agent stat'ing a share, an
+  offsite sync job, a cron reading a mount — all start returning `EACCES`,
+  while backups keep working, so nothing connects the outage to this run.
+  Instead the path is `stat`ed and the run fails early, with a message naming
+  `backup_host_path`, if it is not a directory. `cstacks` must already be able
+  to create repositories under it, which it is on any server v1 was backing up
+  to.
+* **The existing account's shell and shadow entry are not rewritten.**
+  `ansible.builtin.user` rewrites `/etc/passwd` when `shell` differs and writes
+  the shadow field when `password` is given, so both are omitted on an
+  `existing_env` server. `system` and `create_home` stay — the module ignores
+  both for an account that already exists.
 
 That makes two inventory inputs **required** on the nodes attaching to such a
 server (they describe the existing environment and have no safe default):
@@ -74,15 +108,17 @@ the existing one anyway — and then point `backup_borg_remote_path` at it.
 | `backup_server_user` / `backup_server_group` | `cstacks` | The account nodes back up as. |
 | `backup_server_shell` | `/bin/bash` | Login shell (the agent runs shell commands over SSH). |
 | `backup_server_host_path` | `backup_host_path` or `/var/lib/computestacks/backups` | Repository path. |
-| `backup_server_host_path_mode` | `0770` | Mode applied to it. |
+| `backup_server_host_path_mode` | `0770` | Mode applied to it — **on a v2-built server only**; never applied on an `existing_env` server. |
 | `backup_server_prefix` | `/opt/computestacks` | Install prefix (`borg/<version>/`, `bin/`, `tmp/`). |
 | `backup_server_borg_asset` | `borg-linux-glibc231-x86_64` | Upstream release asset (amd64 only — preflight asserts the architecture). |
 | `backup_server_borg_keyservers` | 3 keyservers | Tried in turn; all failing is a hard error. |
 | `backup_server_install_borg` | `false` | Install borg on an `existing_env` server anyway. |
 
 Consumed, not owned: `borg_version`, `borg_release_gpg_fingerprint`,
-`borg_binary_path` (versions.yml), `backup_host_path`, `existing_env`
-(inventory).
+`borg_binary_path` (versions.yml), `backup_host_path`, `site`, `existing_env`
+(inventory). The role reads no site map itself; `site` matters here only
+because `cs_agent` and `validate` use it to decide which backup server a given
+node belongs to.
 
 ## Deviations from v1 (`roles/backup`)
 

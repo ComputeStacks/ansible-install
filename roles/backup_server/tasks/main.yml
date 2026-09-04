@@ -1,7 +1,10 @@
 ---
-# ATTACH MODE (existing_env: true): only the three tasks in account.yml run —
-# the cstacks user, its authorized_keys directory, and the repository path's
-# ownership. Nothing else on a live v1 backup server is touched, and in
+# ATTACH MODE (existing_env: true): account.yml runs, and the only WRITE it
+# makes on a live v1 backup server is `~cstacks/.ssh` (0700), which is what
+# roles/cs_agent needs in order to add the new node's authorized_keys entry.
+# The existing cstacks account's shell and shadow entry are left alone and the
+# repository root is checked with `stat` rather than chowned and chmodded —
+# see the notes in account.yml. Nothing else on the server is touched, and in
 # particular v2's borg is NOT installed over the server's existing one unless
 # backup_server_install_borg is explicitly set (docs/contracts.md rule 9).
 

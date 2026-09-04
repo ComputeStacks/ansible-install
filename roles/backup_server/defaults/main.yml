@@ -11,8 +11,12 @@ backup_server_shell: /bin/bash
 
 # Where repositories live. Attach mode MUST set backup_host_path to the
 # existing server's path (v1 default was /mnt) — the same value cs_agent
-# renders into backups.borg.ssh.host_path.
+# renders into backups.borg.ssh.host_path. On an `existing_env` server this
+# path is only stat'ed, never created, chowned or chmodded: 0770 on /mnt
+# removes world traverse to every filesystem mounted under it. See
+# tasks/account.yml.
 backup_server_host_path: "{{ backup_host_path | default('/var/lib/computestacks/backups') }}"
+# Applied on a v2-built server only.
 backup_server_host_path_mode: "0770"
 
 # --- borg ------------------------------------------------------------------

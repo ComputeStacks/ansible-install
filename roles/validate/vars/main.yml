@@ -49,21 +49,98 @@ validate_acme_address: >-
 validate_acme_server: >-
   {{ (validate_acme_address | trim) ~ ':' ~ cs_ports.controller_acme_backend }}
 
+# --- expected unit sets ----------------------------------------------------
+# `validate_services_*` name the units a host has BECAUSE THESE PLAYBOOKS PUT
+# THEM THERE. On an `existing_env` host they put none there, so on such a host
+# both lists below are deliberately EMPTY and the services check asserts
+# nothing at all.
+#
+# docs/attach-mode.md already states the principle for the metrics and backup
+# hosts — "their unit set is not this repository's to assert" — and it applies
+# with exactly the same force to the existing controller, which is the one
+# `existing_env` host that add-region.yml actually runs `validate` against.
+# That controller was built by the v1 provisioner, years ago, on Debian: it may
+# run postgres in a container rather than as `postgresql.service`, it may have
+# the upstream node_exporter installed as `node_exporter.service` rather than
+# Debian's `prometheus-node-exporter`, and its nginx may be a container in
+# front of the portal. Every one of those is a perfectly healthy controller
+# that this list would call a failure — and a red `validate` on a healthy host
+# is worse than no check, because the operator cannot tell it apart from the
+# real failures this role exists to catch.
+#
+# Nothing is lost. Attach mode writes no unit to the existing controller (see
+# docs/attach-mode.md §What it writes: a pg_dump, two appended environment
+# keys, the v2 `cstacks` script, the portal container, and firewall lines in
+# v1's own iptables script), and every unit the old list named is already
+# proved to work FUNCTIONALLY by a check that survives:
+#
+#   docker      — the `containers` check finds `portal` and `vault-bootstrap`
+#                 running, which docker cannot do while it is down. Both names
+#                 are v1's own (roles/vault: the storage path is "v1 layout —
+#                 do not change"), so that check stays correct here.
+#   postgresql  — controller_seed's `bootstrap:apply` reads and writes the
+#                 controller's database before validate ever runs.
+#   nginx       — the `portal` check dials https://<cs_portal_domain>/.
+#   redis-server— the portal container fails its own boot without it.
+#
+# The `nodes` lists are unreachable in practice (add-region.yml rejects
+# `existing_env: true` on a node outright) but are covered by the same rule so
+# there is ONE sentence to state: a host this repository did not build has a
+# unit set this repository does not assert.
 validate_expected_services: >-
-  {{ (validate_services_common
-      + (validate_services_v2_only if not (existing_env | default(false) | bool) else [])
-      + (validate_services_controller if 'controller' in group_names else [])
-      + (validate_services_metrics if 'metrics' in group_names else [])
-      + (validate_services_registry if 'registry' in group_names else [])
-      + (validate_services_nodes if 'nodes' in group_names else [])
-      + (validate_services_nameservers if 'nameservers' in group_names else [])
-      + (validate_services_backup if 'backup' in group_names else []))
-     | unique }}
+  {{ []
+     if (existing_env | default(false) | bool)
+     else ((validate_services_common
+            + validate_services_v2_only
+            + (validate_services_controller if 'controller' in group_names else [])
+            + (validate_services_metrics if 'metrics' in group_names else [])
+            + (validate_services_registry if 'registry' in group_names else [])
+            + (validate_services_nodes if 'nodes' in group_names else [])
+            + (validate_services_nameservers if 'nameservers' in group_names else [])
+            + (validate_services_backup if 'backup' in group_names else []))
+           | unique) }}
 
 validate_expected_enabled_services: >-
-  {{ (validate_services_enabled_nodes if 'nodes' in group_names else []) | unique }}
+  {{ []
+     if (existing_env | default(false) | bool)
+     else ((validate_services_enabled_nodes if 'nodes' in group_names else []) | unique) }}
 
 validate_expected_containers: >-
   {{ (validate_containers_controller if 'controller' in group_names else []) | unique }}
 
-validate_backup_host: "{{ groups['backup'] | default([]) | first | default('') }}"
+# --- site scoping ----------------------------------------------------------
+# The backup server for THIS host's site, not "the first backup server in the
+# inventory". With more than one site in the inventory, `groups['backup'] |
+# first` handed every node whichever backup host happened to sort first —
+# so a sjo node's borg check SSHed at the ams server, failed on a key that was
+# never installed there, and named the wrong host in the failure message.
+#
+# `cs_site_backup_hosts` references `hostvars`, so it is read here on the host
+# currently executing and never as `hostvars[h].cs_site_backup_hosts` (hard
+# rule 10, docs/contracts.md §Variable scope). vars/main.yml is evaluated
+# per-host, so `cs_site` is this host's own site — which is what the borg
+# check, which runs ON the node, wants.
+#
+# The `default('')` guards the SUBSCRIPT: a site with no backup server has no
+# key in the map at all, which is legal and means that site's nodes run
+# without backups. tasks/main.yml gates the whole borg check on this being
+# non-empty, exactly as it did when the fleet had one backup server or none.
+# A single-site inventory puts every host in the site called `default`, so the
+# map has one key and this resolves to the same host it always did.
+validate_backup_host: "{{ cs_site_backup_hosts[cs_site] | default('') }}"
+
+# The nginx basic-auth credentials for THIS host's site's metrics vhosts, in
+# the one frozen spelling (docs/contracts.md §Site scoping). The guard is on
+# the SUBSCRIPT and the fallback is the whole default dict: only sites named
+# in the vaulted `metrics_site_credentials` appear in the map, and guarding
+# the field instead would swallow a misconfigured entry along with an absent
+# one.
+#
+# Both halves matter. The USERNAME used to come from `acme_web`'s v2 default
+# (`promuser`) on every site; a v1-built metrics host may use neither that nor
+# the v2 password, and a wrong username produces a 401 that is completely
+# indistinguishable from a wrong password — the prometheus check then fails at
+# the very end of a long converge with a message pointing at labels, scrape
+# targets and the firewall, none of which are the problem.
+validate_metrics_credentials: >-
+  {{ cs_site_metrics_credentials[cs_site] | default(cs_metrics_credentials_default) }}

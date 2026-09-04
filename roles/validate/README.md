@@ -19,12 +19,12 @@ this role exists to catch at install time.
 
 | Name | Runs on | From | What it asserts |
 | --- | --- | --- | --- |
-| `services` | every host | itself | Every unit that host's groups imply is `systemctl is-active`; `haproxy` on nodes is `is-enabled` only. |
+| `services` | every host | itself | Every unit that host's groups imply is `systemctl is-active`; `haproxy` on nodes is `is-enabled` only. Asserts **nothing** on an `existing_env` host. |
 | `containers` | controller | itself | `portal` and `vault-bootstrap` exist and are running. |
 | `agent` | nodes | **the controller** | cs-agent answers on `cs_ports.agent_http` at the address the controller actually dials. |
 | `backfill` | nodes | **the controller** | `nodes.datachannel_backfilled_at` is set for this node. |
-| `prometheus` | nodes | **the controller** | The controller's own placement query returns a non-zero count for this node's label set. |
-| `borg` | nodes | itself | SSH to the backup server as `cstacks` runs the remote borg, and its version matches the client's. |
+| `prometheus` | nodes | **the controller** | The controller's own placement query returns a non-zero count for this node's label set, against **this node's site's** prometheus, with **that site's** credentials. |
+| `borg` | nodes | itself | SSH to **this node's site's** backup server as `cstacks` runs the remote borg, and its version matches the client's. Skipped when that site has no backup server. |
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
@@ -86,6 +86,32 @@ what is being asserted is routing. The fail message names the az, the derived
 address, how it was derived, and the `controller_acme_address` host var that
 overrides it.
 
+**Every per-site value comes from the site maps, never from a global.** The
+prometheus query dials `cs_site_metrics_domains[cs_site]` with the
+`cs_site_metrics_credentials[cs_site]` pair, and the borg check SSHes to
+`cs_site_backup_hosts[cs_site]` — the frozen spellings from
+`playbooks/group_vars/all/sites.yml` (docs/contracts.md §Site scoping),
+resolved on the host being validated. `validate_backup_host` used to be
+`groups['backup'] | first`, which in a two-site fleet handed every node
+whichever backup server sorted first: a `sjo` node's borg check then SSHed at
+the `ams` server, failed on a key that was never installed there, and named the
+wrong host in the failure message. `validate_prometheus_endpoint` had the same
+shape via the single global `cs_metrics_domain`.
+
+**Both halves of the basic-auth pair are per site, not just the password.**
+The username used to be `acme_web`'s v2 default (`promuser`) everywhere. A
+metrics VM built by v1 answers to whatever its own htpasswd holds, and a wrong
+username is a 401 that is *indistinguishable* from a wrong password — same
+status, same symptom, and a fail message that would have sent the operator
+looking at labels, scrape targets and firewall rules. The query task is
+`no_log` for the same reason: both halves now come out of the vaulted
+`metrics_site_credentials`, and `uri`'s own argspec redacts `url_password` but
+not `url_username`. The assert that follows carries the status, the transport
+error, the endpoint and the label set, so nothing diagnostic is lost.
+
+A single-site inventory sets `site` nowhere, every host lands in the site
+called `default`, and all three resolve to exactly the values they always did.
+
 **`systemctl is-active`, not `service_facts`.** `cs-firewall` is a oneshot
 with `RemainAfterExit`; its sub-state is `exited`, which `service_facts`
 surfaces as not-running. `is-active` reports what the unit actually is.
@@ -103,10 +129,40 @@ warning.
 
 `add-region.yml` runs this on `controller:nodes` only — the existing metrics
 and backup hosts are not v2-built and their unit set is not this role's to
-assert. On an `existing_env` controller the `cs-firewall` unit is dropped
-from the expected service list (a v1 host runs `cs-iptables` instead);
-everything else applies unchanged, because everything else is a property of
-the control plane rather than of how the host was built.
+assert.
+
+**That principle applies to the existing controller too, and the `services`
+check therefore asserts nothing at all on any `existing_env` host.** It used to
+drop only `cs-firewall` and go on asserting `docker`, `nginx`, `postgresql`,
+`redis-server` and `prometheus-node-exporter` there. Those are v2's unit names.
+The production controller was built by the v1 provisioner, years ago, on
+Debian: it may run postgres in a container rather than as `postgresql.service`,
+it may carry the upstream node_exporter as `node_exporter.service` rather than
+Debian's `prometheus-node-exporter`, and its nginx may be a container. Each of
+those is a healthy controller that the old list called a failure — and a run
+that ends `failed` on a healthy host is worse than no check, because the
+operator cannot tell it apart from the real failures this role exists to catch.
+
+Nothing is lost, because attach mode writes no unit to that host (see
+docs/attach-mode.md §What it writes) and every unit the list named is already
+proved to work functionally by a check that still runs:
+
+| Old assertion | What still proves it |
+| --- | --- |
+| `docker` | `containers` finds `portal` and `vault-bootstrap` running. |
+| `postgresql` | `controller_seed`'s `bootstrap:apply` read and wrote the database before `validate` started. |
+| `nginx` | `portal` dials `https://<cs_portal_domain>/`. |
+| `redis-server` | the `portal` container does not boot without it. |
+| `prometheus-node-exporter` | `prometheus` runs the controller's placement query for the new node. |
+
+The `containers` check is **not** relaxed: `portal` and `vault-bootstrap` are
+v1's own container names (`roles/vault` calls the storage layout "v1 layout —
+do not change" precisely because attach mode reads an existing controller's
+keys out of it), so both are correct on a v1 controller and both are things
+this run depends on.
+
+Everything else applies unchanged on an existing host, because everything else
+is a property of the control plane rather than of how the host was built.
 
 ## Variables
 
@@ -114,21 +170,31 @@ the control plane rather than of how the host was built.
 | --- | --- | --- |
 | `validate_skip` | `[]` | Check names to skip. |
 | `validate_tls_verify` | `true` | Certificate verification for the prometheus query and the portal probe. Set false while the portal is on a self-signed certificate. |
-| `validate_services_*` | see `defaults/main.yml` | Expected units, per group. |
+| `validate_services_*` | see `defaults/main.yml` | Expected units, per group. All of them are skipped on an `existing_env` host. |
 | `validate_containers_controller` | `[portal, vault-bootstrap]` | |
 | `validate_cstacks_bin` | `cstacks` | Absolute path if it is not on the controller's non-interactive PATH. |
 | `validate_agent_probe_path` / `_expected_status` | `/v1/admin/changelog` / `401` | See above. |
-| `validate_prometheus_*` | endpoint, credentials, metric, job | Endpoint and username follow `acme_web`'s. |
+| `validate_prometheus_endpoint` | `https://{{ cs_site_metrics_domains[cs_site] \| default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}` | This host's site's metrics vhost. |
+| `validate_prometheus_username` / `_password` | this host's site's entry in `cs_site_metrics_credentials`, else `cs_metrics_credentials_default` | Both halves matter — a wrong username is an indistinguishable 401. |
+| `validate_prometheus_metric` / `_job` | `node_cpu_seconds_total` / `node-exporter` | The controller's own label contract. |
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
 | `validate_portal_url` / `_status_codes` | `https://{{ cs_portal_domain }}/` | |
 | `validate_ssh_timeout` / `validate_agent_timeout` / `validate_acme_timeout` | `10` | Seconds. |
 
+Computed in `vars/main.yml`, not overridable: `validate_backup_host`
+(`cs_site_backup_hosts[cs_site]`, empty when this site has no backup server),
+`validate_metrics_credentials` (`cs_site_metrics_credentials[cs_site]`, else
+`cs_metrics_credentials_default`), `validate_expected_services` /
+`_enabled_services` / `_containers`, and the tailnet and ACME derivations.
+
 Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `az`,
 `cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`, `dns_driver`,
-`borg_version`, `borg_image`, `prometheus_basic_auth_password`,
-`existing_env`, `tailscale_authkey` / `tailscale_enabled`,
-`controller_acme_address`.
+`borg_version`, `borg_image`, `existing_env`, `tailscale_authkey` /
+`tailscale_enabled`, `controller_acme_address`, and the frozen site contract
+`cs_site`, `cs_site_backup_hosts`, `cs_site_metrics_domains`,
+`cs_site_metrics_credentials`, `cs_metrics_credentials_default`
+(`playbooks/group_vars/all/sites.yml`).
 
 ## Requirements
 

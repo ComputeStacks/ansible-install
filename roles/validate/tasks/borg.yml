@@ -4,6 +4,11 @@
 # repository create and teardown, which is why there is no forced command).
 # This checks the key is authorized and that the remote borg is the version
 # the client half expects.
+#
+# `validate_backup_host` is the backup server in THIS node's site — the same
+# host roles/cs_agent rendered into `backups.borg.ssh.host` and delegated the
+# authorized_keys entry to. The whole point of checking it here is that it is
+# the same host, so it is resolved from the same map (vars/main.yml).
 
 - name: Check the node can SSH to the backup server as the borg user
   ansible.builtin.command:
@@ -35,9 +40,12 @@
       `{{ validate_borg_remote_path }}` as
       {{ validate_borg_ssh_user }}@{{ hostvars[validate_backup_host].primary_ip }}:
       {{ (validate_borg_ssh.stderr | default('') | trim) | truncate(300) }}.
-      Every backup on this node fails until it can. Check that the node's
-      public key ({{ validate_borg_keyfile }}.pub) is in the cstacks
-      account's authorized_keys on {{ validate_backup_host }}, and that
+      Every backup on this node fails until it can. Check that
+      {{ validate_backup_host }} really is this node's backup server — it is
+      the one in site "{{ cs_site }}", so a wrong `site` on either host points
+      this at the wrong facility — that the node's public key
+      ({{ validate_borg_keyfile }}.pub) is in the cstacks account's
+      authorized_keys there, and that
       `backup_borg_remote_path` points at a borg that actually exists there
       (an existing v1 server has the distro borg at /usr/bin/borg, not v2's
       wrapper).

@@ -22,9 +22,18 @@ validate_tls_verify: "{{ not (acme_ca | default('zerossl')) is match('.*test$') 
 # RemainAfterExit unit (cs-firewall) reports sub-state `exited`, which
 # service_facts surfaces as a non-running state, while `is-active` correctly
 # reports it active.
+#
+# Every list below names units these playbooks install. NONE of them is
+# asserted on an `existing_env` host — see the long note above
+# `validate_expected_services` in vars/main.yml for why, and for which checks
+# cover the same ground functionally there.
 validate_services_common:
   - prometheus-node-exporter
-# Not present on an existing v1 host, which runs cs-iptables instead.
+# Kept as its own list even though the blanket `existing_env` skip in
+# vars/main.yml now subsumes it: it is the named home for "units only a
+# v2-built host has", and an inventory that overrides one of these lists
+# should not silently acquire the other's contents. A v1 host runs
+# cs-iptables instead of cs-firewall.
 validate_services_v2_only:
   - cs-firewall
 validate_services_controller:
@@ -84,9 +93,26 @@ validate_agent_timeout: 10
 # rejected while prometheus itself looks perfectly healthy.
 validate_prometheus_metric: node_cpu_seconds_total
 validate_prometheus_job: node-exporter
-validate_prometheus_username: "{{ acme_web_prometheus_username | default('promuser') }}"
-validate_prometheus_password: "{{ prometheus_basic_auth_password | default('') }}"
-validate_prometheus_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus }}"
+
+# Credentials and endpoint are BOTH per site (docs/contracts.md §Site
+# scoping). `validate_metrics_credentials` in vars/main.yml resolves this
+# host's site once; overriding either name below still wins, so an
+# environment can pin a single value without unpicking the map.
+#
+# The username is not decoration. It used to be `acme_web`'s v2 default on
+# every host; a metrics VM built by v1 may answer to a different one, and a
+# wrong username is a 401 with precisely the same symptom as a wrong password.
+validate_prometheus_username: "{{ validate_metrics_credentials.prometheus_username }}"
+validate_prometheus_password: "{{ validate_metrics_credentials.prometheus_password }}"
+
+# The vhost this site's prometheus answers on: the `metrics_domain` host var
+# of this site's metrics host, else the environment-wide `cs_metrics_domain`.
+# The `default()` guards the SUBSCRIPT — a site with no metrics host has no
+# key — and resolves to exactly today's value for a single-site inventory,
+# where every host is in the site called `default` and that site's metrics
+# host sets no `metrics_domain`.
+validate_prometheus_endpoint: >-
+  https://{{ cs_site_metrics_domains[cs_site] | default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}
 
 # --- borg -----------------------------------------------------------------
 validate_borg_ssh_user: "{{ cs_agent_backup_ssh_user | default('cstacks') }}"

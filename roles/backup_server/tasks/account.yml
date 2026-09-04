@@ -1,18 +1,41 @@
 ---
-# Runs in attach mode too — every task here is additive or idempotent on an
-# existing server.
+# Runs in attach mode too, against a LIVE production backup server that other
+# regions are backing up to right now. What this file legitimately does there
+# is exactly one thing: make sure `~cstacks/.ssh` exists so roles/cs_agent can
+# drop the new node's authorized_keys entry into it. Everything else is gated
+# on `existing_env` and downgraded to a read-only check, because on a server
+# these playbooks did not build, "ensure" means "overwrite whatever is there".
 
+# On a v2 server this creates the account. On an `existing_env` server the
+# account already exists (v1's backup role made it, and every existing region
+# backs up as it) and the two parameters that would REWRITE it are omitted:
+#
+#   shell     — the module rewrites /etc/passwd when it differs. v1's account
+#               may deliberately have a different login shell.
+#   password  — writes the shadow entry. Setting it to '!' is a locked
+#               password, which is right for an account we just created and
+#               is not ours to assert on one we did not.
+#
+# `system` and `create_home` are creation-time-only parameters; the module
+# ignores both for an existing account, so they stay unconditional. Nothing
+# here changes an existing account, which is why the register below is still
+# a reliable source for its real home directory.
 - name: Ensure the cstacks system account exists
   ansible.builtin.user:
     name: "{{ backup_server_user }}"
-    shell: "{{ backup_server_shell }}"
+    shell: "{{ omit if (existing_env | default(false) | bool) else backup_server_shell }}"
     system: true
     create_home: true
     # Key auth only: '!' is a locked password, not a usable hash.
-    password: "!"
+    password: "{{ omit if (existing_env | default(false) | bool) else '!' }}"
     state: present
   register: backup_server_account
 
+# cs_agent adds one authorized_keys entry per node (delegated here), so this
+# role never enumerates nodes — an attach-mode inventory only ever holds the
+# new region's node anyway. This directory is the one thing the role has to
+# guarantee on an existing server, so it is NOT gated: 0700 on ~/.ssh is what
+# sshd demands, and creating it where it already exists is a no-op.
 - name: Ensure the cstacks authorized_keys directory exists
   ansible.builtin.file:
     path: "{{ backup_server_account.home }}/.ssh"
@@ -21,9 +44,20 @@
     group: "{{ backup_server_group }}"
     mode: "0700"
 
-# cs_agent adds one authorized_keys entry per node (delegated here), so this
-# role never enumerates nodes — an attach-mode inventory only ever holds the
-# new region's node anyway.
+# --- the repository root ---------------------------------------------------
+# On a v2 server this creates it. On an `existing_env` server it MUST NOT run,
+# and the reason is worth spelling out because the task looks harmless.
+#
+# Attach mode requires the operator to set `backup_host_path` to the existing
+# server's value, and on a v1 server that value is `/mnt`. The task below is
+# non-recursive, so it would not touch anything underneath — but chmod 0770 on
+# /mnt itself removes the world execute bit, and world execute on a directory
+# is what lets an unrelated process TRAVERSE it. Every mount under /mnt then
+# becomes unreachable to anything not running as root or in the cstacks group:
+# a monitoring agent stat()ing a filesystem, an offsite sync job, a cron that
+# reads a share — all start returning EACCES, on a host whose backups keep
+# working, so nothing connects the outage to this run. The chown to
+# cstacks:cstacks is the same class of change applied to the same directory.
 - name: Ensure the repository path exists and is owned by cstacks
   ansible.builtin.file:
     path: "{{ backup_server_host_path }}"
@@ -31,3 +65,35 @@
     owner: "{{ backup_server_user }}"
     group: "{{ backup_server_group }}"
     mode: "{{ backup_server_host_path_mode }}"
+  when: not (existing_env | default(false) | bool)
+
+# What the ownership task was actually buying on an existing server was the
+# early failure when `backup_host_path` is wrong. That is worth keeping, and
+# it does not need a write: a `stat` gets the same answer, and gets it before
+# cs_agent hands the node a `backups.borg.ssh.host_path` pointing at a
+# directory that is not there.
+- name: Check the existing repository path
+  ansible.builtin.stat:
+    path: "{{ backup_server_host_path }}"
+  register: backup_server_existing_path
+  when: existing_env | default(false) | bool
+
+- name: Assert the existing repository path is a directory
+  ansible.builtin.assert:
+    that:
+      - backup_server_existing_path.stat.exists | default(false)
+      - backup_server_existing_path.stat.isdir | default(false)
+    fail_msg: >-
+      {{ backup_server_host_path }} does not exist as a directory on
+      {{ inventory_hostname }}, which is flagged existing_env. That path comes
+      from `backup_host_path`, which attach mode requires you to set to THIS
+      server's existing repository root — v1 servers use /mnt, and leaving it
+      unset leaves v2's default (/var/lib/computestacks/backups), which does
+      not exist here. It is not created here on purpose: this role does not
+      create, chown or chmod a directory on a server it did not build.
+      Fix `backup_host_path` to the real path; every node's
+      cs-agent renders it into backups.borg.ssh.host_path and creates its own
+      repository underneath, so `{{ backup_server_user }}` must already be
+      able to write there (it is, on any server v1 was backing up to).
+    quiet: true
+  when: existing_env | default(false) | bool

@@ -11,6 +11,11 @@
 #
 # The query runs FROM the controller because that is control-plane row #10:
 # the metrics vhost accepts 3101 from the controller's addresses only.
+#
+# The endpoint and BOTH halves of the basic-auth pair are this node's site's
+# (roles/validate/vars/main.yml). A node in a second site queries its own
+# site's prometheus with its own site's credentials; a single-site inventory
+# resolves all three to the values it always used.
 
 - name: Query prometheus for this node's cpu metric from the controller
   ansible.builtin.uri:
@@ -29,6 +34,13 @@
   changed_when: false
   failed_when: false
   check_mode: false
+  # Both halves of the pair now come out of the vaulted
+  # `metrics_site_credentials`, so the whole invocation is hidden rather than
+  # relying on `uri`'s argspec, which marks `url_password` no_log but not
+  # `url_username`. Nothing diagnostic is lost: `failed_when: false` means
+  # this task never prints on its own anyway, and the assert below carries the
+  # status, the endpoint, the label set and the transport error verbatim.
+  no_log: true
 
 - name: Assert prometheus returns data for this node's label set
   ansible.builtin.assert:
@@ -41,12 +53,18 @@
       The controller's placement query returned no data for
       node="{{ hostname }}",region="{{ az }}",job="{{ validate_prometheus_job }}"
       at {{ validate_prometheus_endpoint }}
-      (HTTP {{ validate_prometheus_result.status | default('no response') }}).
+      (HTTP {{ validate_prometheus_result.status | default('no response') }}:
+      {{ validate_prometheus_result.msg | default('no transport error') }}).
       This is the failure that rejects every order against this node while
       every dashboard stays green. Check, in order: the per-AZ file_sd
       fragment /etc/prometheus/node_exporter/{{ az }}.yml on the metrics host
       (its labels must be region={{ az }} and node={{ hostname }}); that
       prometheus can reach {{ hostname }} on {{ cs_ports.node_exporter }};
       and that the metrics vhost accepts {{ cs_ports.metrics_prometheus }}
-      from {{ validate_controller_host }} with these credentials.
+      from {{ validate_controller_host }}.
+      A 401 here is a CREDENTIAL failure, and the username is as likely to be
+      wrong as the password — a v1-built metrics host answers to whatever its
+      htpasswd holds, not to v2's `promuser`. Set both halves for this host's
+      site ({{ cs_site }}) under `metrics_site_credentials` in the vaulted
+      secrets.
     quiet: true
