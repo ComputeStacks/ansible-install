@@ -27,36 +27,57 @@ exists once the controller has a `Node` row for this hostname
    (`regenerate: never`). It has to live under `/etc/computestacks` because
    that is the only host directory bind-mounted into the borg container.
 4. **Backup server authorization.** The public key is added to the `cstacks`
-   account's `authorized_keys` on the backup host (delegated), one additive
-   entry per node commented `cs-agent <hostname>` — safe against an
-   `existing_env` server that already carries other nodes' keys. No forced
-   command: the agent runs `mkdir -p`/`rm -rf` over this connection to create
-   and tear down repositories, and a `borg serve` ForceCommand would break
-   repository creation outright.
+   account's `authorized_keys` on **this node's site's** backup host
+   (delegated), one additive entry per node commented `cs-agent <hostname>` —
+   safe against an `existing_env` server that already carries other nodes'
+   keys. No forced command: the agent runs `mkdir -p`/`rm -rf` over this
+   connection to create and tear down repositories, and a `borg serve`
+   ForceCommand would break repository creation outright.
 
-   Steps 2–4 are **skipped entirely when the inventory names no backup
+   Steps 2–4 are **skipped entirely when this node's site names no backup
    server** — see below.
 5. **Enrollment** (`tasks/enroll.yml`, tagged `enroll`) — see below.
 6. **`agent.yml`** (0600), then enable and start the service. Config changes
    notify a restart.
 
+## Which backup server (site scoping)
+
+Backup servers are **site-scoped** (docs/contracts.md §Vocabulary): a node
+backs up to the one backup server standing in its own physical facility. The
+role resolves it through `cs_site_backup_hosts[cs_site]`, the frozen spelling
+from `playbooks/group_vars/all/sites.yml`; it re-derives nothing and there is
+no `cs_agent_backup_group` any more (that map is built from a literal
+`groups['backup']`, so the indirection named a group nobody read).
+
+Those maps reference `hostvars` and are therefore **local reads only**
+(contracts.md hard rule 10) — every one here happens on the node itself, keyed
+by that node's own `cs_site`.
+
+A **single-site inventory sets `site` nowhere**, every host lands in the site
+called `default`, the map holds exactly one key, and the role resolves the
+same host `groups['backup'] | first` used to return.
+
 ## No backup server
 
-A backup server is optional. `groups['backup']` may hold **one** host or
-**none**; two or more fails the assert at the top of `tasks/main.yml`, because
-both this role and `validate` resolve the server with `groups['backup'] | first`
-and nothing can choose between several.
+A backup server is optional, and optional **per site**. A site may hold **one**
+backup host or **none**. Two in one site is caught twice: by `preflight` for
+the whole inventory, and by the backstop assert at the top of `tasks/main.yml`
+for this node's own site. The backstop is not redundant — `cs_site_backup_hosts`
+is built by zipping sites onto hosts, so the second host claiming a site does
+not error, it *wins*, and every node in the site silently starts writing its
+borg repository somewhere else. The assert counts the raw list, which is the
+only place that duplicate is still visible.
 
-With the group empty, the node still gets its agent, its enrollment and its
-metadata front door. What is skipped:
+With this node's site holding no backup host, the node still gets its agent,
+its enrollment and its metadata front door. What is skipped:
 
 * the borg key directory, the keypair, and the `authorized_key` delegation —
   all three, as one block. That last task's `delegate_to` still has to resolve
   to *something*: ansible templates it at task setup, before any `when` is
-  evaluated, so a bare `groups['backup'] | first` fails the task even when the
-  block is skipped. It uses a total lookup (`groups.get(...) | first |
-  default(inventory_hostname)`) for that reason; the fallback host is never
-  contacted.
+  evaluated, so a bare `cs_site_backup_hosts[cs_site]` fails the task even when
+  the block is skipped. It uses a total lookup
+  (`cs_site_backup_hosts.get(cs_site, inventory_hostname)`) for that reason;
+  the fallback host is never contacted.
 * the `backups.borg` block in `agent.yml`. `backups.enabled` renders `false`,
   though `backups.key` is still written so that adding a backup server later
   is purely an inventory change.
@@ -125,8 +146,8 @@ containers.
 | `cs_agent_apt_repo` / `cs_agent_apt_key_url` | versions.yml | Repository and signing key. |
 | `cs_agent_listen_addr` | derived | Metadata front-door bind address (see above). |
 | `cs_agent_admin_token_hash` | `""` | Filled by enrollment; pre-seeded from the existing file. |
-| `cs_agent_backup_group` | `backup` | Inventory group holding the backup server. |
-| `cs_agent_backup_configured` | derived | True when that group holds exactly one host. Gates every borg task and the `backups.borg` block in `agent.yml`. |
+| `cs_agent_backup_configured` | derived | True when this node's site has a backup host (`cs_site in cs_site_backup_hosts`). Gates every borg task and the `backups.borg` block in `agent.yml`. |
+| `cs_agent_backup_hosts_in_site` | derived | Backup hosts declaring this node's site, as a raw list. Only the backstop assert reads it. |
 | `cs_agent_backups_enabled` | `true` | Operator intent. `agent.yml` gets this **AND** `cs_agent_backup_configured`. |
 | `cs_agent_backup_ssh_user` | `cstacks` | Account on the backup server. |
 | `cs_agent_backup_host_path` | `backup_host_path` or `/var/lib/computestacks/backups` | Repository path **on the backup server**. |
@@ -139,7 +160,12 @@ containers.
 
 Consumed, not owned: `hostname`, `primary_ip` (inventory), `backups_key`,
 `sentry_dsn`, `s3_export_*` (secrets), `cs_portal_domain`, `cs_ports`,
-`borg_image`, `borg_binary_path`, `tailscale_authkey`/`tailscale_enabled`.
+`borg_image`, `borg_binary_path`, `tailscale_authkey`/`tailscale_enabled`,
+`cs_site` and `cs_site_backup_hosts` (`playbooks/group_vars/all/sites.yml` —
+frozen spellings, local reads only).
+
+`agent.yml` is rendered `no_log: true`: it carries `backups.key` and the admin
+token hash, and a `--diff` run would otherwise print both.
 
 **Attach mode:** `backup_host_path` and `backup_borg_remote_path` are
 *required* inventory inputs describing the existing environment (v1 servers:

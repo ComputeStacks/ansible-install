@@ -54,32 +54,70 @@ cs_agent_queue_numworkers: 3
 cs_agent_controller_host: "{{ ('https://' ~ cs_portal_domain) if (cs_portal_domain | default('') | length > 0) else '' }}"
 
 # --- backups ---------------------------------------------------------------
-cs_agent_backup_group: backup
-
-# A backup server is OPTIONAL. When the inventory names none, the node still
-# gets its agent -- it simply runs without backups, rather than the whole run
-# failing on a group that was never required. roles/validate already treats it
-# this way (tasks/main.yml gates the borg checks on the same emptiness), and
-# playbooks/site.yml's `hosts: backup` play matches nothing, so an install
-# without one was already half-supported; this makes cs_agent agree.
+# Backup servers are SITE-scoped (docs/contracts.md §Vocabulary): a node backs
+# up to the ONE backup server standing in its own physical facility, not to a
+# single platform-wide server. `cs_site_backup_hosts` (site -> backup
+# inventory_hostname) is the frozen spelling for that map, defined once in
+# playbooks/group_vars/all/sites.yml. This role consumes it and re-derives
+# nothing.
 #
-# Exactly one is still the ceiling: the borg SSH backend points every node at a
-# single shared repository host, and tasks/main.yml's `| first` has no sane
-# meaning over two. tasks/main.yml asserts <= 1.
-cs_agent_backup_configured: "{{ (groups[cs_agent_backup_group] | default([]) | length) == 1 }}"
+# There is deliberately no `cs_agent_backup_group` any more. It promised the
+# group name was configurable, and that stopped being true the moment the map
+# in sites.yml became the single source of truth — sites.yml builds it out of
+# a literal groups['backup'], so a role-local override would have named a
+# group nobody reads. Nothing outside this role ever set it.
+#
+# LOCAL USE ONLY, docs/contracts.md hard rule 10: `cs_site_backup_hosts`
+# references `hostvars`, so it may only be read on the host currently
+# executing. Every read below happens on the node itself and is keyed by that
+# node's own `cs_site`. NEVER `hostvars[n].cs_site_backup_hosts` — across
+# hosts that evaluates to Undefined with no error at all, and a `| default()`
+# guard would turn it into a wrong-but-plausible backup server.
+#
+# Single-site regression: an inventory that sets `site` nowhere puts every
+# host in the site called `default`, so the map holds exactly one key and this
+# resolves to precisely the host `groups['backup'] | first` used to return.
+
+# A backup server is OPTIONAL, and it is now optional PER SITE. When this
+# node's site names none, the node still gets its agent -- it simply runs
+# without backups, rather than the whole run failing on a server that was
+# never required. roles/preflight allows a site with zero backup hosts for
+# exactly this reason, roles/validate treats it the same way (tasks/main.yml
+# gates the borg checks on the same emptiness), and playbooks/site.yml's
+# `hosts: backup` play simply matches fewer hosts.
+#
+# One per site is still the ceiling, but it is now structural rather than
+# counted: a map keyed by site cannot hold two entries for one site. What that
+# structure makes SILENT -- two backup hosts both claiming this node's site,
+# where building the map keeps whichever came last -- is what the backstop
+# assert in tasks/main.yml exists to catch.
+cs_agent_backup_configured: "{{ cs_site in cs_site_backup_hosts }}"
+
+# Every backup host that claims this node's site. Length 0 or 1 in a correct
+# inventory; the assert in tasks/main.yml is the only consumer, and it needs
+# the raw list rather than the map precisely because the map has already
+# collapsed a duplicate site by the time anything can look at it.
+cs_agent_backup_hosts_in_site: >-
+  {{ (groups['backup'] | default([])) | map('extract', hostvars)
+     | selectattr('cs_site', 'eq', cs_site)
+     | map(attribute='inventory_hostname') | list }}
 
 # Operator intent, not the rendered value. agent.yml gets
 # `cs_agent_backups_enabled AND cs_agent_backup_configured`: there is nothing
-# to back up TO without a server, and the borg block cannot even be templated
-# (cs_agent_backup_ssh_host below does `| first` over the empty group). Set
-# this false to switch backups off on a node that DOES have a backup server.
+# to back up TO without a server in this node's site, and the borg block
+# cannot even be templated (cs_agent_backup_ssh_host below subscripts the map
+# with a site that has no entry). Set this false to switch backups off on a
+# node that DOES have a backup server.
 cs_agent_backups_enabled: true
 
 cs_agent_backup_ssh_user: cstacks
 # Inventory var, never a gathered fact (contracts.md rule 1): a --limit'ed run
-# must render the same backup endpoint as a full run. `first` is safe wherever
-# this is used, because every consumer is gated on cs_agent_backup_configured.
-cs_agent_backup_ssh_host: "{{ hostvars[groups[cs_agent_backup_group] | first].primary_ip }}"
+# must render the same backup endpoint as a full run, including when the
+# backup host itself is outside the limit. The subscript is unguarded on
+# purpose -- every consumer is gated on cs_agent_backup_configured, and a
+# `| default()` here would let a node whose site has no backup server render
+# as though it had one (or, worse, borrow another site's).
+cs_agent_backup_ssh_host: "{{ hostvars[cs_site_backup_hosts[cs_site]].primary_ip }}"
 # Path ON the backup server. Attach mode MUST set backup_host_path to the
 # existing server's path (v1 default was /mnt).
 cs_agent_backup_host_path: "{{ backup_host_path | default('/var/lib/computestacks/backups') }}"

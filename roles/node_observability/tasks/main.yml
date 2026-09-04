@@ -1,24 +1,65 @@
 ---
-- name: Assert a metrics host is present for the loki log shipper
+# A fleet-wide count of metrics hosts stopped meaning anything when metrics
+# hosts became site-scoped: several is now the NORMAL multi-site shape, and
+# the question a node has to answer is only ever "which one serves MY site".
+# roles/preflight asserts the whole inventory (no site with two metrics hosts,
+# no node in a site with none); this is the role-local backstop, and it earns
+# its place the same way cs_agent's does. sites.yml builds
+# `cs_site_metrics_hosts` by zipping sites onto hosts, so a second metrics host
+# claiming this node's site raises nothing at all — it simply wins, and the
+# node starts shipping every tenant log line to the other facility. Checking
+# the raw list catches that; reading the map cannot, because the map has
+# already collapsed the duplicate. Preflight is also a separate play, which a
+# `--tags`/`--limit` run can skip past on its way here.
+- name: Assert exactly one metrics host stands in this node's site
   ansible.builtin.assert:
     that:
-      - (groups[node_observability_metrics_group] | default([]) | length) > 0
-      - loki_basic_auth_password is defined and (loki_basic_auth_password | length > 0)
+      - (node_observability_metrics_hosts_in_site | length) == 1
     fail_msg: >-
-      node_observability needs at least one host in
-      groups['{{ node_observability_metrics_group }}'] and
-      `loki_basic_auth_password` in the vaulted secrets file — the node's
-      fluentd ships every tenant log line to that host's loki vhost.
+      This node is in site '{{ cs_site }}', and
+      {{ node_observability_metrics_hosts_in_site | length }} hosts in
+      groups['metrics'] declare that site
+      ({{ node_observability_metrics_hosts_in_site | sort | join(', ') or 'none' }}).
+      The node's fluentd ships every tenant log line to its own site's loki
+      vhost, so exactly one is needed. Metrics hosts by site:
+      {{ cs_site_metrics_hosts }}. `site` is an inventory HOST var — set it on
+      this node and on the metrics host that serves it, or on neither if the
+      whole inventory is a single site.
+    # `success_msg` is templated when the task's args are FINALIZED, before
+    # the assertion is evaluated — the same trap as `delegate_to` further down
+    # the wave, and it bites hardest in exactly the case this assert exists to
+    # report. An unguarded `cs_site_metrics_hosts[cs_site]` here raises
+    # "object of type 'dict' has no attribute '<site>'" for a node whose site
+    # has no metrics host, and ansible reports THAT instead of the fail_msg
+    # written above. Jinja's inline `if` is lazy, so gating the subscript on
+    # the same membership test keeps the message total. Verified against a
+    # fixture node in a site with no metrics host.
+    success_msg: >-
+      {{ ("site '" ~ cs_site ~ "' logs to " ~ cs_site_metrics_hosts[cs_site]
+          ~ " (" ~ node_observability_loki_endpoint ~ ")")
+         if (cs_site in cs_site_metrics_hosts)
+         else ("no metrics host in site '" ~ cs_site ~ "'") }}
+    quiet: true
 
-- name: Note that only one metrics host is used as the log destination
-  ansible.builtin.debug:
-    msg: >-
-      groups['{{ node_observability_metrics_group }}'] holds
-      {{ groups[node_observability_metrics_group] | length }} hosts;
-      {{ groups[node_observability_metrics_group] | first }} is used as the
-      loki endpoint. v2 assumes ONE shared metrics host — a real multi-host
-      metrics topology needs a decision about how logs are split or replicated.
-  when: (groups[node_observability_metrics_group] | length) > 1
+# Separate from the topology assert so the diagnostic can name the two places
+# the credential may come from. No `no_log` here on purpose: the conditions
+# test `| length`, so ansible echoes the variable NAMES and never a value, and
+# a credential assert that hides its own failure message is worse than useless.
+- name: Assert this site's loki basic-auth credential is set
+  ansible.builtin.assert:
+    that:
+      - node_observability_loki_username | length > 0
+      - node_observability_loki_password | length > 0
+    fail_msg: >-
+      No loki basic-auth credential resolved for site '{{ cs_site }}'. Set the
+      environment-wide `loki_basic_auth_password` in the vaulted secrets file,
+      or — when this site's metrics host has credentials of its own, which a
+      v1-built host being attached to normally does —
+      `metrics_site_credentials['{{ cs_site }}']` with `password` (and
+      `username`, if it is not the `loguser` default). A wrong or missing
+      username 401s exactly like a wrong password: fluentd would ship nothing
+      and say nothing.
+    quiet: true
 
 - name: Preload the container images the controller expects on a node
   ansible.builtin.include_tasks: preload_images.yml

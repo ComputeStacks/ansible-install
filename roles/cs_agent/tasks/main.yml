@@ -11,27 +11,43 @@
       node, `backups_key` in the vaulted secrets file, and a resolved
       `cs_agent_apt_version` in playbooks/group_vars/all/versions.yml.
 
-# One shared backup server is architectural (docs/control-plane graph), so two
-# is the error this catches — the assert is what makes the `| first` below
-# safe, and the role never silently picks one of several backup servers.
+# One shared backup server PER SITE is architectural (docs/control-plane
+# graph, docs/contracts.md §Vocabulary), and roles/preflight asserts it across
+# the whole inventory in the first play. This is the role-local backstop, and
+# it is not redundant with preflight for one specific reason: sites.yml builds
+# `cs_site_backup_hosts` by zipping sites onto hosts, so a second backup host
+# declaring this node's site does not raise anything — it simply wins, and
+# every node in the site quietly starts writing its borg repository to a
+# different server than it did last run. That failure has no symptom until a
+# restore, so the role checks the raw list rather than trusting the map it is
+# about to read. Preflight is also a separate play: a `--tags`/`--limit` run
+# can reach this role without having passed through it.
 #
-# Zero is NOT an error: a backup server is optional (see
+# Zero is NOT an error: a backup server is optional per site (see
 # cs_agent_backup_configured in defaults). The node still gets its agent, and
 # every borg-dependent task below is skipped rather than the run dying on a
-# group the operator never had to define.
-- name: Assert at most one backup server is in the inventory
+# server the operator never had to provide.
+- name: Assert at most one backup server stands in this node's site
   ansible.builtin.assert:
     that:
-      - (groups[cs_agent_backup_group] | default([]) | length) <= 1
+      - (cs_agent_backup_hosts_in_site | length) <= 1
     fail_msg: >-
-      cs_agent found {{ groups[cs_agent_backup_group] | default([]) | length }}
-      hosts in groups['{{ cs_agent_backup_group }}'] and cannot choose between
-      them. The borg SSH backend points every node at a single shared backup
-      server: name exactly one, or none at all to run without backups.
+      cs_agent found {{ cs_agent_backup_hosts_in_site | length }} backup hosts
+      declaring site '{{ cs_site }}'
+      ({{ cs_agent_backup_hosts_in_site | sort | join(', ') }}) and cannot
+      choose between them. The borg SSH backend points every node in a site at
+      one shared backup server: name exactly one backup host per site, or none
+      at all in a site whose nodes should run without backups.
+    # The inline `if` is load-bearing, not cosmetic: `success_msg` is
+    # templated when the task's args are FINALIZED, before the assertion runs
+    # (the same trap as `delegate_to` below), so an unguarded
+    # `cs_site_backup_hosts[cs_site]` would raise on every node whose site has
+    # no backup server — the supported case. Jinja's inline `if` is lazy, so
+    # the subscript is only reached when the key exists.
     success_msg: >-
-      {{ "backup server: " ~ (groups[cs_agent_backup_group] | first)
+      {{ "backup server for site '" ~ cs_site ~ "': " ~ cs_site_backup_hosts[cs_site]
          if (cs_agent_backup_configured | bool)
-         else "no backup server in the inventory — backups will be disabled on this node" }}
+         else "no backup server in site '" ~ cs_site ~ "' — backups will be disabled on this node" }}
     quiet: true
 
 - name: Install the cs-agent package from the ComputeStacks apt repository
@@ -82,14 +98,18 @@
         state: present
         manage_dir: true
       # `delegate_to` is templated when the task is SET UP, before any `when`
-      # is evaluated — the enclosing block's gate does NOT protect it. With no
-      # backup group the subscript raises `object of type 'dict' has no
-      # attribute 'backup'` and the task fails despite being skipped, so the
-      # lookup has to be total: `.get` for the missing key, `default` for the
-      # empty list. The fallback host is never contacted, because the block's
-      # `when` is what actually decides whether this runs.
+      # is evaluated — the enclosing block's gate does NOT protect it, so this
+      # expression must render for EVERY node, including one whose site has no
+      # backup server at all. A bare `cs_site_backup_hosts[cs_site]` raises
+      # there and fails the task despite it being skipped, so the lookup stays
+      # total: `.get` supplies this node itself for a site with no entry, and
+      # a site with no backup host also covers the case of no groups['backup']
+      # at all (sites.yml defaults that group to an empty list, which yields an
+      # empty map). The fallback host is never contacted, because the block's
+      # `when` — cs_agent_backup_configured, the same "is this site's key
+      # present" test — is what actually decides whether this runs.
       # Same trap as roles/docker_tls/tasks/issue.yml.
-      delegate_to: "{{ groups.get(cs_agent_backup_group, []) | first | default(inventory_hostname) }}"
+      delegate_to: "{{ cs_site_backup_hosts.get(cs_site, inventory_hostname) }}"
 
 - name: Read the admin token hash already present in agent.yml
   ansible.builtin.include_tasks: read_token_hash.yml
@@ -99,6 +119,11 @@
   ansible.builtin.include_tasks: enroll.yml
   tags: [enroll]
 
+# no_log because agent.yml carries `backups.key` (the borg repository
+# passphrase for the whole fleet) and the admin token hash. Without it a
+# `--diff` run prints both to the terminal and into any log the operator is
+# capturing, which is the one place a 0600 file was supposed to keep them out
+# of. The changed/ok status and the handler notification are unaffected.
 - name: Deploy agent.yml
   ansible.builtin.template:
     src: agent.yml.j2
@@ -106,6 +131,7 @@
     owner: root
     group: root
     mode: "0600"
+  no_log: true
   tags: [enroll]
   notify: Restart cs-agent
 

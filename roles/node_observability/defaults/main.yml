@@ -33,17 +33,74 @@ node_observability_fluentd_forward_port: 9432
 # unit backs off rather than hammering docker.
 node_observability_fluentd_restart_sec: 30
 
-node_observability_metrics_group: metrics
-node_observability_loki_username: loguser
-node_observability_loki_password: "{{ loki_basic_auth_password }}"
-# Loki sits behind the metrics host's nginx TLS vhost. Prefer the metrics
-# domain (that is what the certificate is issued for) and fall back to the
-# metrics host's inventory primary_ip — an inventory var, never a gathered
-# fact (contracts.md rule 1). `first` is safe because tasks/main.yml asserts
-# the group is non-empty; a multi-host metrics group is not a v2 topology.
+# --- loki destination (SITE-scoped) ----------------------------------------
+# Metrics hosts are SITE-scoped (docs/contracts.md §Vocabulary): a node ships
+# its tenant logs to the loki vhost standing in its OWN physical facility, not
+# to one platform-wide host. `cs_site_metrics_domains`, `cs_site_metrics_hosts`
+# and `cs_site_metrics_credentials` are the frozen spellings, defined once in
+# playbooks/group_vars/all/sites.yml. This role consumes them and re-derives
+# nothing.
+#
+# There is deliberately no `node_observability_metrics_group` any more. It
+# promised the group name was configurable, and that stopped being true the
+# moment the maps in sites.yml became the single source of truth — they are
+# built out of a literal groups['metrics'], so a role-local override would
+# have named a group nobody reads. Nothing outside this role ever set it.
+#
+# LOCAL USE ONLY, docs/contracts.md hard rule 10: the host and domain maps
+# reference `hostvars`, so they may only be read on the host currently
+# executing. Every read below happens on the node itself, keyed by that node's
+# own `cs_site`. NEVER `hostvars[n].cs_site_metrics_domains`.
+#
+# Single-site regression: an inventory that sets `site` nowhere puts every
+# host in the site called `default`, each map holds exactly one key, and the
+# endpoint resolves to exactly what `cs_metrics_domain` / `groups['metrics'] |
+# first` produced before sites existed.
+
+# Every metrics host that claims this node's site. Exactly 1 in a correct
+# inventory; the assert in tasks/main.yml is the only consumer, and it wants
+# the raw list rather than the map because building the map has already
+# collapsed a duplicated site by the time anything can look at it.
+node_observability_metrics_hosts_in_site: >-
+  {{ (groups['metrics'] | default([])) | map('extract', hostvars)
+     | selectattr('cs_site', 'eq', cs_site)
+     | map(attribute='inventory_hostname') | list }}
+
+# Basic auth on this site's loki vhost. THE USERNAME IS AS LOAD-BEARING AS THE
+# PASSWORD, which is why both halves come from the same per-site source: v2
+# defaults to `loguser`, a v1-built metrics host being attached to may use
+# something else entirely, and a wrong username is a 401 with *exactly* the
+# same symptom as a wrong password — fluentd ships nothing, docker keeps
+# logging happily into it, nothing on the node complains, and the first thing
+# that notices is roles/validate at the very end of a converge. Taking the
+# password per site while leaving the username on a global default would
+# recreate that silent failure for every site whose host does not use
+# `loguser`.
+#
+# The fallback goes on the SUBSCRIPT, never on the field (contracts.md §Site
+# scoping): a site absent from the optional vaulted `metrics_site_credentials`
+# resolves wholly to the environment-wide defaults, whereas
+# `…[cs_site].loki_password | default(x)` would swallow a site whose entry
+# exists but is malformed, silently shipping the wrong credential.
+node_observability_loki_username: "{{ (cs_site_metrics_credentials[cs_site] | default(cs_metrics_credentials_default)).loki_username }}"
+node_observability_loki_password: "{{ (cs_site_metrics_credentials[cs_site] | default(cs_metrics_credentials_default)).loki_password }}"
+
+# Loki sits behind the site's metrics host nginx TLS vhost. Prefer that site's
+# metrics domain (that is what its certificate is issued for) and fall back to
+# that metrics host's inventory primary_ip — an inventory var, never a gathered
+# fact (contracts.md rule 1), so a --limit'ed run renders the same endpoint
+# even with the metrics host outside the play.
+#
+# `cs_site_metrics_domains[cs_site]` has already fallen back to the
+# environment-wide `cs_metrics_domain` if that site's metrics host names no
+# `metrics_domain` host var; the length test here is only for the case where
+# BOTH are empty. Both subscripts are unguarded on purpose — tasks/main.yml
+# asserts this node's site has a metrics host, and a `| default()` would let a
+# misconfigured node ship this site's tenant logs to another site's loki.
 node_observability_loki_host: >-
-  {{ cs_metrics_domain if (cs_metrics_domain | default('') | length > 0)
-     else hostvars[groups[node_observability_metrics_group] | first].primary_ip }}
+  {{ cs_site_metrics_domains[cs_site]
+     if (cs_site_metrics_domains[cs_site] | length > 0)
+     else hostvars[cs_site_metrics_hosts[cs_site]].primary_ip }}
 node_observability_loki_endpoint: "https://{{ node_observability_loki_host | trim }}:{{ cs_ports.metrics_loki }}"
 
 # --- image preloads --------------------------------------------------------

@@ -16,6 +16,11 @@
     mode: "0644"
   notify: Restart fluentd
 
+# no_log because this file IS the credential: a `--diff` run would otherwise
+# print the site's loki basic-auth username and password to the terminal and
+# into whatever log the operator is capturing, which is the one place the 0600
+# mode was meant to keep them out of. The changed/ok status and the handler
+# notification are unaffected.
 - name: Install the fluentd loki credentials
   ansible.builtin.template:
     src: loki.env.j2
@@ -23,6 +28,7 @@
     owner: root
     group: root
     mode: "0600"
+  no_log: true
   notify: Restart fluentd
 
 - name: Pull the pinned fluentd loki image
