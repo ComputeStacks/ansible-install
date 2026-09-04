@@ -33,9 +33,38 @@ exists once the controller has a `Node` row for this hostname
    command: the agent runs `mkdir -p`/`rm -rf` over this connection to create
    and tear down repositories, and a `borg serve` ForceCommand would break
    repository creation outright.
+
+   Steps 2–4 are **skipped entirely when the inventory names no backup
+   server** — see below.
 5. **Enrollment** (`tasks/enroll.yml`, tagged `enroll`) — see below.
 6. **`agent.yml`** (0600), then enable and start the service. Config changes
    notify a restart.
+
+## No backup server
+
+A backup server is optional. `groups['backup']` may hold **one** host or
+**none**; two or more fails the assert at the top of `tasks/main.yml`, because
+both this role and `validate` resolve the server with `groups['backup'] | first`
+and nothing can choose between several.
+
+With the group empty, the node still gets its agent, its enrollment and its
+metadata front door. What is skipped:
+
+* the borg key directory, the keypair, and the `authorized_key` delegation —
+  all three, as one block. That last task's `delegate_to` still has to resolve
+  to *something*: ansible templates it at task setup, before any `when` is
+  evaluated, so a bare `groups['backup'] | first` fails the task even when the
+  block is skipped. It uses a total lookup (`groups.get(...) | first |
+  default(inventory_hostname)`) for that reason; the fallback host is never
+  contacted.
+* the `backups.borg` block in `agent.yml`. `backups.enabled` renders `false`,
+  though `backups.key` is still written so that adding a backup server later
+  is purely an inventory change.
+* `validate`'s borg reachability and version checks
+  (`roles/validate/tasks/main.yml` gates them on the same emptiness).
+
+`backups_key` is still required in the secrets file — it is what makes adding
+a server later a no-decision change.
 
 ## Enrollment
 
@@ -96,6 +125,9 @@ containers.
 | `cs_agent_apt_repo` / `cs_agent_apt_key_url` | versions.yml | Repository and signing key. |
 | `cs_agent_listen_addr` | derived | Metadata front-door bind address (see above). |
 | `cs_agent_admin_token_hash` | `""` | Filled by enrollment; pre-seeded from the existing file. |
+| `cs_agent_backup_group` | `backup` | Inventory group holding the backup server. |
+| `cs_agent_backup_configured` | derived | True when that group holds exactly one host. Gates every borg task and the `backups.borg` block in `agent.yml`. |
+| `cs_agent_backups_enabled` | `true` | Operator intent. `agent.yml` gets this **AND** `cs_agent_backup_configured`. |
 | `cs_agent_backup_ssh_user` | `cstacks` | Account on the backup server. |
 | `cs_agent_backup_host_path` | `backup_host_path` or `/var/lib/computestacks/backups` | Repository path **on the backup server**. |
 | `cs_agent_borg_remote_path` | `backup_borg_remote_path` or `borg_binary_path` | borg **on the backup server**. |

@@ -54,12 +54,31 @@ cs_agent_queue_numworkers: 3
 cs_agent_controller_host: "{{ ('https://' ~ cs_portal_domain) if (cs_portal_domain | default('') | length > 0) else '' }}"
 
 # --- backups ---------------------------------------------------------------
-cs_agent_backups_enabled: true
 cs_agent_backup_group: backup
+
+# A backup server is OPTIONAL. When the inventory names none, the node still
+# gets its agent -- it simply runs without backups, rather than the whole run
+# failing on a group that was never required. roles/validate already treats it
+# this way (tasks/main.yml gates the borg checks on the same emptiness), and
+# playbooks/site.yml's `hosts: backup` play matches nothing, so an install
+# without one was already half-supported; this makes cs_agent agree.
+#
+# Exactly one is still the ceiling: the borg SSH backend points every node at a
+# single shared repository host, and tasks/main.yml's `| first` has no sane
+# meaning over two. tasks/main.yml asserts <= 1.
+cs_agent_backup_configured: "{{ (groups[cs_agent_backup_group] | default([]) | length) == 1 }}"
+
+# Operator intent, not the rendered value. agent.yml gets
+# `cs_agent_backups_enabled AND cs_agent_backup_configured`: there is nothing
+# to back up TO without a server, and the borg block cannot even be templated
+# (cs_agent_backup_ssh_host below does `| first` over the empty group). Set
+# this false to switch backups off on a node that DOES have a backup server.
+cs_agent_backups_enabled: true
+
 cs_agent_backup_ssh_user: cstacks
 # Inventory var, never a gathered fact (contracts.md rule 1): a --limit'ed run
-# must render the same backup endpoint as a full run. `first` is safe because
-# tasks/main.yml asserts the group holds exactly one host.
+# must render the same backup endpoint as a full run. `first` is safe wherever
+# this is used, because every consumer is gated on cs_agent_backup_configured.
 cs_agent_backup_ssh_host: "{{ hostvars[groups[cs_agent_backup_group] | first].primary_ip }}"
 # Path ON the backup server. Attach mode MUST set backup_host_path to the
 # existing server's path (v1 default was /mnt).

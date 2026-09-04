@@ -11,17 +11,28 @@
       node, `backups_key` in the vaulted secrets file, and a resolved
       `cs_agent_apt_version` in playbooks/group_vars/all/versions.yml.
 
-# One shared backup server is architectural (docs/control-plane graph). The
-# assert is what makes the `| first` below safe — the role never silently
-# picks one of several backup servers.
-- name: Assert exactly one backup server is in the inventory
+# One shared backup server is architectural (docs/control-plane graph), so two
+# is the error this catches — the assert is what makes the `| first` below
+# safe, and the role never silently picks one of several backup servers.
+#
+# Zero is NOT an error: a backup server is optional (see
+# cs_agent_backup_configured in defaults). The node still gets its agent, and
+# every borg-dependent task below is skipped rather than the run dying on a
+# group the operator never had to define.
+- name: Assert at most one backup server is in the inventory
   ansible.builtin.assert:
     that:
-      - (groups[cs_agent_backup_group] | default([]) | length) == 1
+      - (groups[cs_agent_backup_group] | default([]) | length) <= 1
     fail_msg: >-
-      cs_agent expects exactly one host in groups['{{ cs_agent_backup_group }}']
-      (found {{ groups[cs_agent_backup_group] | default([]) | length }}). The
-      borg SSH backend points every node at a single shared backup server.
+      cs_agent found {{ groups[cs_agent_backup_group] | default([]) | length }}
+      hosts in groups['{{ cs_agent_backup_group }}'] and cannot choose between
+      them. The borg SSH backend points every node at a single shared backup
+      server: name exactly one, or none at all to run without backups.
+    success_msg: >-
+      {{ "backup server: " ~ (groups[cs_agent_backup_group] | first)
+         if (cs_agent_backup_configured | bool)
+         else "no backup server in the inventory — backups will be disabled on this node" }}
+    quiet: true
 
 - name: Install the cs-agent package from the ComputeStacks apt repository
   ansible.builtin.include_tasks: install.yml
@@ -34,39 +45,51 @@
     group: root
     mode: "0750"
 
-- name: Ensure the borg SSH key directory exists
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0700"
-  loop:
-    - "{{ cs_agent_backup_dir }}"
-    - "{{ cs_agent_backup_ssh_dir }}"
+# All three are inert without a backup server to authorize the key against.
+- name: Configure the node's borg access to the backup server
+  when: cs_agent_backup_configured | bool
+  block:
+    - name: Ensure the borg SSH key directory exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ cs_agent_backup_dir }}"
+        - "{{ cs_agent_backup_ssh_dir }}"
 
-- name: Generate the node's borg SSH keypair
-  community.crypto.openssh_keypair:
-    path: "{{ cs_agent_backup_keyfile }}"
-    type: ed25519
-    owner: root
-    group: root
-    mode: "0600"
-    comment: "cs-agent {{ hostname }}"
-    regenerate: never
-    state: present
-  register: cs_agent_backup_keypair
+    - name: Generate the node's borg SSH keypair
+      community.crypto.openssh_keypair:
+        path: "{{ cs_agent_backup_keyfile }}"
+        type: ed25519
+        owner: root
+        group: root
+        mode: "0600"
+        comment: "cs-agent {{ hostname }}"
+        regenerate: never
+        state: present
+      register: cs_agent_backup_keypair
 
-# Additive, per-node entry — safe against an existing_env backup server that
-# already carries every other node's key.
-- name: Authorize the node's borg key on the backup server
-  ansible.posix.authorized_key:
-    user: "{{ cs_agent_backup_ssh_user }}"
-    key: "{{ cs_agent_backup_keypair.public_key }}"
-    comment: "cs-agent {{ hostname }}"
-    state: present
-    manage_dir: true
-  delegate_to: "{{ groups[cs_agent_backup_group] | first }}"
+    # Additive, per-node entry — safe against an existing_env backup server
+    # that already carries every other node's key.
+    - name: Authorize the node's borg key on the backup server
+      ansible.posix.authorized_key:
+        user: "{{ cs_agent_backup_ssh_user }}"
+        key: "{{ cs_agent_backup_keypair.public_key }}"
+        comment: "cs-agent {{ hostname }}"
+        state: present
+        manage_dir: true
+      # `delegate_to` is templated when the task is SET UP, before any `when`
+      # is evaluated — the enclosing block's gate does NOT protect it. With no
+      # backup group the subscript raises `object of type 'dict' has no
+      # attribute 'backup'` and the task fails despite being skipped, so the
+      # lookup has to be total: `.get` for the missing key, `default` for the
+      # empty list. The fallback host is never contacted, because the block's
+      # `when` is what actually decides whether this runs.
+      # Same trap as roles/docker_tls/tasks/issue.yml.
+      delegate_to: "{{ groups.get(cs_agent_backup_group, []) | first | default(inventory_hostname) }}"
 
 - name: Read the admin token hash already present in agent.yml
   ansible.builtin.include_tasks: read_token_hash.yml

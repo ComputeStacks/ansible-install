@@ -28,8 +28,12 @@ queue:
   numworkers: {{ cs_agent_queue_numworkers | int }}
 
 backups:
-  enabled: {{ cs_agent_backups_enabled | bool | lower }}
+  # Off unless the operator wants backups AND the inventory names a backup
+  # server to send them to (defaults/main.yml). `key` is written either way, so
+  # adding a backup server later needs no passphrase decision at that point.
+  enabled: {{ ((cs_agent_backups_enabled | bool) and (cs_agent_backup_configured | bool)) | lower }}
   key: "{{ backups_key }}"
+{% if cs_agent_backup_configured | bool %}
   borg:
     image: "{{ borg_image }}"
     # `compression`, not the sample's `compress`.
@@ -45,6 +49,7 @@ backups:
       keyfile: "{{ cs_agent_backup_keyfile }}"
     # Borg on the BACKUP SERVER, used for the remote half of every operation.
     ssh_borg_remote_path: "{{ cs_agent_borg_remote_path }}"
+{% endif %}
 {% if cs_agent_s3_export_enabled | bool %}
   export:
     s3:
