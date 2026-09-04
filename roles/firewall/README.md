@@ -57,6 +57,8 @@ an inventory var (`primary_ip`, `public_ip`) — no gathered facts, so a
 group, iterated (never `[0]`), and **every** source-restricted accept in the
 tables below also gets an `iifname "tailscale0"` accept when both ends are
 tailnet members — see [pairwise accepts](#pairwise-accepts-address-path-and-tailnet-path).
+It also means every host in that group across **every site**: this role does
+not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 
 ### Every host
 
@@ -167,6 +169,32 @@ to undo that is `firewall_extra_allowed_ipv4` / `_ipv6`, which are blanket
 `accept`s for an address and therefore open every port on this host to it —
 they are a v1-parity escape hatch, not a per-port knob.
 
+## Sites are deliberately ignored
+
+`site` (docs/contracts.md §Site scoping) partitions the fleet: one metrics host
+and at most one backup server per physical facility. This role ignores it, and
+that is a decision rather than an oversight.
+
+The tempting change is to narrow the `node_exporter` (9100) and
+`cadvisor` / `haproxy_stats` accepts from `groups['metrics']` to the asking
+host's own site — `cs_site_metrics_hosts[cs_site]`. It breaks the fleet. The
+9100 accept is emitted on *every* host, and the controller, nameservers,
+registry and backup servers have no `site` at all: for them the narrowed
+expression resolves to nothing, no accept is emitted, and every infrastructure
+scrape target stops answering — on single-site installs as well, where `site`
+is unset everywhere by design.
+
+Accepting scrapes from every metrics host is therefore over-permissive by
+exactly one already-trusted control-plane host per extra site, on ports that
+serve nothing but metrics. That is the correct trade, and the comment at the
+9100 accept in `templates/cs-static.nft.j2` says so at the point where somebody
+would otherwise "fix" it.
+
+Attach mode is the one place the fleet partition does show up, and it is
+handled by `existing_env` rather than by `site`: `tasks/v1_append.yml` appends
+addresses only for nodes this run provisions, skipping hosts already flagged
+`existing_env` (docs/contracts.md rule 9).
+
 ## The 8500 rule
 
 `agent_http` carries the controller's admin Bearer **in cleartext**, so it is
@@ -231,8 +259,28 @@ partial inventory view — docs/contracts.md rule 9). Instead
    is a stop-and-report situation, not something to guess at.
 
 Only IPv4 node addresses are appended: v1's `ip6tables` chain ends in a REJECT,
-so a v6 append would need a different insertion point. The `regexp` uses
-`regex_escape` (v1 passed the raw address, whose dots are regex wildcards).
+so a v6 append would need a different insertion point. Appending at EOF is safe
+because v1 drops by **policy** (`iptables -P INPUT DROP`), not by a terminal
+rule, so a later `-A INPUT … ACCEPT` still takes effect.
+
+The `regexp` is anchored on the **whole rule**, not on the address. v1 passed
+the raw address and v2 originally passed `item | regex_escape`, which escapes
+the dots but does not anchor — and `lineinfile` *replaces* the last line its
+regexp matches. Appending `10.100.1.1` to a script that already accepted
+`10.100.1.10` therefore matched inside that address and deleted an existing
+peer's blanket accept. Nothing broke at the time (the `-C` / `-A` tasks only
+add to the live chain), so the damage surfaced at that host's next reboot or
+`systemctl restart cs-iptables`, as a production node that had lost docker
+mTLS, cs-agent and loki ingest.
+
+The anchored form matches exactly the rule this role writes, modulo whitespace,
+and requires the address to be followed by whitespace so a CIDR accept
+(`-p all -s 10.100.0.0/21 -j ACCEPT`, the shape v1's own upgrade notes use for
+the container network) can never be matched and narrowed to a single host. The
+deliberate consequence: a hand-edited variant — different flag order, an
+absolute `/sbin/iptables`, a trailing `-m comment` — does not match and gets a
+second, additive line. A duplicate `-A … ACCEPT` is cosmetic and self-limiting;
+rewriting a line on a production boot script we did not write is not.
 
 Wave 4J's `attach_fragments` role calls this entry point directly:
 

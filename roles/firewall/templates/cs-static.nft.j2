@@ -88,6 +88,18 @@ table inet {{ firewall_table }} {
         # prometheus -> node_exporter (every host runs one). Scrapes arrive
         # from the metrics host's address, or on tailscale0 when both ends are
         # tailnet members — see the header note.
+        #
+        # DELIBERATELY NOT site-scoped, and this is a decision, not an
+        # oversight (docs/contracts.md §Site scoping). A multi-site fleet runs
+        # one metrics host per site, so narrowing this to that site's metrics
+        # host — `cs_site_metrics_hosts[cs_site]` — looks like the obvious
+        # follow-up. It is wrong: this accept is emitted on EVERY host, and the
+        # controller, nameservers, registry and backup servers carry no `site`
+        # at all, so the narrowed form would resolve to nothing and emit no
+        # accept for them — every infrastructure scrape target goes dark, on
+        # single-site installs too. Accepting from both metrics hosts is
+        # over-permissive by exactly one already-trusted control-plane host.
+        # The same reasoning covers the cadvisor / haproxy-stats accept below.
 {{ accept_from(groups['metrics'], 'tcp dport ' ~ ports.node_exporter ~ ' accept') }}
 {% endif %}
 {% for interface in firewall_container_interfaces %}
@@ -120,6 +132,7 @@ table inet {{ firewall_table }} {
         # prometheus -> cadvisor and haproxy stats. cadvisor runs on the host
         # network bound to all interfaces (node_observability), so these accepts
         # are the ONLY thing keeping 8080 off the public interface.
+        # Not site-scoped, for the reason spelled out at the 9100 accept above.
 {{ accept_from(groups['metrics'] | default([]), 'tcp dport { ' ~ ports.cadvisor ~ ', ' ~ ports.haproxy_stats ~ ' } accept') }}
 {% endif %}
 {% if 'controller' in group_names %}

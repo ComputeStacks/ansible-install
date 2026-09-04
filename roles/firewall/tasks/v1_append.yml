@@ -50,7 +50,31 @@
   ansible.builtin.lineinfile:
     dest: "{{ firewall_v1_script }}"
     line: "{{ firewall_iptables_bin }} -A INPUT -p all -s {{ item }} -j ACCEPT"
-    regexp: "{{ item | regex_escape }}"
+    # Anchored on the WHOLE rule, never on the bare address. `regex_escape`
+    # escapes the dots but does not anchor, and lineinfile REPLACES the last
+    # line its regexp matches: appending 10.100.1.1 to a script that already
+    # accepted 10.100.1.10 matched inside that address and silently deleted an
+    # existing peer's blanket accept. The live chain stayed correct (the -C/-A
+    # tasks below only add), so the loss was invisible until that host's next
+    # reboot or `systemctl restart cs-iptables` — at which point a production
+    # node lost docker mTLS, cs-agent and loki ingest, with nothing tying the
+    # outage back to the run that caused it.
+    #
+    # The address must be followed by whitespace, so a mask can never be
+    # swallowed: v1's own upgrade notes append container-network accepts in
+    # this exact shape (`-p all -s 10.100.0.0/21 -j ACCEPT`), and matching one
+    # of those would narrow a whole /21 down to a single host.
+    #
+    # `\s+` between the tokens is the ONLY tolerance — the regexp matches
+    # exactly the rule this task would write, modulo spacing. A hand-edited
+    # variant (different flag order, an absolute /sbin/iptables, a trailing
+    # `-m comment`) does not match and gets a second, additive line instead.
+    # That is the deliberate trade: a duplicate `-A ... ACCEPT` is cosmetic and
+    # self-limiting (the canonical line then exists, so the next run matches
+    # it), whereas a looser regexp would rewrite a line on a production boot
+    # script that we did not write and cannot see.
+    regexp: >-
+      ^\s*{{ firewall_iptables_bin | regex_escape }}\s+-A\s+INPUT\s+-p\s+all\s+-s\s+{{ item | regex_escape }}\s+-j\s+ACCEPT\s*$
     insertafter: EOF
   loop: "{{ firewall_v1_addresses | default([]) | unique }}"
 
