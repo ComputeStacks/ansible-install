@@ -6,7 +6,7 @@ Change requests go to the engineering manager, not into the code.
 
 ## Vocabulary
 `region` == controller `Location` (e.g. ams005). `az` == controller `Region`
-(e.g. ams-005). Exactly ONE node per az — enforced by preflight, relied on
+(e.g. exm-005). Exactly ONE node per az — enforced by preflight, relied on
 everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
 
 `site` == the physical facility a host lives in. A provisioner-only concept:
@@ -14,9 +14,8 @@ the controller has no column for it, and nothing about it is ever seeded. One
 metrics host and AT MOST one backup server per site (zero backup servers means
 that site's nodes install without backups). A site holds one or more `region`s;
 a `region` never spans sites. It is neither Region nor Location, and that is
-the whole point — in production the Locations `ams001` and `Internal-AMS` are
-two different Locations sharing one metrics server, so no controller-side
-grouping expresses it. Set as an inventory HOST var (`site`) on nodes, metrics
+the whole point — a real estate can have two different Locations sharing one
+metrics server, and no controller-side grouping expresses that. Set as an inventory HOST var (`site`) on nodes, metrics
 hosts and backup hosts; unset everywhere means the single site called
 `default`, which is what every inventory that predates this concept is.
 
@@ -96,8 +95,8 @@ returns Undefined while `cs_site_metrics_hosts` in the same play returns the
 full map.
 
 This is not hypothetical. The first draft of the site-scoping work read
-`hostvars[h].cs_site_metric_endpoint` and would have pointed a new sjo region
-at the ams prometheus and loki — logs and metrics to the wrong facility, and
+`hostvars[h].cs_site_metric_endpoint` and would have pointed a new region at
+another site's prometheus and loki — logs and metrics to the wrong facility, and
 nothing anywhere would have said so.
 
 The same rule has a second face, and it bites any playbook written outside

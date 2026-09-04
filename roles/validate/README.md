@@ -93,8 +93,8 @@ prometheus query dials `cs_site_metrics_domains[cs_site]` with the
 `playbooks/group_vars/all/sites.yml` (docs/contracts.md §Site scoping),
 resolved on the host being validated. `validate_backup_host` used to be
 `groups['backup'] | first`, which in a two-site fleet handed every node
-whichever backup server sorted first: a `sjo` node's borg check then SSHed at
-the `ams` server, failed on a key that was never installed there, and named the
+whichever backup server sorted first: a node in one site then SSHed at another
+site's server, failed on a key that was never installed there, and named the
 wrong host in the failure message. `validate_prometheus_endpoint` had the same
 shape via the single global `cs_metrics_domain`.
 

@@ -90,7 +90,7 @@ acme_web_force_issue: false
 #
 # The metrics name is THIS host's SITE's name, not the environment-wide one:
 # a two-site estate has two metrics hosts answering on two different names
-# (metrics.example.com and metrics.sjo.example.com), and a certificate for
+# (metrics.example.com and metrics.west.example.com), and a certificate for
 # the wrong one fails every node's fluentd push and every scrape through
 # nginx with a hostname mismatch. `cs_site_metrics_domains` is the frozen
 # spelling (docs/contracts.md "Site scoping"); the guard sits on the

@@ -106,10 +106,10 @@ cs_new_nodes: "{{ groups['nodes'] | default([]) | difference(cs_existing_hosts) 
 # secrets, keyed by site:
 #
 #     metrics_site_credentials:
-#       ams:
+#       east:
 #         username: promuser        # fills BOTH usernames
-#         password: "<the ams nginx basic-auth password>"
-#       sjo:
+#         password: "<that metrics host's nginx basic-auth password>"
+#       west:
 #         prometheus_username: promuser
 #         prometheus_password: "..."
 #         loki_username: loguser

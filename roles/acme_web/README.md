@@ -119,7 +119,7 @@ variable so both the documented vocabulary and the role-prefix lint rule hold.
 
 A metrics host serves exactly one **site** (docs/contracts.md §Vocabulary),
 and each site answers on its own public name — production has
-`metrics.example.com` and `metrics.sjo.example.com`. `acme_web_domains`
+`metrics.example.com` and `metrics.west.example.com`. `acme_web_domains`
 therefore puts **this host's site's** name on the certificate, not the
 environment-wide one:
 
@@ -153,10 +153,10 @@ its loki vhost. So the htpasswd files are built from
 ```yaml
 # vaulted secrets, optional, keyed by site
 metrics_site_credentials:
-  ams:
+  east:
     username: promuser        # fills BOTH usernames
-    password: "<the ams nginx basic-auth password>"
-  sjo:
+    password: "<that metrics host's nginx basic-auth password>"
+  west:
     prometheus_username: promuser
     prometheus_password: "..."
     loki_username: loguser

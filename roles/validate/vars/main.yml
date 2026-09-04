@@ -112,7 +112,7 @@ validate_expected_containers: >-
 # The backup server for THIS host's site, not "the first backup server in the
 # inventory". With more than one site in the inventory, `groups['backup'] |
 # first` handed every node whichever backup host happened to sort first —
-# so a sjo node's borg check SSHed at the ams server, failed on a key that was
+# so a node's borg check SSHed at another site's server, failed on a key that was
 # never installed there, and named the wrong host in the failure message.
 #
 # `cs_site_backup_hosts` references `hostvars`, so it is read here on the host
