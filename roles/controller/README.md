@@ -158,21 +158,33 @@ controller; `tasks/main.yml` never runs there.
 Assert first, then act:
 
 1. `/etc/default/computestacks` must exist.
-2. **`secret_key_base` in the vaulted secrets must equal the file's
+2. The `portal` container must be running, and the image it runs must define
+   `bootstrap:apply`. Probed read-only with `docker exec … bundle exec rake
+   --all --tasks`, because v1's `cstacks` has no `runner` subcommand.
+   docs/attach-mode.md makes "upgrade the controller first" a prerequisite;
+   without this the operator learns it was skipped only after the dump, the
+   env append, the script swap, the portal restart and a fully-built node.
+3. Every path the v2 `cstacks` script will bind-mount must already exist,
+   resolved exactly as that script resolves it (env-file value, else the
+   script's own default). A v1 file that omits `CS_SSH_KEYS_PATH` would
+   otherwise mount an empty `/etc/computestacks/.ssh` over the app keypair
+   that actually lives in `/var/lib/computestacks/sshkeys`, breaking every
+   controller→node SSH operation fleet-wide with nothing noticing.
+4. **`secret_key_base` in the vaulted secrets must equal the file's
    `SECRET_KEY_BASE` byte-for-byte**, or the play aborts. The manifest apply
    encrypts with that value; applying under a different one writes credentials
    the running controller decrypts to `nil` — silent, total credential loss.
    The fix is always to copy the existing value into `secrets.yml`, never the
    other way around.
-3. `cstacks database-backup` — the gate. Everything downstream
+5. `cstacks database-backup` — the gate. Everything downstream
    (`controller_seed`) writes to the database.
-4. `lineinfile` **appends** `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH`,
+6. `lineinfile` **appends** `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH`,
    and only when the key is absent. No `regexp:` is used, so an existing value
    can never be rewritten. docs/contracts.md: the environment file is
    append-only, always.
-5. Installs the v2 `cstacks` script (with `backup: true`) — one of the two
+7. Installs the v2 `cstacks` script (with `backup: true`) — one of the two
    whole-file exceptions to the attach-mode rule.
-6. Flushes the handler explicitly, so the recreated portal carries the new
+8. Flushes the handler explicitly, so the recreated portal carries the new
    environment and the proxy_ips mount before `controller_seed` runs.
 
 ## Variables

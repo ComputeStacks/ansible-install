@@ -6,7 +6,12 @@
 # ALWAYS. The v2 cstacks script is one of the two whole-file exceptions.
 #
 # Assert first, then take a database backup, then append, then swap the
-# script, then recreate the container.
+# script, then recreate the container. EVERY read-only check belongs above the
+# pg_dump: from there on the play is slow (a dump of the production database),
+# then noisy (an append to the environment file, v2's cstacks over v1's), then
+# disruptive (a portal recreate, 30-60s with the portal, the API and the job
+# queues down). A check that runs after all that is not a gate, it is an
+# autopsy.
 
 - name: Stat the existing controller environment file
   ansible.builtin.stat:
@@ -66,6 +71,166 @@
   register: controller_attach_bin_stat
   failed_when: not controller_attach_bin_stat.stat.exists
 
+# --- gates on the running controller, still writing nothing ----------------
+
+# v1 hardcoded the name `portal` and never wrote CS_CONTAINER_NAME; v2 reads
+# CS_CONTAINER_NAME with `portal` as its fallback. Resolve it the same way the
+# script will, so both shapes work and neither is guessed at.
+- name: Resolve the portal container name from the existing environment file
+  ansible.builtin.set_fact:
+    controller_attach_container: >-
+      {{ (([''] + (controller_attach_env_lines | select('match', '^CS_CONTAINER_NAME=') | list))
+          | last | split('=', 1) | last | trim) | default(controller_container_name, true) }}
+
+- name: Look for the running portal container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - ps
+      - --quiet
+      - --filter
+      - "name=^{{ controller_attach_container }}$"
+  register: controller_attach_container_ps
+  changed_when: false
+
+- name: Assert the portal container is running
+  ansible.builtin.assert:
+    that:
+      - (controller_attach_container_ps.stdout | trim) | length > 0
+    fail_msg: >-
+      No running container named '{{ controller_attach_container }}' on
+      {{ inventory_hostname }}. Attach mode prepares a LIVE controller, and the
+      next check reads the image that controller is running. Start it
+      (`cstacks run`) and run this playbook again.
+    success_msg: "the {{ controller_attach_container }} container is running"
+
+# THE prerequisite docs/attach-mode.md states and nothing used to check.
+# preflight's two controller-image assertions are both skipped for
+# `existing_env`, so a controller that was never `cstacks upgrade`d used to
+# get all the way past the dump, the environment append, the script swap, the
+# portal restart and a fully-built new node before `cstacks seed` died with
+# `Don't know how to build task 'bootstrap:apply'` — leaving a half-attached
+# region and a controller that had already been restarted for nothing.
+#
+# Read with `docker exec`, NOT through `cstacks runner`: the script on disk at
+# this point is still v1's, and v1's cstacks has no `runner` subcommand at all
+# (it predates that contract) — relying on it here would fail on exactly the
+# controllers this check exists for. `rake --all --tasks` loads the Rakefile
+# and prints the task list; it executes no task and writes nothing.
+#
+# The RUNNING container is the right thing to ask. v1's `run()` mounts no rake
+# tasks into it (only its `bootstrap` subcommand ever mounted CS_RAKE_PATH),
+# so the task list it reports is the image's own — which is what `cstacks
+# seed` later starts a fresh container from.
+- name: Probe the running controller for the bootstrap:apply rake task
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ controller_attach_container }}"
+      - bundle
+      - exec
+      - rake
+      - --all
+      - --tasks
+  register: controller_attach_rake_tasks
+  changed_when: false
+  failed_when: false
+
+- name: Assert the running controller defines the bootstrap:apply rake task
+  ansible.builtin.assert:
+    that:
+      - controller_attach_rake_tasks.rc == 0
+      - "'bootstrap:apply' in controller_attach_rake_tasks.stdout"
+    fail_msg: >-
+      The controller image running on {{ inventory_hostname }} does not define
+      `rake bootstrap:apply`
+      {{ "(the task list could not be read: rc="
+         ~ controller_attach_rake_tasks.rc ~ ", "
+         ~ (controller_attach_rake_tasks.stderr | default('') | trim | truncate(300))
+         ~ ")" if controller_attach_rake_tasks.rc != 0 else "" }}.
+      Attach mode seeds the new region through that task, so the existing
+      controller must be upgraded to a release carrying it FIRST — run
+      `cstacks upgrade` on {{ inventory_hostname }}, confirm the portal comes
+      back, then run this playbook again (docs/attach-mode.md §Prerequisites).
+      Nothing has been changed on this controller yet.
+    success_msg: "the running controller defines bootstrap:apply"
+
+# The v2 cstacks script sources the environment file and then applies
+# `: "${VAR:=default}"` fallbacks (roles/controller/files/cstacks.sh). A key
+# the file omits therefore silently takes V2's default, and `docker run`
+# CREATES a missing bind-mount source as an empty directory — mounting
+# nothing over what should have been there, with no error anywhere.
+#
+# CS_SSH_KEYS_PATH is the one that matters: v1 keeps the application keypair
+# in /var/lib/computestacks/sshkeys (v1 roles/controller `ssh_keys_directory`,
+# and roles/ssh_trust/defaults/main.yml says the same) while v2 defaults to
+# /etc/computestacks/.ssh. Get it wrong and the portal mounts an empty
+# lib/ssh: every controller -> node ssh operation in the FLEET fails —
+# volumes, haproxy certificate deploys, load balancer reloads, registry
+# orders — and nothing in this run notices.
+#
+# v1's own environment file template writes all three of these keys, so a
+# stock v1 controller passes. This is the guard for the ones that are not
+# stock. The fallbacks below are the role variables the script's literals were
+# taken from; they are the same strings and they move together.
+- name: Resolve the directories the v2 cstacks script will bind-mount
+  ansible.builtin.set_fact:
+    controller_attach_mounts:
+      - key: CS_CERT_PATH
+        path: >-
+          {{ ((([''] + (controller_attach_env_lines | select('match', '^CS_CERT_PATH=') | list))
+               | last | split('=', 1) | last | trim) | default(controller_certificates_dir, true))
+             ~ '/docker' }}
+        purpose: >-
+          the portal's docker client certificate, which every controller ->
+          node docker operation authenticates with
+      - key: CS_BRANDING_PATH
+        path: >-
+          {{ (([''] + (controller_attach_env_lines | select('match', '^CS_BRANDING_PATH=') | list))
+              | last | split('=', 1) | last | trim) | default(controller_branding_dir, true) }}
+        purpose: >-
+          the branding assets mounted over public/assets/custom; an empty one
+          serves the portal with no stylesheet
+      - key: CS_SSH_KEYS_PATH
+        path: >-
+          {{ (([''] + (controller_attach_env_lines | select('match', '^CS_SSH_KEYS_PATH=') | list))
+              | last | split('=', 1) | last | trim) | default(controller_ssh_key_dir, true) }}
+        purpose: >-
+          the application ssh keypair every controller -> node operation uses
+          (volumes, haproxy certificate deploys, load balancer reloads)
+
+- name: Stat the directories the v2 cstacks script will bind-mount
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ controller_attach_mounts }}"
+  loop_control:
+    label: "{{ item.key }} -> {{ item.path }}"
+  register: controller_attach_mount_stat
+
+- name: Assert every directory the v2 cstacks script mounts already exists
+  ansible.builtin.assert:
+    that:
+      # `isdir` is absent entirely when the path does not exist, hence the
+      # guard: the useful message is the one below, not a templating error.
+      - item.stat.exists
+      - item.stat.isdir | default(false)
+    fail_msg: >-
+      {{ item.item.path }} does not exist on {{ inventory_hostname }} (or is
+      not a directory), but the v2 cstacks script will bind-mount it as
+      {{ item.item.key }} — {{ item.item.purpose }}. Docker would create it
+      empty and mount that over the container's own path, silently. Either
+      {{ item.item.key }} is missing from {{ controller_env_file }} and this is
+      v2's default standing in for a path v1 keeps somewhere else, or the
+      directory really is gone. Add the correct
+      {{ item.item.key }}=<path> line to {{ controller_env_file }} by hand
+      (it is append-only and this playbook will not rewrite it) and run again.
+      Nothing has been changed on this controller yet.
+    success_msg: "{{ item.item.key }}: {{ item.item.path }}"
+  loop: "{{ controller_attach_mount_stat.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+
 # Gate: nothing below is destructive, but everything after it (the manifest
 # apply in controller_seed) writes to the database. A failed pg_dump stops
 # the attach here.
@@ -77,9 +242,22 @@
   register: controller_attach_backup
   changed_when: controller_attach_backup.rc == 0
 
+# The fourth mount, and the only one this play may create rather than assert:
+# CS_PROXY_IPS_PATH is new in v2, so a v1 environment file never carries it.
+# If one DOES -- a controller prepared by an earlier attach run, or an
+# operator who set it by hand -- that value wins, because the file is
+# append-only and the append below is skipped when the key is present.
+# Creating the role's own default instead would leave docker to auto-create
+# the real one, empty.
+- name: Resolve the proxy IP list directory
+  ansible.builtin.set_fact:
+    controller_attach_proxy_ips_dir: >-
+      {{ (([''] + (controller_attach_env_lines | select('match', '^CS_PROXY_IPS_PATH=') | list))
+          | last | split('=', 1) | last | trim) | default(controller_proxy_ips_dir, true) }}
+
 - name: Create the proxy IP list directory
   ansible.builtin.file:
-    path: "{{ controller_proxy_ips_dir }}"
+    path: "{{ controller_attach_proxy_ips_dir }}"
     state: directory
     owner: root
     group: root
