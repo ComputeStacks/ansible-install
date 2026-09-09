@@ -232,7 +232,7 @@ Assert first, then act:
    controller and a half-attached region. Without it `controller_seed` would
    read the legacy pem — this environment's own certificate — and seed it as
    the new region's, under the new region's domain. It is enumerated rather
-   than reusing `tasks/main.yml`: and enumerated rather than reusing `tasks/main.yml`: that
+   than reusing `tasks/main.yml`: that
    file's directory-layout loop would chmod `/etc/computestacks`,
    `/var/lib/computestacks` and the certificates directory, all v1-owned
    paths on this host (docs/contracts.md rule 9). Nothing here names the

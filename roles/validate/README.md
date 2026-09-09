@@ -117,6 +117,14 @@ The task waits up to `validate_lb_domain_retries` × `_delay` for the verdict
 rather than warning at once, and stops on the first non-pending answer — a
 healthy install pays for one query.
 
+If the verdict is still pending when the ceiling is reached, ansible prints
+`Task failed: Action failed.` before this task's own "not a failure" report.
+That line is ansible saying the `until` condition never came true;
+`failed_when: false` keeps it from failing the play. Expect it on a first
+`add-region.yml` run — the controller has usually not finished validating by
+the time validate gets here — and re-run `--tags lb_domain` rather than
+reading it as a broken install.
+
 The failure message names the exact pair of records the controller demands:
 `<app_domain>` A to that load balancer's public IP, and `*.<app_domain>`
 **CNAME** to `<app_domain>`. The wildcard cannot be an A record:
@@ -236,7 +244,7 @@ is a property of the control plane rather than of how the host was built.
 | `validate_prometheus_endpoint` | `https://{{ cs_site_metrics_domains[cs_site] \| default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}` | This host's site's metrics vhost. |
 | `validate_prometheus_username` / `_password` | this host's site's entry in `cs_site_metrics_credentials`, else `cs_metrics_credentials_default` | Both halves matter — a wrong username is an indistinguishable 401. |
 | `validate_prometheus_metric` / `_job` | `node_cpu_seconds_total` / `node-exporter` | The controller's own label contract. |
-| `validate_lb_domain_retries` / `_delay` | `12` / `10` | Ceiling on the wait for the controller's asynchronous domain verdict — two minutes. `1` takes whatever answer is there. |
+| `validate_lb_domain_retries` / `_delay` | `12` / `10` | Ceiling on the wait for the controller's asynchronous domain verdict — two minutes. `0`, not `1`, takes whatever answer is there: ansible counts *re*-tries, so `1` is two attempts. |
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
 | `validate_portal_url` / `_status_codes` | `https://{{ cs_portal_domain }}/` | |

@@ -437,9 +437,15 @@
     # -- production's rows were created by v1 with their correct per-region
     # domains already.
     #
-    # It can only fire where the preview ran (attach mode, or any run with the
-    # address flag). Greenfield does not preview and does not need to: there
-    # are no existing rows to drift from.
+    # It fires on EVERY run, greenfield included, because the preview above is
+    # unconditional. An earlier draft of this gate ran only where the preview
+    # did -- attach mode, or a run with the address flag -- on the reasoning
+    # that greenfield has no existing rows to drift from. That reasoning is
+    # wrong, and the case it misses is the one the gate exists for: a v2
+    # environment that has already converged has nothing flagged
+    # `existing_env`, so it is still a greenfield inventory, and an operator
+    # who adds `app_domain` to its nodes and re-runs would have got no preview
+    # and no gate. See the preview task for the full argument.
     - name: Find any load balancer domain drift in the preview
       # `Recorder#drift` prints a subject line and then one line per changed
       # attribute (recorder.rb, `drift`):

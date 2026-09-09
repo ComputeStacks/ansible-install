@@ -281,9 +281,14 @@ own change log, and tells the operator to change the domain in the admin UI
 first (or to correct `app_domain` to match what the database already holds).
 The role will not do it for them.
 
-The gate can only fire where the preview ran — attach mode, or any run with
-`controller_seed_update_addresses`. Greenfield neither previews nor needs to:
-there are no existing rows to drift from. **Changing the domain of an existing
+The gate fires on **every** run, because the `DRY_RUN` preview it reads is
+unconditional. Greenfield is not exempt, and that is the whole point: an
+environment that has already converged still has nothing flagged
+`existing_env`, so it is a greenfield inventory with live rows behind it, and
+that is exactly where adding `app_domain` to a node would otherwise rotate a
+certificate onto a load balancer whose domain the apply will not touch.
+`controller_seed_dry_run_first` governs only whether the preview is
+*printed*. **Changing the domain of an existing
 load balancer is out of scope for the provisioner**, and this is a guard
 against a future mistake rather than a migration tool: production's rows were
 created by v1 with their correct per-region domains already.

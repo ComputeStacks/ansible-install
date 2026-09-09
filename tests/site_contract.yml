@@ -42,6 +42,18 @@
           sites_of_every_host: >-
             {{ dict(groups['all'] | sort
                     | zip(groups['all'] | sort | map('extract', hostvars, 'cs_site'))) }}
+          # cs_app_domain is the second name in the repo built to survive a
+          # cross-host read, and for the same reason (docs/contracts.md
+          # §Per-az application domains): controller_seed renders on the
+          # CONTROLLER and needs every node's load balancer domain. It is
+          # rendered here on every host, not just nodes, because the failure
+          # this play exists to catch is "does not resolve at all" -- and a
+          # shared host resolving it to cs_app_zone is exactly as much a pass
+          # as a node resolving it to its own.
+          cs_app_domain: "{{ cs_app_domain }}"
+          app_domains_of_every_host: >-
+            {{ dict(groups['all'] | sort
+                    | zip(groups['all'] | sort | map('extract', hostvars, 'cs_app_domain'))) }}
 
 # The credential map is the one contract name with real logic in it: a JSON
 # round-trip that expands the `username`/`password` shorthand and falls back

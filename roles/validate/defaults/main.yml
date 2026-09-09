@@ -155,9 +155,20 @@ validate_acme_timeout: 10
 # waits.
 #
 # Retries x delay is the ceiling: 12 x 10 = two minutes. Set
-# `validate_lb_domain_retries: 1` to take whatever answer is there and move
-# on. Waiting longer never turns a failure into a pass — a verdict of
-# INVALID is final and fails immediately — it only converts "not checked
-# yet", which is reported and NOT asserted, into a real answer.
+# `validate_lb_domain_retries: 0` to take whatever answer is there and move
+# on -- NOT 1. Ansible's `retries` counts RE-tries, so 1 means two attempts
+# with a delay between them; 0 is the value that runs the query once and
+# skips the `until` loop. Waiting longer never turns a failure into a pass --
+# a verdict of INVALID is final and fails immediately -- it only converts
+# "not checked yet", which is reported and NOT asserted, into a real answer.
+#
+# When the verdict is STILL pending after the ceiling, ansible prints a
+# `Task failed: Action failed.` line before the task's own "this is not a
+# failure" report. That ERROR line is ansible announcing that `until` never
+# came true; `failed_when: false` is what stops it failing the play, and it
+# does stop it (verified on ansible-core 2.19.4 -- failed_when wins). It is
+# expected on a first `add-region.yml` run, where the controller has usually
+# not finished validating by the time validate reaches this task, and the
+# remedy is to re-run `--tags lb_domain` rather than to treat it as broken.
 validate_lb_domain_retries: 12
 validate_lb_domain_delay: 10
