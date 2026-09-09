@@ -6,8 +6,9 @@
 
 The ComputeStacks controller host: the `cstacks` CLI, `/etc/default/
 computestacks`, the `portal` container, the application ssh keypair that every
-node and the registry host trust, and the self-signed tenant wildcard
-certificate every load balancer serves.
+node and the registry host trust, and one self-signed tenant wildcard
+certificate per availability zone — the certificate that az's load balancer
+serves.
 
 It does **not** own the manifest or the seeding step — `controller_seed`
 (Wave 4I) renders the manifest and calls `cstacks seed`. It does not own the
@@ -17,11 +18,13 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 
 1. Asserts the image is `repo` + a non-floating tag, that the immutable
    secrets are present and long enough, that `postgres_password` is URL-safe,
-   and that `cs_app_zone` is a bare zone.
-2. Creates the directory layout (below).
+   that every az's load balancer domain is a bare domain, and that the two
+   spellings of the wildcard certificate root agree (see below).
+2. Creates the directory layout (below), plus one 0700 directory per per-az
+   domain.
 3. Generates the application ssh keypair at
    `/etc/computestacks/.ssh/id_ed25519` (`regenerate: never`).
-4. Generates the self-signed tenant wildcard **once**.
+4. Generates a self-signed tenant wildcard **once per domain**.
 5. Installs the `cstacks` CLI and its bash completion.
 6. Renders `/etc/default/computestacks` — **only when not
    `existing_env`** (`no_log`, mode 0600).
@@ -45,7 +48,52 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 | `/var/lib/computestacks/backups` | `cstacks database-backup` output. |
 | `/var/lib/computestacks/branding` | Mounted as `public/assets/custom`. Seeded per-file from the image's `public/custom` (see below); drop your own assets here and they are never overwritten. |
 | `/var/lib/computestacks/proxy_ips` | **v2 new.** `ProxyIpList`'s persistent store, mounted as `lib/proxy_ips`. |
-| `/var/lib/computestacks/.ssl_wildcard` | `sharedcert.pem` (cert **and** key in one file — the form haproxy wants) plus the openssl config that produced it. |
+| `/var/lib/computestacks/.ssl_wildcard` | `cs_app_wildcard_dir`. Holds `sharedcert.pem` (cert **and** key in one file — the form haproxy wants) plus the `selfwildcard.conf` that produced it, for the default domain only. |
+| `/var/lib/computestacks/.ssl_wildcard/<domain>` | 0700. The same pair for one az whose `app_domain` is not `cs_app_zone`. One directory per az. |
+
+## Per-az wildcard certificates
+
+Every availability zone has its own load balancer, every load balancer
+answers on its own domain, and each therefore needs its own self-signed
+wildcard. The contract is `playbooks/group_vars/all/app_domains.yml`; this
+role is the half that generates.
+
+| Domain | Certificate |
+| --- | --- |
+| `cs_app_zone` itself (a node with no `app_domain`) | `<controller_wildcard_dir>/sharedcert.pem` — **the legacy path, unchanged** |
+| anything else | `<cs_app_wildcard_dir>/<domain>/sharedcert.pem` |
+
+**The legacy carve-out is load bearing.** `Bootstrap::Writer#rotate!` skips a
+credential whose *decrypted* value already matches the manifest, so
+generate-once at a stable path re-seeds as a no-op. Move the default domain's
+certificate under a per-domain directory and the value genuinely changes —
+the next converge pushes a brand new certificate to every load balancer in
+the fleet. An inventory that sets `app_domain` nowhere writes the same bytes
+to the same paths it always did.
+
+**Generate-once is now per domain.** The `creates:` guard used to sit on a
+path with no domain in it, which would have been wrong in both directions
+once domains multiplied: regenerating rotates the fleet, and a single shared
+path means the first az to converge wins the file and every other az is
+seeded with a certificate for the first az's name.
+
+**`controller_wildcard_domain` is deleted, not deprecated.** It named one
+environment-wide CN. `roles/preflight` fails the run if an inventory still
+sets it — and can only see it there, because role defaults are not in scope
+in preflight's play, which is why the default had to go rather than be
+documented away. The CN of each certificate is now the domain itself, passed
+into `templates/ssl_wildcard.cnf.j2` as `controller_wildcard_cn`.
+
+**Two names for the certificate root, and this role asserts they agree.**
+The per-az paths hang off `cs_app_wildcard_dir`, a global, because
+`roles/controller_seed` slurps them back in a play where this role's defaults
+are out of scope. The legacy path keeps deriving from
+`controller_wildcard_dir` (`<controller_data_dir>/.ssl_wildcard`) and must,
+per the carve-out above. They are equal by default, which is exactly the
+arrangement that breaks quietly: move `controller_data_dir` and this role
+would write where `controller_seed` does not read. This role is the only
+place both names are in scope, so it asserts equality and tells you to set
+`app_wildcard_dir`.
 
 ## The `cstacks` CLI
 
@@ -176,15 +224,29 @@ Assert first, then act:
    the running controller decrypts to `nil` — silent, total credential loss.
    The fix is always to copy the existing value into `secrets.yml`, never the
    other way around.
-5. `cstacks database-backup` — the gate. Everything downstream
+5. Generates each **new** region's wildcard certificate, into
+   `<cs_app_wildcard_dir>/<domain>/` — the only thing this file writes that
+   the existing controller does not already own. It sits above the dump
+   because everything below the dump is slow, then noisy, then disruptive,
+   and openssl failing after a portal recreate would leave a restarted
+   controller and a half-attached region. Without it `controller_seed` would
+   read the legacy pem — this environment's own certificate — and seed it as
+   the new region's, under the new region's domain. It is enumerated rather
+   than reusing `tasks/main.yml`: and enumerated rather than reusing `tasks/main.yml`: that
+   file's directory-layout loop would chmod `/etc/computestacks`,
+   `/var/lib/computestacks` and the certificates directory, all v1-owned
+   paths on this host (docs/contracts.md rule 9). Nothing here names the
+   legacy `sharedcert.pem`, and nothing here touches the mode of
+   `cs_app_wildcard_dir` itself.
+6. `cstacks database-backup` — the gate. Everything downstream
    (`controller_seed`) writes to the database.
-6. `lineinfile` **appends** `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH`,
+7. `lineinfile` **appends** `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH`,
    and only when the key is absent. No `regexp:` is used, so an existing value
    can never be rewritten. docs/contracts.md: the environment file is
    append-only, always.
-7. Installs the v2 `cstacks` script (with `backup: true`) — one of the two
+8. Installs the v2 `cstacks` script (with `backup: true`) — one of the two
    whole-file exceptions to the attach-mode rule.
-8. Flushes the handler explicitly, so the recreated portal carries the new
+9. Flushes the handler explicitly, so the recreated portal carries the new
    environment and the proxy_ips mount before `controller_seed` runs.
 
 ## Variables
@@ -194,8 +256,8 @@ Assert first, then act:
 | `controller_image_repo` / `controller_image_tag` | `ghcr.io/computestacks/controller` / `9.7` | `versions.yml`. Composed into `CS_REG`. The **minor** tag is a deliberate rolling channel; a digest pin would make `cstacks upgrade` a permanent no-op. |
 | `controller_image_allow_floating_tag` | `false` | Permit a `latest`/`stable`/`main`/`master` tag. For an image that publishes no immutable line (an internal build cut on demand); set it as a host var beside the repo override. Costs reproducibility: nothing then records which build a host runs. |
 | `controller_auto_upgrade` | `true` | When the running container's image differs from `CS_REG`, run the full `cstacks upgrade` rather than recreating on an unmigrated schema. Set false to make tag bumps manual. |
-| `controller_wildcard_domain` | `{{ cs_app_zone }}` | CN and `*.` SAN of the shared certificate. |
-| `controller_wildcard_days` | `3650` | Generated once; never rotated by a converge. |
+| `controller_wildcard_days` | `3650` | Generated once **per domain**; never rotated by a converge. |
+| `app_wildcard_dir` | unset | Operator override for `cs_app_wildcard_dir`, the root of the per-az certificate paths. Read in `playbooks/group_vars/all/app_domains.yml`, not here — `controller_seed` has to resolve the same path in a play where this role's defaults are out of scope. **Set it if you move `controller_data_dir`**; this role asserts the two agree. |
 | `controller_app_id` | `default` | Links Sentry reports to this installation. |
 | `controller_sentry_dsn` | `{{ sentry_dsn \| default('') }}` | Empty disables bug reporting. v1 defaulted to ComputeStacks' own DSN. |
 | `controller_postgres_*` | `computestacks` / `cloudportal` / `127.0.0.1` / pool 40 | Composed into `DATABASE_URL`. |
@@ -203,8 +265,28 @@ Assert first, then act:
 | `controller_registry_username` / `_password` | unset | Optional pull credentials for a private image repo, in `secrets.yml`. This role does **not** log in — `playbooks/group_vars/all/registries.yml` folds the pair into `docker_registries` and `roles/docker_config` performs the login, one play earlier. |
 
 Consumed, not owned: `cs_ports.redis`, `secret_key_base`, `user_auth_secret`,
-`node_enrollment_token`, `postgres_password`, `cs_app_zone`, `locale`,
+`node_enrollment_token`, `postgres_password`, `cs_app_zone`,
+`cs_app_domain`, `cs_app_wildcard_dir`, `cs_new_nodes`, `locale`,
 `currency`, `existing_env`.
+
+`controller_wildcard_domain` is **gone**, not deprecated — see
+[Per-az wildcard certificates](#per-az-wildcard-certificates).
+
+### Role vars (`vars/main.yml`) — the frozen cross-role spellings
+
+| Name | Shape | Cross-host read |
+| --- | --- | --- |
+| `cs_app_domains` | sorted, unique `cs_app_domain` of `cs_new_nodes` | **local only** |
+| `cs_app_domain_cert_paths` | domain -> pem path | **local only** |
+| `controller_per_az_app_domains` | `cs_app_domains` minus `cs_app_zone` | **local only** |
+
+The first two are defined character-for-character identically in
+`roles/controller_seed/vars/main.yml`: one role writes the pem, the other
+slurps it, and they must agree on which domain maps to which path. They carry
+`# noqa: var-naming[no-role-prefix]` because they are a contract rather than
+this role's property; renaming them per role would give the contract two
+names. Never read them as `hostvars[h].cs_app_domains` (docs/contracts.md
+rule 10) — `cs_app_domain` is the hostvars-free value that survives that.
 
 ## Handler
 
@@ -227,9 +309,10 @@ restarted the portal by hand.
   different key on a re-run against a wiped `/etc/default/computestacks` and
   destroyed every encrypted column. Both are asserted inputs now
   (docs/contracts.md rule 8).
-* **The wildcard certificate is generate-once.** v1 regenerated it on every
-  run; under v2's convergent rule that would rotate the load balancer shared
-  certificate fleet-wide on every converge.
+* **The wildcard certificates are generate-once, per domain.** v1
+  regenerated its single certificate on every run; under v2's convergent rule
+  that would rotate the load balancer shared certificate fleet-wide on every
+  converge. See below for why "per domain" is the other half of that.
 * **`bootstrap-app` is gone.** v1's generated `bootstrap.rake` embedded ruby
   in a Jinja template and drifted from the controller's models. Seeding is now
   `cstacks seed` → `rake bootstrap:apply[<manifest>]` against a versioned

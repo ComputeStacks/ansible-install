@@ -5,13 +5,18 @@
 # docs/contracts.md §Attach mode: /etc/default/computestacks is append-only,
 # ALWAYS. The v2 cstacks script is one of the two whole-file exceptions.
 #
-# Assert first, then take a database backup, then append, then swap the
-# script, then recreate the container. EVERY read-only check belongs above the
-# pg_dump: from there on the play is slow (a dump of the production database),
-# then noisy (an append to the environment file, v2's cstacks over v1's), then
-# disruptive (a portal recreate, 30-60s with the portal, the API and the job
-# queues down). A check that runs after all that is not a gate, it is an
-# autopsy.
+# Assert first, generate the new regions' certificates, then take a database
+# backup, then append, then swap the script, then recreate the container.
+# EVERY read-only check belongs above the pg_dump: from there on the play is
+# slow (a dump of the production database), then noisy (an append to the
+# environment file, v2's cstacks over v1's), then disruptive (a portal
+# recreate, 30-60s with the portal, the API and the job queues down). A check
+# that runs after all that is not a gate, it is an autopsy.
+#
+# The certificate generation is the one WRITE above the dump, and it is there
+# for the same reason: it only ever creates paths this controller does not
+# already have, and failing it after the restart would be an autopsy too. Its
+# own block says the rest.
 
 - name: Stat the existing controller environment file
   ansible.builtin.stat:
@@ -230,6 +235,127 @@
   loop: "{{ controller_attach_mount_stat.results }}"
   loop_control:
     label: "{{ item.item.key }}"
+
+# --- the new regions' wildcard certificates --------------------------------
+#
+# WHY ATTACH MODE GENERATES CERTIFICATES AT ALL. tasks/main.yml never runs
+# here, so until now nothing did — and controller_seed then slurped whatever
+# sat at `controller_seed_shared_cert_path`, which on a v1-built controller
+# is the EXISTING environment's certificate, and seeded
+# it as the new region's `shared_certificate` while the manifest rendered the
+# new region's own domain. The new load balancer would serve a certificate
+# whose CN is another region's name, and every tenant TLS handshake against
+# it would mismatch. v1 was accidentally correct here only because it
+# regenerated its single certificate on every run, so the cert always matched
+# that run's domain.
+#
+# WHY ABOVE THE pg_dump. The file header's rule, and this is the case it was
+# written for: everything below is slow (a dump of the production database),
+# then noisy (an append to the environment file, v2's cstacks over v1's),
+# then disruptive (a portal recreate — 30-60s with the portal, the API and
+# the job queues all down). openssl failing here — an unwritable data
+# directory, a domain that is not a domain — after all of that would leave a
+# restarted controller and a half-attached region, and controller_seed would
+# fail on the missing pem immediately afterwards anyway. This is the one
+# thing in this file that writes something the existing controller does not
+# already own, so it is also the one write that is safe to do before the
+# backup: it creates new paths and touches nothing that exists.
+#
+# WHY THE TASK LIST IS ENUMERATED rather than reusing tasks/main.yml's. The
+# two tasks this depends on live in the greenfield converge next to things
+# that must never run here: main.yml's directory-layout loop chmods
+# /etc/computestacks, /etc/computestacks/certificates, /var/lib/computestacks
+# and the certificate root itself — all v1-owned paths on this host, and
+# docs/contracts.md rule 9 permits additive fragments only. Note what the
+# tasks below do NOT do: no task names `cs_app_wildcard_dir` on its own, so
+# its mode is never touched. `file: state=directory` creates a missing parent
+# but applies owner/group/mode only to directories it actually creates, so a
+# v1 `.ssl_wildcard` keeps whatever mode v1 gave it.
+#
+# There is also no `cs_app_wildcard_dir` vs `controller_wildcard_dir`
+# consistency assert here, unlike tasks/main.yml. Attach mode never reads or
+# writes the legacy path: this role writes `cs_app_wildcard_dir` and
+# controller_seed reads `cs_app_wildcard_dir`, one spelling at both ends, and
+# `controller_data_dir` on a v1 controller is none of v2's business.
+- name: Assert attach mode generates a certificate for every new region
+  ansible.builtin.assert:
+    that:
+      - (controller_per_az_app_domains | length) > 0
+      - (controller_per_az_app_domains | length) == (cs_app_domains | length)
+    fail_msg: >-
+      The new regions in this run resolve to the load balancer domains
+      {{ cs_app_domains }}, and
+      {{ (cs_app_domains | length) - (controller_per_az_app_domains | length) }}
+      of them {{ "is" if ((cs_app_domains | length) - (controller_per_az_app_domains | length)) == 1
+                 else "are" }} the environment-wide zone
+      '{{ cs_app_zone }}' itself (or the list is empty and no new node reached
+      this play at all). Attach mode must never seed a new region from the
+      legacy certificate at {{ controller_wildcard_cert }} — that pem is the
+      EXISTING environment's, its CN is the existing environment's domain, and
+      nothing here would generate anything for the new region. Give every new
+      node its own `app_domain` host var
+      (playbooks/group_vars/all/app_domains.yml). roles/preflight makes the
+      same check with the operator-facing explanation; if you are seeing this
+      one, preflight was skipped.
+    success_msg: >-
+      generating for {{ controller_per_az_app_domains | join(', ') }}
+
+- name: Create a directory for each new region's wildcard certificate
+  ansible.builtin.file:
+    path: "{{ cs_app_wildcard_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: "{{ controller_per_az_app_domains }}"
+
+- name: Write each new region's wildcard openssl config
+  ansible.builtin.template:
+    src: ssl_wildcard.cnf.j2
+    dest: "{{ cs_app_domain_cert_paths[item] | dirname }}/{{ controller_wildcard_config_name }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ controller_per_az_app_domains }}"
+  vars:
+    controller_wildcard_cn: "{{ item }}"
+
+# GENERATE-ONCE, PER DOMAIN, exactly as the greenfield converge does: a
+# second attach run for the same region must find the pem already there and
+# do nothing, because controller_seed re-applies the manifest and
+# `Bootstrap::Writer#rotate!` writes a `shared_certificate` whose decrypted
+# value differs — a regenerated pem here is a rotated certificate on a live
+# load balancer.
+- name: Generate each new region's self-signed wildcard certificate (once)
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -days
+      - "{{ controller_wildcard_days }}"
+      - -newkey
+      - "rsa:{{ controller_wildcard_key_bits }}"
+      - -sha256
+      - -keyout
+      - "{{ cs_app_domain_cert_paths[item] }}"
+      - -out
+      - "{{ cs_app_domain_cert_paths[item] }}"
+      - -config
+      - "{{ cs_app_domain_cert_paths[item] | dirname }}/{{ controller_wildcard_config_name }}"
+      - -extensions
+      - v3_req
+    creates: "{{ cs_app_domain_cert_paths[item] }}"
+  loop: "{{ controller_per_az_app_domains }}"
+
+- name: Restrict each new region's wildcard certificate (it carries the private key)
+  ansible.builtin.file:
+    path: "{{ cs_app_domain_cert_paths[item] }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ controller_per_az_app_domains }}"
 
 # Gate: nothing below is destructive, but everything after it (the manifest
 # apply in controller_seed) writes to the database. A failed pg_dump stops

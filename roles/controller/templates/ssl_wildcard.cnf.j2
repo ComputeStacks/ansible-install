@@ -1,7 +1,22 @@
 {{ ansible_managed | comment }}
-# openssl req config for the self-signed tenant wildcard certificate. The
-# certificate is the load balancer `shared_certificate` input; it is generated
-# ONCE and never rotated by a converge.
+# openssl req config for one availability zone's self-signed tenant wildcard
+# certificate. The certificate is that az's load balancer
+# `shared_certificate` input; it is generated ONCE per domain and never
+# rotated by a converge.
+#
+# `controller_wildcard_cn` IS THE LOOP ITEM. Both callers render this file
+# once per domain in `cs_app_domains` (tasks/main.yml) or
+# `controller_per_az_app_domains` (tasks/attach_prep.yml) and pass the domain
+# as a task var. It is spelled as its own name rather than read as `item`
+# so that the template says what it needs instead of depending on the shape
+# of whatever loop happens to include it — and so a caller that ever renders
+# it outside a loop fails loudly on an undefined variable rather than
+# silently taking some other loop's item.
+#
+# There is no environment-wide CN any more: `controller_wildcard_domain` is
+# retired (see defaults/main.yml). One domain per az, one certificate per
+# domain, one config file per certificate — each in that domain's own
+# directory, beside the pem it produced.
 [req]
 distinguished_name = req_distinguished_name
 x509_extensions = v3_req
@@ -13,7 +28,7 @@ ST = {{ controller_wildcard_state }}
 L = {{ controller_wildcard_locality }}
 O = {{ controller_wildcard_org }}
 OU = {{ controller_wildcard_org_unit }}
-CN = {{ controller_wildcard_domain }}
+CN = {{ controller_wildcard_cn }}
 
 [v3_req]
 keyUsage = nonRepudiation, digitalSignature, keyEncipherment
@@ -21,5 +36,5 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = *.{{ controller_wildcard_domain }}
-DNS.2 = {{ controller_wildcard_domain }}
+DNS.1 = *.{{ controller_wildcard_cn }}
+DNS.2 = {{ controller_wildcard_cn }}

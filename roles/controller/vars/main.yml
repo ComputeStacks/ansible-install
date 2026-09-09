@@ -1,0 +1,95 @@
+---
+# Per-az application domains and the certificate path each one gets. Role
+# vars, not defaults: they mirror the frozen contract in
+# playbooks/group_vars/all/app_domains.yml and are derivations, never
+# operator knobs. The operator inputs are `app_domain` (an optional inventory
+# HOST var on a node) and `app_wildcard_dir` (the certificate root override).
+#
+# BOTH SPELLINGS ARE FROZEN and both are LOCAL USE ONLY. They read
+# `hostvars`, so they may only ever be read on the host currently executing —
+# NEVER `hostvars[h].cs_app_domains` (docs/contracts.md rule 10). That is the
+# whole reason `cs_app_domain` itself is a trivial, hostvars-free variable in
+# group_vars: the value that has to survive a cross-host read is that one,
+# and everything derived from it is a map the rendering host indexes locally.
+# roles/controller_seed carries the same two names, derived the same way.
+# They cannot be one shared definition — a role's vars are that role's — so
+# what IS shared is the input they both build on: `cs_app_wildcard_dir`, the
+# single global spelling of the path root (see app_domains.yml). Diff the two
+# blocks whenever either changes; only the legacy branch differs, and that
+# role's own comment says why.
+#
+# THE `# noqa: var-naming[no-role-prefix]` MARKERS ARE DELIBERATE. Every
+# other variable this role owns is `controller_`-prefixed and ansible-lint's
+# production profile enforces that for a role's own vars — but these two
+# spellings are a cross-role contract, not this role's property: they are
+# frozen in docs/contracts.md and defined character-for-character identically
+# in roles/controller_seed/vars/main.yml, because the role that GENERATES a
+# certificate and the role that SLURPS it back have to agree on which domain
+# maps to which path. Prefixing them per role would give the same contract
+# two names and hide exactly the drift the contract exists to prevent. The
+# intermediate `_json` name carries the marker too, for symmetry with the
+# other role rather than out of necessity.
+
+# The domains this run must have a certificate for, deduplicated and sorted.
+#
+# `cs_new_nodes`, NOT `groups['nodes']`, for the same reason
+# roles/controller_seed derives its sites and regions from it: a host flagged
+# `existing_env` is not rendered into the manifest at all, so generating a
+# certificate for its domain would produce a pem nothing ever reads. In a
+# greenfield converge the two lists are identical.
+#
+# `| sort` is not decoration. `cs_new_nodes` is built with `difference()`,
+# which does not preserve inventory order, and this list is the loop order of
+# three tasks whose output a human reads.
+cs_app_domains: >-  # noqa: var-naming[no-role-prefix]
+  {{ (cs_new_nodes | default([])) | map('extract', hostvars, 'cs_app_domain')
+     | map('string') | list | unique | sort }}
+
+# domain -> the pem holding that domain's certificate AND key (one file,
+# which is the form haproxy wants).
+#
+# THE LEGACY CARVE-OUT IS LOAD BEARING. The default domain — every az of
+# every inventory written before per-az domains existed — keeps the exact
+# path v1 and v2 have always used, `<controller_wildcard_dir>/sharedcert.pem`.
+# It is not moved under a per-domain directory, and the reason is the seeding
+# side: `Bootstrap::Writer#rotate!` skips a credential whose DECRYPTED value
+# already matches the manifest, so generate-once at a stable path re-seeds as
+# a no-op. Move the default domain's certificate and the value genuinely
+# changes — the next converge would push a brand new certificate to every
+# load balancer in the fleet, which is precisely the fleet-wide rotation the
+# `creates:` guard exists to prevent.
+#
+# Built as JSON and parsed back, the same idiom and for the same reason as
+# playbooks/group_vars/all/sites.yml: the legacy branch needs a jinja
+# for-loop, a template carrying one renders to a string, and the round-trip
+# is what turns it back into a mapping. `to_json` on every scalar is what
+# makes an arbitrary domain safe to embed.
+cs_app_domain_cert_paths_json: >-  # noqa: var-naming[no-role-prefix]
+  {
+  {% for cs_ad in cs_app_domains %}
+  {{ cs_ad | to_json }}:
+  {{ (controller_wildcard_cert
+      if cs_ad == cs_app_zone
+      else (cs_app_wildcard_dir ~ '/' ~ cs_ad ~ '/sharedcert.pem')) | to_json }}{{ ',' if not loop.last else '' }}
+  {% endfor %}
+  }
+cs_app_domain_cert_paths: "{{ cs_app_domain_cert_paths_json | from_json }}"  # noqa: var-naming[no-role-prefix]
+
+# `cs_app_domains` minus the environment-wide zone: the domains that get a
+# directory of their own. ONE spelling for the exclusion, because two tasks
+# in two files depend on it meaning exactly the same thing — tasks/main.yml
+# creates a directory for each of these (the legacy pem sits in the root
+# instead), and tasks/attach_prep.yml generates for these and NOTHING else.
+#
+# The attach case is why the name matters. On a v1-built controller the
+# legacy path already holds the EXISTING environment's certificate: a new
+# region whose domain resolved to `cs_app_zone` would generate nothing (the
+# `creates:` guard sees that file), and controller_seed would then seed the
+# existing environment's certificate onto the new region's load balancer
+# while the manifest renders the new region's own domain — the exact bug the
+# per-az contract exists to prevent. roles/preflight fails the run before
+# that can happen; this list is the structural half of the same guarantee, so
+# that no task in attach mode can name the legacy path even if preflight were
+# skipped.
+controller_per_az_app_domains: >-
+  {{ cs_app_domains | reject('equalto', cs_app_zone | default('')) | list }}

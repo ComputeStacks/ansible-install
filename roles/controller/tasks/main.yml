@@ -64,16 +64,59 @@
       a '@', ':', '/' or '#' silently truncates the connection string.
       Generate it with `openssl rand -hex 32`.
 
-- name: Assert the tenant wildcard domain is set
+# One certificate per az, and this is the list. roles/preflight checks the
+# same values in far more detail, per host and with the operator-facing
+# explanation; this is the role-local backstop, and it is the one that runs
+# on the host that is about to write the files.
+- name: Assert every availability zone names a bare load balancer domain
   ansible.builtin.assert:
     that:
-      - (controller_wildcard_domain | default('')) | length > 0
-      - "'*' not in controller_wildcard_domain"
+      - (cs_app_domains | length) > 0
+      - cs_app_domains | select('equalto', '') | list | length == 0
+      - cs_app_domains | select('search', '[*]') | list | length == 0
     fail_msg: >-
-      cs_app_zone (or controller_wildcard_domain) must be the bare tenant zone
-      — e.g. 'usercontent.example.com', not '*.usercontent.example.com'. It is
-      the CN of the self-signed certificate every load balancer serves as its
-      shared certificate.
+      The load balancer domains this run would generate certificates for are
+      {{ cs_app_domains }}. Each must be a bare domain — e.g.
+      'az1.usercontent.example.com', not '*.az1.usercontent.example.com' and
+      not empty; the wildcard is implied and this file writes it as the SAN.
+      An empty list means no node reached this converge at all
+      (`cs_new_nodes`). Each value is that az's `app_domain` host var falling
+      back to the environment-wide `cs_app_zone`
+      (playbooks/group_vars/all/app_domains.yml), and each becomes the CN of
+      the certificate its own load balancer serves.
+
+# THE ONE PLACE BOTH SPELLINGS OF THE CERTIFICATE ROOT ARE IN SCOPE, so this
+# is where they are checked against each other.
+#
+# The per-az certificates are written under `cs_app_wildcard_dir` — a global
+# (playbooks/group_vars/all/app_domains.yml), because roles/controller_seed
+# has to read them back and this role's defaults are not in scope in the
+# seeding play. The legacy `cs_app_zone` certificate keeps deriving from
+# `controller_wildcard_dir` here, and must, because moving it would change
+# the value `Bootstrap::Writer#rotate!` compares and re-seed a fresh
+# certificate onto every load balancer in the fleet.
+#
+# Two roots that are equal by default is exactly the arrangement that breaks
+# quietly: an operator who moves `controller_data_dir` moves the legacy
+# certificate and the directory this role creates, while controller_seed goes
+# on reading `/var/lib/computestacks/.ssl_wildcard/...` — its slurp fails, or
+# worse finds a leftover file from before the move. Nothing about the failure
+# would name `app_wildcard_dir`, so this assert does.
+- name: Assert the wildcard certificate root has one spelling
+  ansible.builtin.assert:
+    that:
+      - cs_app_wildcard_dir == controller_wildcard_dir
+    fail_msg: >-
+      cs_app_wildcard_dir is '{{ cs_app_wildcard_dir }}' but
+      controller_wildcard_dir is '{{ controller_wildcard_dir }}'. The per-az
+      certificates are written under the first and read back by
+      roles/controller_seed from the first, while the legacy
+      {{ cs_app_zone }} certificate lives under the second — so the two must
+      name the same directory. You have moved `controller_data_dir` (or
+      `controller_wildcard_dir` itself); set the operator override
+      `app_wildcard_dir` to '{{ controller_wildcard_dir }}' to match. It is
+      read in playbooks/group_vars/all/app_domains.yml and is in scope in
+      every play, which this role's defaults are not.
 
 - name: Create the controller directory layout
   ansible.builtin.file:
@@ -93,9 +136,24 @@
     - {path: "{{ controller_backups_dir }}", mode: "0700"}
     - {path: "{{ controller_branding_dir }}", mode: "0755"}
     - {path: "{{ controller_proxy_ips_dir }}", mode: "0755"}
+    # The certificate root. The legacy `cs_app_zone` pem sits directly in it;
+    # every other domain gets its own subdirectory, created below.
     - {path: "{{ controller_wildcard_dir }}", mode: "0700"}
   loop_control:
     label: "{{ item.path }}"
+
+# One directory per az, 0700, holding that domain's pem and the openssl
+# config that produced it. The legacy domain is skipped: its pem is
+# `<controller_wildcard_dir>/sharedcert.pem`, in the root created above, and
+# it stays there (see vars/main.yml — moving it re-seeds the whole fleet).
+- name: Create a directory for each availability zone's wildcard certificate
+  ansible.builtin.file:
+    path: "{{ cs_app_wildcard_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: "{{ controller_per_az_app_domains }}"
 
 - name: Generate the application ssh keypair
   community.crypto.openssh_keypair:
@@ -108,19 +166,35 @@
     regenerate: never
     state: present
 
-- name: Write the self-signed wildcard openssl config
+# The config file lives beside the pem it produces, which is what makes ONE
+# expression serve both layouts: `| dirname` of the legacy
+# `<controller_wildcard_dir>/sharedcert.pem` IS the root, so this renders the
+# legacy config to `controller_wildcard_config` — the exact path an
+# already-built controller already has, from the same two defaults.
+- name: Write each availability zone's wildcard openssl config
   ansible.builtin.template:
     src: ssl_wildcard.cnf.j2
-    dest: "{{ controller_wildcard_config }}"
+    dest: "{{ cs_app_domain_cert_paths[item] | dirname }}/{{ controller_wildcard_config_name }}"
     owner: root
     group: root
     mode: "0600"
+  loop: "{{ cs_app_domains }}"
+  vars:
+    # The template's CN and `*.` SAN. Passed as a named task var rather than
+    # left to `item`, so the template states its own contract and attach mode
+    # can render it from a different loop over a different list.
+    controller_wildcard_cn: "{{ item }}"
 
-# GENERATE-ONCE. `creates:` is the whole point: v1 regenerated this on every
+# GENERATE-ONCE, PER DOMAIN. `creates:` is the whole point and the per-domain
+# path is the other half of it: v1 regenerated its one certificate on every
 # run, and under v2's convergent rule that would hand every load balancer in
-# the fleet a new shared certificate on every converge. Key and certificate
-# go into ONE pem, which is the form haproxy wants.
-- name: Generate the self-signed tenant wildcard certificate (once)
+# the fleet a new shared certificate on every converge. A single `creates:`
+# guard on a path with no domain in it would have been just as wrong in the
+# other direction — the first az to converge would have won the file, and
+# every other az would have been seeded with a certificate for the first
+# az's name. Key and certificate go into ONE pem, which is the form haproxy
+# wants.
+- name: Generate each availability zone's self-signed wildcard certificate (once)
   ansible.builtin.command:
     argv:
       - openssl
@@ -133,21 +207,25 @@
       - "rsa:{{ controller_wildcard_key_bits }}"
       - -sha256
       - -keyout
-      - "{{ controller_wildcard_cert }}"
+      - "{{ cs_app_domain_cert_paths[item] }}"
       - -out
-      - "{{ controller_wildcard_cert }}"
+      - "{{ cs_app_domain_cert_paths[item] }}"
       - -config
-      - "{{ controller_wildcard_config }}"
+      - "{{ cs_app_domain_cert_paths[item] | dirname }}/{{ controller_wildcard_config_name }}"
       - -extensions
       - v3_req
-    creates: "{{ controller_wildcard_cert }}"
+    creates: "{{ cs_app_domain_cert_paths[item] }}"
+  loop: "{{ cs_app_domains }}"
 
-- name: Restrict the wildcard certificate (it carries the private key)
+# openssl writes the key with whatever the process umask allows; this is what
+# makes it 0600. Idempotent — the mode is already right on every later pass.
+- name: Restrict each wildcard certificate (it carries the private key)
   ansible.builtin.file:
-    path: "{{ controller_wildcard_cert }}"
+    path: "{{ cs_app_domain_cert_paths[item] }}"
     owner: root
     group: root
     mode: "0600"
+  loop: "{{ cs_app_domains }}"
 
 # `docker login` for a private controller image repo is NOT done here. It is
 # roles/docker_config's job, in the earlier "Docker hosts" play, because the

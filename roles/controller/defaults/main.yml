@@ -45,9 +45,33 @@ controller_seed_default_branding: true
 # lists are re-fetched into a throwaway container filesystem on every restart.
 controller_proxy_ips_dir: "{{ controller_data_dir }}/proxy_ips"
 
+# THE LEGACY certificate paths, and only those. They are the path the
+# environment-wide `cs_app_zone` gets — every az of every inventory written
+# before per-az domains existed — and they keep the exact spelling v1 and v2
+# have always used, because `Bootstrap::Writer#rotate!` compares the
+# DECRYPTED credential and moving this file would push a brand new
+# certificate to every load balancer in the fleet on the next converge.
+#
+# A per-az domain's certificate does NOT derive from these. It lives at
+# `<cs_app_wildcard_dir>/<domain>/sharedcert.pem`, rooted on the ONE global
+# spelling in playbooks/group_vars/all/app_domains.yml, because
+# roles/controller_seed has to read the same path back and none of the names
+# below are in scope in the seeding play. tasks/main.yml asserts that
+# `cs_app_wildcard_dir` and `controller_wildcard_dir` still agree — this role
+# is the only place both are in scope — so an operator who moves
+# `controller_data_dir` is told to set `app_wildcard_dir` too rather than
+# quietly ending up with certificates written to one root and read from
+# another.
 controller_wildcard_dir: "{{ controller_data_dir }}/.ssl_wildcard"
 controller_wildcard_cert: "{{ controller_wildcard_dir }}/sharedcert.pem"
-controller_wildcard_config: "{{ controller_wildcard_dir }}/selfwildcard.conf"
+# Every certificate's openssl config sits beside the pem it produced, under
+# this name — the legacy one in the root, a per-az one in that domain's
+# directory. tasks/main.yml and tasks/attach_prep.yml both spell it
+# `<that domain's pem> | dirname` + this, so the two layouts need one
+# expression and `controller_wildcard_config` below cannot drift away from
+# what the legacy domain actually gets.
+controller_wildcard_config_name: selfwildcard.conf
+controller_wildcard_config: "{{ controller_wildcard_dir }}/{{ controller_wildcard_config_name }}"
 
 controller_env_file: /etc/default/computestacks
 controller_db_sentinel: "{{ controller_data_dir }}/.db_provisioned"
@@ -55,15 +79,34 @@ controller_docker_cert_state_file: "{{ controller_data_dir }}/.docker_cert.sha25
 controller_bin: /usr/local/bin/cstacks
 controller_completion_file: /etc/bash_completion.d/cstacks
 
-# --- self-signed tenant wildcard -----------------------------------------
+# --- self-signed tenant wildcards, one per availability zone ---------------
 # The LoadBalancer `shared_certificate` input (manifest
 # locations[].regions[].load_balancer.shared_certificate, Wave 4I). Cert and
 # key are written into ONE pem, which is the form haproxy wants.
 #
-# GENERATE-ONCE (`creates:`). v1 regenerated this on every run; under v2's
-# convergent-by-default rule that would rotate the shared certificate on every
-# converge and roll it out to every load balancer in the fleet.
-controller_wildcard_domain: "{{ cs_app_zone }}"
+# GENERATE-ONCE, PER DOMAIN (`creates:` on that domain's own path). v1
+# regenerated its single certificate on every run; under v2's
+# convergent-by-default rule that would rotate the shared certificate on
+# every converge and roll it out to every load balancer in the fleet.
+#
+# THERE IS NO `controller_wildcard_domain` ANY MORE, and its absence is the
+# feature. It was the one environment-wide CN; every az now has its own load
+# balancer domain (`app_domain` -> `cs_app_domain`,
+# playbooks/group_vars/all/app_domains.yml) and its own certificate, and the
+# CN of each is the loop item in tasks/main.yml. Keeping it alive as a
+# "single-domain override" would have been a silent CN/domain mismatch: the
+# manifest's load balancer `domain` comes from `cs_app_domain`, which knows
+# nothing about it, so the override would have moved every certificate's CN
+# and left every rendered domain exactly where it was — every load balancer
+# in the fleet serving a certificate for a name it does not answer on.
+#
+# roles/preflight fails the run when an inventory still sets it. That check
+# can only see inventory and extra vars — role defaults are not in scope in
+# preflight's play — which is why the default had to be DELETED here rather
+# than documented as deprecated. A default left in place is a value that is
+# always set, and preflight would never have seen it.
+#
+# The remaining knobs below apply to every domain's certificate alike.
 controller_wildcard_days: 3650
 controller_wildcard_key_bits: 2048
 controller_wildcard_country: US
