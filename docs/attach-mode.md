@@ -158,13 +158,13 @@ manifest with `DRY_RUN=1` first, prints what it would create plus any drift
 warnings, and pauses for you to read it. That is the last point before
 anything is written to the controller's database.
 
-**The `DRY_RUN` pass itself is unconditional and cannot be switched off.** It
-is the input to gate G, which fails the run when the preview reports drift on
-a load balancer's `domain` — the apply rotates a load balancer's certificate
-on an existing row but never rewrites its domain, so a manifest that disagrees
-would hand a live load balancer a certificate whose CN no longer matches the
-name it still serves. A gate whose input never ran passes without checking
-anything, so the preview always runs. `DRY_RUN=1` writes nothing.
+**On an attach run the `DRY_RUN` pass cannot be switched off.** It is the
+input to gate G, which fails the run when the preview reports drift on a load
+balancer's `domain` — the apply rotates a load balancer's certificate on an
+existing row but never rewrites its domain, so a manifest that disagrees would
+hand a live load balancer a certificate whose CN no longer matches the name it
+still serves. A gate whose input never ran passes without checking anything,
+so no output flag is allowed to skip the pass. `DRY_RUN=1` writes nothing.
 
 The two opt-outs govern only the human-facing half:
 `controller_seed_confirm: false` skips the prompt in CI (the `pause` module

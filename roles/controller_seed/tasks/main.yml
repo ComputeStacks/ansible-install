@@ -358,30 +358,34 @@
       diff: false
       no_log: true
 
-    # UNCONDITIONAL, and the `when:` this task used to carry is the reason.
+    # The preview gates two deliberate-operation paths: any apply against an
+    # existing environment, and any run with the address-update flag on (an
+    # address rewrite is a topology change and deserves eyes even greenfield).
+    # A greenfield converge has no rows to drift from and does not pay for it.
     #
-    # The preview began life as the operator-facing half of two deliberate
-    # operations -- an apply against an existing environment, and any run with
-    # the address-update flag on -- so it ran only for those, and only when
-    # `controller_seed_dry_run_first` was left true. Gate G below then reads
-    # its output, and a gate that reads a task which did not run does not fail:
-    # it passes, silently, having checked nothing.
+    # NOT gated on `controller_seed_dry_run_first`, which this task used to
+    # carry as well. That flag is the human-OUTPUT knob -- docs/automation.md
+    # calls the preview "for humans" and CI sets it false to keep the diff out
+    # of a log -- while gate G below reads this task's registered result. A
+    # gate whose input is switched off by an output-formatting flag does not
+    # fail: it passes, silently, having checked nothing. So the flag now
+    # governs the DISPLAY only, and the scan it feeds runs whenever the run
+    # could touch an existing row.
     #
-    # Both skips cover the case the gate exists FOR. A v2 environment that has
-    # already converged has nothing flagged `existing_env` -- it is a
-    # greenfield inventory that happens to have been applied once -- so an
-    # operator who adds `app_domain` to those nodes and re-runs would have got
-    # no preview, no gate, and a certificate rotated onto every load balancer
-    # whose domain the apply will not touch. `dry_run_first: false`, the flag
-    # reached for to skip the prompt in CI, removed the gate the same way.
-    #
-    # So the PREVIEW is now a safety scan that always runs, and the PAUSE below
-    # keeps the deliberate-operation gating it always had. DRY_RUN=1 writes
-    # nothing (the apply is one transaction and the preview rolls it back), so
-    # the cost of the split is one extra read-only `cstacks seed` on a
-    # greenfield converge, which buys the only automated check that stands
-    # between a stale `app_domain` and nine mismatched tenant certificates.
-    - name: Preview the apply (DRY_RUN) -- always, so gate G has something to read
+    # Known limit, accepted deliberately: a v2 environment that has already
+    # converged has nothing flagged `existing_env` -- it is a greenfield
+    # inventory that happens to have been applied once -- so it gets no
+    # preview and no gate. What that misses is a `shared_certificate` rotated
+    # onto a load balancer whose domain the apply will not change. Survivable
+    # where it matters: production runs `le` on, and
+    # `LoadBalancer#deployable_shared_certificate` (load_balancer.rb:158)
+    # serves the LetsEncrypt bundle whenever it is active, so the rotated
+    # column is a dormant fallback rather than the certificate tenants get --
+    # wrong only on the day a renewal fails. Closing the hole properly means
+    # asking the controller whether any load balancer rows exist (a `cstacks
+    # runner` one-liner) rather than making every greenfield converge pay for
+    # a second full apply.
+    - name: Preview the apply against the existing controller (DRY_RUN)
       ansible.builtin.command:
         argv:
           - "{{ controller_seed_cstacks_bin }}"
@@ -392,19 +396,15 @@
         UPDATE_ADDRESSES: "{{ '1' if controller_seed_update_addresses | bool else '0' }}"
       register: controller_seed_dry_run
       changed_when: false
+      when: (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
 
-    # The DISPLAY keeps the gating the preview used to carry, so a greenfield
-    # converge does not start dumping a diff it never printed before, and
-    # `controller_seed_dry_run_first: false` still means what
-    # docs/automation.md says it means -- "the preview is for humans", no
-    # human-facing output in CI. What it no longer does is remove gate G:
-    # the gate reads the registered result, not this task, and its own
-    # fail_msg carries the drifted lines an operator needs.
+    # `controller_seed_dry_run_first: false` keeps the diff out of a CI log
+    # without disarming gate G above. When the preview was skipped entirely
+    # there is no `stdout_lines` and the length test skips this too.
     - name: Show what the apply would change
       ansible.builtin.debug:
         var: controller_seed_dry_run.stdout_lines
       when:
-        - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
         - controller_seed_dry_run_first | bool
         - (controller_seed_dry_run.stdout_lines | default([])) | length > 0
 
@@ -437,15 +437,12 @@
     # -- production's rows were created by v1 with their correct per-region
     # domains already.
     #
-    # It fires on EVERY run, greenfield included, because the preview above is
-    # unconditional. An earlier draft of this gate ran only where the preview
-    # did -- attach mode, or a run with the address flag -- on the reasoning
-    # that greenfield has no existing rows to drift from. That reasoning is
-    # wrong, and the case it misses is the one the gate exists for: a v2
-    # environment that has already converged has nothing flagged
-    # `existing_env`, so it is still a greenfield inventory, and an operator
-    # who adds `app_domain` to its nodes and re-runs would have got no preview
-    # and no gate. See the preview task for the full argument.
+    # It fires wherever the preview above runs -- attach mode, or a run with
+    # the address flag -- which is every path that can reach an existing row
+    # through this role. It is deliberately NOT tied to
+    # `controller_seed_dry_run_first`, so turning the diff off in CI does not
+    # turn the gate off with it. See the preview task for what that leaves
+    # uncovered and why that residue is acceptable.
     - name: Find any load balancer domain drift in the preview
       # `Recorder#drift` prints a subject line and then one line per changed
       # attribute (recorder.rb, `drift`):

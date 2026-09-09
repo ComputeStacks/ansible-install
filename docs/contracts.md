@@ -281,10 +281,17 @@ name it still serves. Changing an existing load balancer's domain is
 deliberately **out of scope** and stays a controller-side, human-operated
 action.
 
-`roles/controller_seed` therefore runs `DRY_RUN=1` **unconditionally** and
+`roles/controller_seed` therefore runs `DRY_RUN=1` on every path that can
+reach an existing row — attach mode, or a run with the address flag — and
 fails the run when the preview reports drift on a load balancer's `domain`
 (gate G). `controller_seed_dry_run_first` governs only whether that preview is
-PRINTED; it can no longer switch the gate off.
+PRINTED; it cannot switch the gate off.
+
+A converged environment re-run without `existing_env` gets neither preview nor
+gate. That residue is accepted: production load balancers run `le`, and
+`LoadBalancer#deployable_shared_certificate` serves the LetsEncrypt bundle
+while it is active, so the rotated `shared_certificate` is a dormant fallback
+rather than the certificate tenants receive.
 
 **Operator remediation when gate G fires:** change that load balancer's domain
 in the admin UI first, then re-run the seed. Do not edit the inventory to

@@ -40,7 +40,9 @@ template that drifted from the controller's models across releases.
    `diff: false` + `no_log` (it carries the admin password, the DNS API keys,
    the client credentials, the stats password and the load balancer's private
    key).
-5. Runs `DRY_RUN=1 cstacks seed` — **always**, because gate G reads it — and
+5. Runs `DRY_RUN=1 cstacks seed` in attach mode, or with
+   `controller_seed_update_addresses` — the paths that can reach an existing
+   row — and
    **fails the run if the preview reports drift on a load balancer `domain`**
    (see "Create-only, and the domain gate"). In attach mode, or with
    `controller_seed_update_addresses`, it also prints what it would create,
@@ -281,14 +283,22 @@ own change log, and tells the operator to change the domain in the admin UI
 first (or to correct `app_domain` to match what the database already holds).
 The role will not do it for them.
 
-The gate fires on **every** run, because the `DRY_RUN` preview it reads is
-unconditional. Greenfield is not exempt, and that is the whole point: an
-environment that has already converged still has nothing flagged
-`existing_env`, so it is a greenfield inventory with live rows behind it, and
-that is exactly where adding `app_domain` to a node would otherwise rotate a
-certificate onto a load balancer whose domain the apply will not touch.
-`controller_seed_dry_run_first` governs only whether the preview is
-*printed*. **Changing the domain of an existing
+The gate fires wherever the preview runs — attach mode, or a run with the
+address flag — and is deliberately not tied to
+`controller_seed_dry_run_first`, which governs only whether the preview is
+*printed*: turning the diff off in CI must not turn the gate off with it.
+
+One case is left uncovered on purpose. An environment that has already
+converged has nothing flagged `existing_env`, so it is a greenfield inventory
+with live rows behind it, and adding `app_domain` to one of its nodes rotates
+a certificate onto a load balancer whose domain the apply will not touch. That
+is survivable where it matters: production runs `le` on, and
+`LoadBalancer#deployable_shared_certificate` serves the LetsEncrypt bundle
+whenever it is active, leaving the rotated `shared_certificate` a dormant
+fallback rather than the certificate tenants receive — wrong only on the day a
+renewal fails. Closing it properly means asking the controller whether any
+load balancer rows exist, not making every greenfield converge pay for a
+second full apply. **Changing the domain of an existing
 load balancer is out of scope for the provisioner**, and this is a guard
 against a future mistake rather than a migration tool: production's rows were
 created by v1 with their correct per-region domains already.
@@ -334,17 +344,15 @@ be set **and to differ from `cs_app_zone`** for this reason — setting it
 *equal* would select the legacy path, generate nothing, and reproduce the bug
 while passing the check.
 
-**Every** run makes a `DRY_RUN=1` pass first, and it cannot be switched off:
-gate G reads its output, and a gate whose input never ran passes without
-checking anything. `DRY_RUN=1` writes nothing (the apply is one transaction
-and the preview rolls it back), so the cost on a greenfield converge is one
-extra read-only `cstacks seed`.
+An attach run makes a `DRY_RUN=1` pass first, as does a run with
+`controller_seed_update_addresses`. `DRY_RUN=1` writes nothing — the apply is
+one transaction and the preview rolls it back.
 
-What is gated is the human-facing half. The diff is PRINTED, and the run
-`pause`s, on an attach run or a run with `controller_seed_update_addresses`.
-Set `controller_seed_confirm: false` in CI (the pause module needs a tty);
+What the flags gate is the human-facing half. Set
+`controller_seed_confirm: false` in CI (the pause module needs a tty);
 `controller_seed_dry_run_first: false` stops the diff being printed. Neither
-flag disables gate G.
+flag disables gate G, which reads the preview's registered result rather than
+the printed output.
 
 ## Variables
 
@@ -353,7 +361,7 @@ flag disables gate G.
 | `controller_seed_manifest_path` | `/var/lib/computestacks/manifest.yml` | root 0600; deleted after a successful apply. |
 | `controller_seed_remove_manifest` | `true` | Set false to keep the rendered document (it carries secrets). |
 | `controller_seed_full_manifest` | `false` | Attach mode: render the global sections too. |
-| `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Whether the preview is PRINTED, and whether the run pauses — both only in attach mode or on a run with the address flag below. Neither controls whether the `DRY_RUN` pass RUNS: it is unconditional, because gate G reads it. |
+| `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Whether the preview is PRINTED, and whether the run pauses. The `DRY_RUN` pass itself RUNS in attach mode or with the address flag below, regardless of either — gate G reads it, so an output flag must not disarm it. |
 | `controller_seed_update_addresses` | `false` | **Deliberate topology changes only.** Runs the apply with `UPDATE_ADDRESSES=1`: `region.acme_server`, `node.agent_host` (incl. clearing) and the DNS driver endpoint are updated on existing rows, reported as `[readdress]` lines. Full run or warm fact cache only; the new path must already be up — the controller dials the new address on its next call. |
 | `controller_seed_registry_node` | first registry host's `primary_ip` | `Setting.registry_node`. Empty ⇒ the registry settings are omitted. |
 | `controller_seed_cr_le` | `{{ cs_registry_domain }}` | `Setting.cr_le`. |

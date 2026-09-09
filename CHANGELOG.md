@@ -30,11 +30,12 @@
   domain it cannot change.** The apply writes a load balancer's
   `shared_certificate` on an existing row but only *reports* its `domain`, so
   a stale manifest would leave a live load balancer serving a certificate for
-  a name it no longer answers on. The `DRY_RUN` preview is now unconditional
-  and the run fails when it reports drift on a load balancer domain;
+  a name it no longer answers on. The `DRY_RUN` preview runs on every path
+  that can reach an existing row — attach mode, or a run with the address
+  flag — and the run fails when it reports drift on a load balancer domain.
   `controller_seed_dry_run_first` governs only whether the preview is
-  printed. Changing an existing load balancer's domain stays a
-  controller-side, human-operated action.
+  printed, and no longer disarms the check. Changing an existing load
+  balancer's domain stays a controller-side, human-operated action.
 * **`validate` closes the loop against reality.** A new `lb_domain` check
   reads back the controller's own asynchronous verdict — that the load
   balancer reached `domain_valid`, and that its domain matches its
