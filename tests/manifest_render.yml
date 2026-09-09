@@ -1,0 +1,188 @@
+---
+# Does the bootstrap manifest actually RENDER? — the check neither
+# --syntax-check nor tests/site_contract.yml can do.
+#
+#   ansible-playbook -c local -i inventories/example        tests/manifest_render.yml
+#   ansible-playbook -c local -i tests/fixtures/single-site  tests/manifest_render.yml
+#
+# (both are run by `make check`)
+#
+# WHY THIS EXISTS. roles/controller_seed renders
+# templates/manifest.yml.j2 in the middle of a converge, from a `slurp` of a
+# certificate that only exists on a controller this repository has already
+# built. So the single most consequential template in the repository — the
+# document that creates every Location, Region, Node, network and load
+# balancer row — could only ever be exercised against a live host, and a
+# change to it was reviewable only by reading it. This play renders it with
+# no controller, no connection and no secrets beyond what the two shipped
+# sample inventories already carry in cleartext, which makes "render it
+# before and after, and diff" a thing a reviewer can actually do:
+#
+#   git stash / worktree the tree at the base commit, then
+#   ansible-playbook -c local -i inventories/example tests/manifest_render.yml \
+#     -e manifest_render_out=/tmp/baseline-example.yml
+#   ...and the same again on the changed tree, and diff the two files.
+#
+# `manifest_render_out` is the ONLY way to get the bytes: the debug below
+# prints the document a line at a time for a human, which is not
+# something to diff.
+#
+# THIS PLAY PRINTS THE RENDERED MANIFEST, AND THE MANIFEST CARRIES SECRETS —
+# the admin password, the DNS API keys, the metric/log client credentials and
+# the haproxy stats password. That is deliberate and it is safe HERE: the two
+# inventories `make check` runs it against ship unencrypted CHANGEME samples
+# (docs/contracts.md rule 6). Point it at a real environment and you have
+# printed that environment's secrets to your terminal and, with
+# `manifest_render_out`, to a file. roles/controller_seed itself carries
+# `no_log: true` on every one of these tasks for exactly that reason.
+#
+# `tests/group_vars` is a SYMLINK to `playbooks/group_vars`, and this play
+# depends on it as much as tests/site_contract.yml does: the template reads
+# `cs_new_nodes`, `cs_site_metrics_domains` and `cs_site_metrics_credentials`,
+# and the site maps are built from `map('extract', hostvars, 'cs_site')` — as
+# play `vars_files:` they would collapse to Undefined (docs/contracts.md
+# §Variable scope). See tests/roles.yml for the full account.
+#
+# WHAT IS STUBBED, AND WHAT IS NOT. Exactly one input is faked: the
+# certificate `roles/controller_seed` slurps off the controller. Everything
+# else — every default, every role var, every derivation — is loaded from the
+# role's own files, so a change to any of them is visible here. Two
+# consequences worth knowing before you trust a diff:
+#
+#   * `include_vars` outranks inventory group_vars, so an inventory that
+#     overrode a `controller_seed_*` knob would be ignored by this play and
+#     honoured by a real converge. Neither shipped inventory does; if one ever
+#     does, this play stops being a faithful render for it.
+#   * The role's own tasks are NOT run. The assertions in
+#     roles/controller_seed/tasks/main.yml are not exercised here, and any
+#     value that role computes with `set_fact` rather than in defaults/ or
+#     vars/ has to be stubbed below or the render fails with an undefined
+#     variable. That failure is the point at which you add the stub — do not
+#     "fix" it by pointing the lookup somewhere else.
+# A play whose `hosts:` matches nothing prints "skipping: no hosts matched"
+# and carries on, and the run still ends green -- the same failure mode the
+# `--limit region_*` note in the Makefile is about. Everything below is one
+# play on `controller`, so without this the whole harness could quietly stop
+# testing anything at all.
+- name: Assert this inventory has a controller for the manifest play to run on
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: There is exactly one controller
+      ansible.builtin.assert:
+        that:
+          - (groups['controller'] | default([])) | length == 1
+        fail_msg: >-
+          groups['controller'] has
+          {{ (groups['controller'] | default([])) | length }} hosts, so the
+          render play below would match no host and this harness would pass
+          without rendering anything. roles/preflight asserts the same thing
+          for a real converge.
+        success_msg: "groups['controller'] has exactly one host to render on"
+        quiet: true
+
+- name: Render the bootstrap manifest with no controller to render it on
+  hosts: controller
+  gather_facts: false
+  vars:
+    # Written only when the operator asks for it, so the play has no side
+    # effect under `make check`. See the capture recipe in the header.
+    manifest_render_out: ""
+
+    # The one stub. roles/controller_seed builds `controller_seed_shared_certificates`
+    # -- domain -> pem -- from a slurp per load balancer domain of the
+    # self-signed wildcards roles/controller generates (cert AND key in one
+    # file, which is the form haproxy wants), so the shape that matters is
+    # "a multi-line pem-ish string that survives `| trim | indent(12, true)`".
+    # Deliberately not a real key, and deliberately fixed text: the baseline
+    # diff described in the header is worthless if this value moves between
+    # runs. ONE pem text for every domain, on purpose -- a per-domain stub
+    # would make the diff show which az got which certificate, and what this
+    # harness can actually prove is that the template indexes the map by the
+    # right key, which an undefined-key error proves loudly and for free.
+    manifest_render_stub_certificate: |
+      -----BEGIN CERTIFICATE-----
+      STUB — tests/manifest_render.yml, not a certificate
+      -----END CERTIFICATE-----
+      -----BEGIN PRIVATE KEY-----
+      STUB — tests/manifest_render.yml, not a key
+      -----END PRIVATE KEY-----
+  tasks:
+    # From the role's own files, by path: `include_role` would run the role's
+    # tasks (which reach a controller), and copying the values here would be
+    # one more thing to keep in step with a role that changes.
+    - name: Load roles/controller_seed's defaults and vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/controller_seed/{{ item }}/main.yml"
+      loop:
+        - defaults
+        - vars
+      loop_control:
+        label: "roles/controller_seed/{{ item }}/main.yml"
+
+    # Keyed off `cs_app_domain_cert_paths` rather than off `cs_app_domains`,
+    # even though the two have identical keys by construction. Those are the
+    # paths the role slurps, so keying the stub on them makes THIS harness
+    # evaluate the path derivation -- and the path root `cs_app_wildcard_dir`
+    # is a global the seeding play has to have in scope. Key the stub on the
+    # domain list instead and a broken or out-of-scope path map renders green
+    # here and fails on a live controller, which is the exact class of bug
+    # this file exists to catch. It costs nothing: the paths themselves are
+    # never opened.
+    - name: Stand in for the certificates roles/controller_seed slurps
+      ansible.builtin.set_fact:
+        controller_seed_shared_certificates: >-
+          {{ dict((cs_app_domain_cert_paths.keys() | list)
+                  | product([manifest_render_stub_certificate])) }}
+
+    # The same `lookup('template')` roles/controller_seed uses, with the path
+    # spelled out because this play is not in role context and the role's
+    # templates/ directory is therefore not on the search path.
+    - name: Render the manifest in memory
+      ansible.builtin.set_fact:
+        manifest_render_content: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/controller_seed/templates/manifest.yml.j2') }}
+
+    # Deliberately the same four conditions roles/controller_seed asserts
+    # before it writes the file. A template that renders but produces a
+    # document the apply would reject on its first line is not a pass, and the
+    # apply treats an unknown top-level key as a hard error, never a warning.
+    - name: Assert the rendered manifest parses and carries only schema-1 sections
+      ansible.builtin.assert:
+        that:
+          - (manifest_render_content | from_yaml) is mapping
+          - (manifest_render_content | from_yaml).schema_version == 1
+          - ((manifest_render_content | from_yaml).keys() | list
+             | difference(controller_seed_schema_sections)) | length == 0
+          - ((manifest_render_content | from_yaml).locations | default([])) | length > 0
+        fail_msg: >-
+          The rendered manifest is not a schema_version 1 document: it either
+          does not parse as a YAML mapping, carries a top-level key the apply
+          does not know, or has no locations. Same assertion, same wording, as
+          roles/controller_seed/tasks/main.yml — if it fires here it would
+          have failed a converge too.
+        success_msg: >-
+          manifest renders and parses:
+          {{ ((manifest_render_content | from_yaml).locations | default([])) | length }}
+          location(s),
+          {{ (manifest_render_content | from_yaml).keys() | list | sort | join(', ') }}
+        quiet: true
+
+    # Split, so the default callback prints one manifest line per output line
+    # instead of a single string full of \n escapes. Printing the document IS
+    # the point of the play — see the secrets note in the header.
+    - name: Show the rendered manifest
+      ansible.builtin.debug:
+        msg: "{{ manifest_render_content.split('\n') }}"
+
+    - name: Write the rendered manifest for a byte-for-byte comparison
+      ansible.builtin.copy:
+        content: "{{ manifest_render_content }}"
+        dest: "{{ manifest_render_out }}"
+        mode: "0600"
+      delegate_to: localhost
+      # A secrets-bearing document (sample secrets here, real ones against a
+      # real inventory): 0600, and never through --diff.
+      diff: false
+      when: (manifest_render_out | length) > 0

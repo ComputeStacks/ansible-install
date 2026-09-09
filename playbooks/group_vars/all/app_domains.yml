@@ -1,0 +1,126 @@
+---
+# THE per-az application domain contract (frozen). Every availability zone has
+# its own load balancer, and in a real estate every one of those load
+# balancers answers on a DIFFERENT domain — the name tenant containers are
+# published under (`<container>.<domain>`) and the CN of the wildcard
+# certificate that load balancer serves.
+#
+# v1 had two variables for this and v2 collapsed them into one:
+# `cs_app_url` was the load balancer's domain and the certificate CN, per run,
+# and `cs_app_zone` was — in v1's own words — "the zone name for cs_app_url".
+# The merge is the bug this file un-does. `cs_app_zone` keeps the meaning it
+# has today and stays environment-wide: ONE parent `Dns::Zone`, one
+# `pdnsutil create-zone`, one entry in the manifest's `dns.zones` list. Nothing
+# in roles/powerdns or roles/validate changes. What splits off is the per-az
+# half — the load balancer domain — and that is `app_domain`.
+#
+# `app_domain` is an OPTIONAL inventory HOST var on a node. Nothing here
+# assigns it (the registries.yml rule, and the same reason sites.yml does not
+# assign `site`): playbook group_vars outrank inventory group_vars, so a
+# default written here would silently discard what the inventory said. An
+# inventory that sets it nowhere — which is every inventory that predates this
+# file, including tests/fixtures/single-site — gets `cs_app_zone` for every
+# node and renders exactly what it rendered before, byte for byte.
+#
+# ONE PARENT ZONE SERVES EVERY DOMAIN BENEATH IT, and that is not an
+# assumption: the controller's LetsEncryptAuth#dns_zone walks UP from the
+# container FQDN — the last 2 labels, then 3, then 4, then 5 — and takes the
+# first exact Dns::Zone match. The broadest match that exists wins, so a zone
+# of `usercontent.example.com` answers for `az1.usercontent.example.com` and
+# every other domain under it. roles/preflight asserts both halves of what
+# that walk needs: every `app_domain` is at or under `cs_app_zone`, and
+# `cs_app_zone` is 2–5 labels so the walk can reach it at all. A domain that
+# fails either is not an install failure — it is a tenant wildcard certificate
+# that silently never issues, weeks later.
+
+# ---------------------------------------------------------------------------
+# Cross-host safe (no `hostvars` reference)
+# ---------------------------------------------------------------------------
+
+# `cs_app_domain` is deliberately trivial, for exactly the reason `cs_site` is
+# (docs/contracts.md §Variable scope, hard rule 10). It references ONLY the
+# plain inventory host var `app_domain` and the environment-wide
+# `cs_app_zone`, so it is safe to read as `hostvars[h].cs_app_domain` from any
+# rendering host, for any host in the inventory, in or out of the current
+# `--limit`. That cross-host read is not a nicety here: the manifest is
+# rendered ON THE CONTROLLER and needs every node's load balancer domain, so
+# this is the one value in the whole feature that must survive it. Anything
+# that needs `hostvars` becomes a map the rendering host indexes locally —
+# which is why the domain -> certificate-path maps live in
+# roles/controller/vars/ and roles/controller_seed/vars/ and NOT here. That
+# is the `hostvars` half of the reason; the other half is one single map
+# entry, and it is spelled out under `cs_app_wildcard_dir` below. The per-az
+# paths need nothing this file does not have.
+#
+# `default(..., true)` — the second argument — is load bearing. A plain
+# `default()` only fires on Undefined, so `app_domain: ""` in an inventory
+# would render a BLANK load balancer domain: the manifest would carry
+# `domain: ""`, and the controller's ValidateDomainWorker returns early on a
+# blank domain rather than complaining, so the load balancer would sit there
+# permanently un-validated with nothing anywhere saying why. Empty is a
+# mistake, not a value; it means "unset" and takes the zone.
+cs_app_domain: "{{ app_domain | default(cs_app_zone, true) }}"
+
+# ---------------------------------------------------------------------------
+# Where the per-az certificates live. Cross-host safe (no `hostvars`).
+# ---------------------------------------------------------------------------
+
+# The ROOT of the per-az wildcard certificate paths, and it has exactly ONE
+# spelling because two roles must agree on it byte for byte: roles/controller
+# GENERATES `<cs_app_wildcard_dir>/<domain>/sharedcert.pem` and
+# roles/controller_seed SLURPS that file back to fill the load balancer's
+# `shared_certificate`. A root spelled once in each role is two literals that
+# drift, and the drift is silent in the worst way — the seed finds no file
+# (or, on a re-run, a stale one) and the load balancer ends up serving a
+# certificate for a name it does not answer on.
+#
+# It lives HERE rather than in either role, because it has to be in scope in
+# every play that touches it and neither role's paths are: the
+# `controller_wildcard_dir` default is not in scope in the "Seed controller"
+# play (playbooks/site.yml), and add-region.yml never runs roles/controller's
+# main.yml at all. The repository already knew this —
+# roles/controller_seed/defaults/main.yml carries a hard-coded
+# `| default('/var/lib/computestacks/.ssl_wildcard/sharedcert.pem')` for
+# exactly that reason.
+#
+# `app_wildcard_dir` is the operator override, and an operator who moves
+# `controller_data_dir` MUST set TWO things, not one:
+#
+#   app_wildcard_dir                  -- this variable: where the per-az
+#                                        certificates are written AND read
+#                                        back. Without it roles/controller
+#                                        writes under the moved root while
+#                                        roles/controller_seed reads under the
+#                                        default one.
+#   controller_seed_shared_cert_path  -- the LEGACY cs_app_zone entry on the
+#                                        seeding side. Its own fallback is the
+#                                        hard-coded default path, so a moved
+#                                        data directory leaves it pointing at
+#                                        a file that is not there.
+#
+# roles/controller asserts the first (it is the one place both spellings of
+# the root are in scope). NOTHING CAN ASSERT THE SECOND: in the seeding play
+# `controller_wildcard_cert` is not in scope at all, so
+# `controller_seed_shared_cert_path` silently takes its hard-coded fallback
+# and there is no second value to compare it against. It is written down
+# here and in docs/contracts.md instead, which is the whole guard there is.
+#
+# The LEGACY single-certificate path is deliberately NOT re-spelled:
+# roles/controller still derives
+# `<controller_data_dir>/.ssl_wildcard/sharedcert.pem` from its own defaults,
+# because moving the default domain's certificate to a new path would change
+# the value `Bootstrap::Writer#rotate!` compares against and push a fresh
+# certificate to every load balancer in the fleet on the next converge.
+#
+# THE DOMAIN -> CERTIFICATE-PATH MAPS STILL CANNOT LIVE HERE, and this is the
+# narrow reason, which supersedes the broader one it is tempting to give
+# above. The per-az half of those maps needs nothing but this variable, which
+# is in scope everywhere. It is exactly ONE entry that cannot come here: the
+# legacy `cs_app_zone` key, which is `controller_wildcard_cert` in
+# roles/controller and `controller_seed_shared_cert_path` in
+# roles/controller_seed — a role default on each side, in scope in neither
+# other play. (The maps are also built from `hostvars`, so they could not be
+# read cross-host from here in any case.) So they stay in the two roles'
+# `vars/` files under the frozen spellings `cs_app_domains` and
+# `cs_app_domain_cert_paths`, local use only.
+cs_app_wildcard_dir: "{{ app_wildcard_dir | default('/var/lib/computestacks/.ssl_wildcard') }}"

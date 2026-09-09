@@ -225,6 +225,145 @@
          else "no backup host — nodes will be configured with backups disabled" }}
   run_once: true
 
+# Per-az application domains (playbooks/group_vars/all/app_domains.yml). Every
+# az's load balancer answers on its own domain, and every one of them lives
+# under the single environment-wide `cs_app_zone`. All five checks below are
+# pure inventory reads, and all five are about a failure that is invisible at
+# converge time: a wrong domain here does not break the install, it produces a
+# load balancer serving a certificate for a name it does not answer on, or a
+# tenant wildcard certificate that never issues, discovered weeks later.
+- name: Assert every app_domain that is set is a bare lowercase domain
+  ansible.builtin.assert:
+    that:
+      - (hostvars[item].app_domain | default('', true) | string) | length > 0
+      - >-
+        (hostvars[item].app_domain | default('', true) | string)
+        is match('^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
+    fail_msg: >-
+      app_domain '{{ hostvars[item].app_domain | default('') }}' on host
+      '{{ item }}' is not a bare domain name. It must be lowercase letters,
+      digits, hyphens and dots only, with at least one dot — no '*' (the
+      wildcard is implied; the certificate carries the SAN and the DNS record
+      is a separate CNAME), no scheme, no port, no path, no trailing dot, and
+      not empty. An empty value is the worst of them: it is not "unset", it
+      renders a blank load balancer domain, and the controller's
+      ValidateDomainWorker returns early on a blank domain instead of
+      complaining. {{ preflight_app_domain_hint }}
+    success_msg: "{{ item }}: app_domain '{{ hostvars[item].app_domain }}' is a bare domain"
+  loop: "{{ preflight_app_domain_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+  run_once: true
+
+# Scoped to nodes that SET it, because the derived `cs_app_domain` is
+# `cs_app_zone` for every host that does not — an unscoped uniqueness check
+# would abort every inventory in this repository (see defaults/main.yml).
+- name: Assert no two availability zones are given the same app_domain
+  ansible.builtin.assert:
+    that:
+      - (preflight_node_app_domains | unique | length) == (preflight_node_app_domains | length)
+    fail_msg: >-
+      Two nodes name the same app_domain —
+      {{ dict(preflight_app_domain_nodes | zip(preflight_node_app_domains)) }}.
+      There is exactly one node, and therefore one load balancer, per az, and
+      each load balancer answers on its own domain with its own certificate.
+      Two azs sharing one domain means whichever DNS record you publish sends
+      every tenant to one of them. {{ preflight_app_domain_hint }}
+    success_msg: >-
+      {{ "app_domains are distinct per az: "
+         ~ dict(preflight_app_domain_nodes | zip(preflight_node_app_domains))
+         if (preflight_app_domain_nodes | length) > 0
+         else "no node sets app_domain — every az uses cs_app_zone, as before" }}
+  run_once: true
+
+# This one can only see the azs in THIS inventory. In attach mode the
+# inventory is a partial view of the fleet (contracts rule 9), so a new
+# region colliding with an EXISTING production az's domain is not detectable
+# here — check the admin UI. Said again in README.md.
+
+# The controller's LetsEncryptAuth#dns_zone walks up from a container's FQDN —
+# the last 2 labels, then 3, then 4, then 5 — and takes the first exact
+# Dns::Zone match. A domain outside the zone, or a zone too deep for the walk
+# to reach, matches nothing; the controller then has no DNS driver to answer
+# the DNS-01 challenge with, and the tenant's wildcard certificate silently
+# never issues (event_code 2721edc59787a807 is the related domain-validation
+# failure). Nothing about the install fails, which is exactly why this is a
+# hard assert and not a warning.
+- name: Assert every app_domain lies under cs_app_zone, and the zone is shallow enough to match
+  ansible.builtin.assert:
+    that:
+      - (cs_app_zone | default('')) | length > 0
+      - (preflight_app_zone_labels | int) >= 2
+      - (preflight_app_zone_labels | int) <= 5
+      - (preflight_app_domains_outside_zone | length) == 0
+    fail_msg: >-
+      cs_app_zone is '{{ cs_app_zone | default('(unset)') }}'
+      ({{ preflight_app_zone_labels }} labels)
+      {{ ("and these app_domains do not lie under it: "
+          ~ (preflight_app_domains_outside_zone | join(', ')))
+         if (preflight_app_domains_outside_zone | length) > 0
+         else "" }}.
+      Every load balancer domain must be `cs_app_zone` itself or sit beneath
+      it at a label boundary, and `cs_app_zone` must be 2 to 5 labels long:
+      the controller resolves a container's DNS zone by walking up the last
+      2, 3, 4 and 5 labels of its FQDN and taking the first exact Dns::Zone
+      match, so anything outside that finds no zone, gets no DNS-01
+      challenge, and never issues a certificate — with no error at install
+      time. There is ONE parent zone per environment; do not create a second.
+      {{ preflight_app_domain_hint }}
+    success_msg: >-
+      cs_app_zone '{{ cs_app_zone | default('') }}' is
+      {{ preflight_app_zone_labels }} labels and every app_domain lies under it
+  run_once: true
+
+# `is defined` would not be enough here. An app_domain set EQUAL to
+# cs_app_zone selects the legacy single-certificate path: roles/controller
+# generates nothing new, controller_seed reads the existing environment's
+# certificate off the legacy path, and the new region's load balancer is
+# seeded with the certificate of the environment it just joined — the precise
+# bug this whole contract exists to prevent, while passing a
+# `is defined` gate.
+- name: Assert every new node names its own app_domain in attach mode
+  ansible.builtin.assert:
+    that:
+      - (preflight_attach_nodes_sharing_zone | length) == 0
+    fail_msg: >-
+      Attaching to an existing environment, but these new nodes have no
+      app_domain of their own:
+      {{ preflight_attach_nodes_sharing_zone | join(', ') }} — they either set
+      none, or set it to cs_app_zone
+      ('{{ cs_app_zone | default('') }}') itself. Both mean the same thing:
+      this region's load balancer would be seeded with the EXISTING
+      environment's shared certificate, whose CN is the existing environment's
+      domain, and no certificate would be generated for the new region at all.
+      Give each new node the domain its own load balancer answers on.
+      {{ preflight_app_domain_hint }}
+    success_msg: >-
+      attach mode: every new node names its own app_domain
+  when: preflight_attach_mode | bool
+  run_once: true
+
+# `controller_wildcard_domain` was the single environment-wide CN, and it is
+# RETIRED rather than kept as a single-domain override. Keeping it live would
+# be a silent mismatch: the manifest's load balancer `domain` now comes from
+# `cs_app_domain`, which knows nothing about it, so an override would change
+# the certificate's CN and leave every rendered domain alone.
+- name: Assert the retired controller_wildcard_domain is not being used as an override
+  ansible.builtin.assert:
+    that:
+      - (preflight_wildcard_domain_overrides | length) == 0
+    fail_msg: >-
+      controller_wildcard_domain is set on
+      {{ preflight_wildcard_domain_overrides | join(', ') }} and is RETIRED.
+      It named one environment-wide certificate CN, and the load balancer
+      domain now comes from `app_domain` per az — so this override would move
+      the CN and leave every domain where it was, giving every load balancer
+      in the fleet a certificate for a name it does not answer on. Delete it
+      and set `app_domain` on the nodes instead.
+      {{ preflight_app_domain_hint }}
+    success_msg: "controller_wildcard_domain is not overridden"
+  run_once: true
+
 - name: Assert exactly one primary nameserver when using the powerdns driver
   ansible.builtin.assert:
     that:

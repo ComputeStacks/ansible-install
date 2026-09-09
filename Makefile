@@ -72,8 +72,9 @@ help:
 	@echo "validate ENV=<name>               re-run the post-install checks only"
 	@echo "add-region-validate ENV=<name>    the same, for an attached region (add-region.yml)"
 	@echo "lint                              ansible-lint, production profile"
-	@echo "check                             syntax-check the playbooks and the role harness,"
-	@echo "                                  then parse both inventories and render the site contract"
+	@echo "check                             syntax-check the playbooks and the role harness, then"
+	@echo "                                  parse both inventories and render the site contract"
+	@echo "                                  and the bootstrap manifest against each"
 	@echo ""
 	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honoured."
 	@echo ""
@@ -117,8 +118,11 @@ lint:
 	$(ANSIBLE_LINT)
 
 # Parses both playbooks and the per-role harness against the example
-# inventory, then both shipped inventories -- no ENV, no connection, no
-# secrets.
+# inventory, then both shipped inventories -- no ENV, no connection, and no
+# secrets beyond the unencrypted CHANGEME samples those two inventories ship
+# (docs/contracts.md rule 6). tests/manifest_render.yml PRINTS the manifest it
+# renders, so run it by hand against a real inventory only if you mean to
+# print that environment's secrets; its own header says so at length.
 #
 # The grep is a real regression test, not decoration. A directory inventory is
 # parsed in ALPHABETICAL order, so the constructed plugin's source file has to
@@ -139,4 +143,7 @@ check:
 	  echo "tests/fixtures/single-site produced no region_* groups."; exit 1; }
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/site_contract.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/site_contract.yml
-	@echo "check: inventories parse, region groups exist, site contract resolves"
+	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/manifest_render.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
+	@echo "check: inventories parse, region groups exist, site contract resolves,"
+	@echo "       bootstrap manifest renders and parses as schema 1"

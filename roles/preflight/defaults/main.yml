@@ -40,6 +40,22 @@ preflight_site_hint: >-
   playbook group_vars outrank inventory group_vars. A single-site inventory
   sets it nowhere at all and every host lands in the site called 'default'.
 
+# What `app_domain` is and where to set it, as an operator-facing sentence.
+# Shared by the app-domain assertions so they stay readable.
+preflight_app_domain_hint: >-
+  `app_domain` is the domain THAT AZ's load balancer answers on — the name
+  tenant containers are published under (<container>.<app_domain>) and the CN
+  of the wildcard certificate that load balancer serves. It is an OPTIONAL
+  inventory HOST var on a node, and it must lie at or under the
+  environment-wide `cs_app_zone`, which keeps the meaning it has today: the
+  ONE parent DNS zone (playbooks/group_vars/all/app_domains.yml). A node that
+  sets it nowhere takes `cs_app_zone` itself, which is what every inventory
+  written before per-az domains existed does. Set it as a HOST var on the
+  node, never in group_vars — playbook group_vars outrank inventory
+  group_vars, and one value shared by two AZs is a collision this role
+  rejects. Each domain needs its own DNS records: `<app_domain>` A -> that
+  load balancer's public IP, and `*.<app_domain>` CNAME -> `<app_domain>`.
+
 # The site values this run is working with, from the three groups that have
 # one. Read by the assertions in tasks/main.yml, which are all `run_once` —
 # these evaluate in the executing host's context, where `hostvars` is in
@@ -68,6 +84,84 @@ preflight_metrics_domains: >-
 preflight_metrics_credential_values: >-
   {{ (metrics_site_credentials | default({})).values()
      | map('dictsort') | flatten | select('string') | list }}
+
+# --- per-az application domains -------------------------------------------
+# The contract is playbooks/group_vars/all/app_domains.yml. Same shape as the
+# site derivations above and read the same way: every assertion using them is
+# `run_once`, so `hostvars` is in scope (docs/contracts.md §Variable scope).
+#
+# EXPLICITLY SET is the scope that matters, and it is not the same as
+# `cs_app_domain`. Every host in every inventory has a `cs_app_domain` —
+# unset means `cs_app_zone` — so a uniqueness check over the derived value
+# would fail every inventory in this repository, the frozen
+# tests/fixtures/single-site included, on the day this file landed. What an
+# operator can get wrong is the value they typed, so that is what is checked.
+preflight_app_domain_hosts: >-
+  {{ groups['all'] | map('extract', hostvars) | selectattr('app_domain', 'defined')
+     | map(attribute='inventory_hostname') | list | sort }}
+
+# Nodes only, for the collision check: one az per node (preflight asserts it
+# above), so two nodes naming the same domain IS two azs sharing a load
+# balancer domain. Not deduped — comparing the list against its own `unique`
+# is how the collision is detected, the same way preflight_metrics_sites
+# works.
+preflight_app_domain_nodes: >-
+  {{ (groups['nodes'] | default([])) | map('extract', hostvars)
+     | selectattr('app_domain', 'defined')
+     | map(attribute='inventory_hostname') | list | sort }}
+preflight_node_app_domains: >-
+  {{ preflight_app_domain_nodes | map('extract', hostvars, 'app_domain') | list }}
+
+# Explicitly-set domains that are NOT at or under `cs_app_zone`.
+#
+# The suffix test is deliberately two-part rather than one `endswith`: with a
+# zone of `usercontent.example.com`, the domain `notusercontent.example.com`
+# ends with that string and is not under that zone. It is either the zone
+# itself or something with a label boundary in front of it, which is exactly
+# what the controller's LetsEncryptAuth#dns_zone label walk will and will not
+# match.
+preflight_app_domains_outside_zone: >-
+  {{ preflight_app_domain_hosts | map('extract', hostvars, 'app_domain')
+     | map('string')
+     | reject('equalto', cs_app_zone | default(''))
+     | reject('search', '\.' ~ (cs_app_zone | default('') | regex_escape) ~ '$')
+     | list | unique | sort }}
+
+# How many labels `cs_app_zone` has. The walk looks at the last 2, 3, 4 and 5
+# labels of a container's FQDN and nothing deeper, so a zone outside that
+# range can never be matched however correct the DNS is.
+preflight_app_zone_labels: >-
+  {{ ((cs_app_zone | default('')) | string).split('.') | length }}
+
+# Attach mode, decided by the CONTROLLER's flag and not by the host this role
+# happens to be running against — character for character the predicate
+# roles/ssh_trust/defaults/main.yml uses. `| first` is the single-controller
+# guarantee preflight asserts a few tasks earlier (docs/contracts.md rule 2).
+preflight_attach_mode: >-
+  {{ hostvars[groups['controller'] | first].existing_env | default(false) | bool }}
+
+# New nodes whose load balancer domain would be the environment-wide zone.
+# `cs_app_domain` (not `app_domain`) on purpose: it collapses "set nowhere"
+# and "set equal to cs_app_zone" into the one condition that matters, and it
+# is the cross-host-safe read the contract blesses (hard rule 10). In attach
+# mode both mean the same thing — the legacy single-certificate path — and
+# both reseed the EXISTING environment's certificate onto the new region's
+# load balancer.
+preflight_attach_nodes_sharing_zone: >-
+  {{ (cs_new_nodes | default([])) | map('extract', hostvars)
+     | selectattr('cs_app_domain', 'equalto', cs_app_zone | default(''))
+     | map(attribute='inventory_hostname') | list | sort }}
+
+# Hosts that set the retired `controller_wildcard_domain` to something other
+# than `cs_app_zone`. roles/controller's default for it IS `cs_app_zone` and
+# role defaults are not in scope here, so anything this finds was written by
+# an operator (the same reason the powerdns_name assert in
+# roles/controller_seed reads only the inventory).
+preflight_wildcard_domain_overrides: >-
+  {{ groups['all'] | map('extract', hostvars)
+     | selectattr('controller_wildcard_domain', 'defined')
+     | rejectattr('controller_wildcard_domain', 'equalto', cs_app_zone | default(''))
+     | map(attribute='inventory_hostname') | list | sort }}
 
 # Inventory vars every node in groups['nodes'] must define (docs/contracts.md
 # rule 1). Templates elsewhere in the provisioner assume these are present.
