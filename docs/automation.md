@@ -56,7 +56,11 @@ acme_ca: letsencrypt_test        # staging CA: untrusted chain, no real rate
                                  # relaxes TLS verification automatically for
                                  # the *test CAs.
 controller_seed_confirm: false   # the seed's confirmation pause needs a tty
-controller_seed_dry_run_first: false   # optional; the preview is for humans
+controller_seed_dry_run_first: false   # optional; stops the preview being
+                                 # PRINTED. The DRY_RUN pass still RUNS -- it
+                                 # is what gate G reads, and gate G fails the
+                                 # run on load balancer domain drift. Neither
+                                 # flag can switch that off.
 ```
 
 ```bash

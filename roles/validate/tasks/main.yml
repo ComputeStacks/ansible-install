@@ -103,6 +103,22 @@
     - "'nodes' in group_names"
   tags: [validate, acme_backend]
 
+# Per az, and only for an az this run actually seeded: `cs_new_nodes` is
+# `groups['nodes']` minus every host flagged `existing_env`, and an existing
+# region's load balancer was never in this run's manifest. It is read HERE,
+# on the node currently executing, never as `hostvars[h].cs_new_nodes`
+# (docs/contracts.md rule 10).
+- name: Assert this az's load balancer validated its domain and matches its certificate
+  ansible.builtin.include_tasks:
+    file: lb_domain.yml
+    apply:
+      tags: [validate, lb_domain]
+  when:
+    - "'lb_domain' not in validate_skip"
+    - "'nodes' in group_names"
+    - inventory_hostname in (cs_new_nodes | default([]))
+  tags: [validate, lb_domain]
+
 - name: Assert the tenant DNS zone resolves on every nameserver
   ansible.builtin.include_tasks:
     file: dns.yml

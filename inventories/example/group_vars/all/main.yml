@@ -20,7 +20,20 @@ cs_registry_domain: cr.example.com
 # host does not set a `metrics_domain` host var of its own (hosts.yml). A
 # single-site install has only this one.
 cs_metrics_domain: metrics.example.com
-cs_app_zone: usercontent.example.com     # tenant Dns::Zone
+# The ONE tenant Dns::Zone: one `pdnsutil create-zone`, one entry in the
+# manifest's `dns.zones`, and the parent of every load balancer domain in the
+# environment. It stays environment-wide.
+#
+# What is PER AZ is the load balancer's own domain, the `app_domain` host var
+# on each node (hosts.yml). Every az has its own load balancer and its own
+# wildcard certificate; a node that sets no `app_domain` uses this value, so
+# an inventory written before per-az domains existed renders exactly what it
+# always did. Every `app_domain` must sit at or under this zone, and this
+# zone must be 2 to 5 labels long — the controller finds a container's zone
+# by walking UP the container FQDN and taking the first exact match, so a
+# domain outside it, or a zone too deep to be reached, silently never issues
+# a tenant certificate. roles/preflight asserts both.
+cs_app_zone: usercontent.example.com
 cs_admin_email: admin@example.com
 
 locale: en
@@ -48,7 +61,7 @@ acme_account_email: admin@example.com
 # Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
 
 # Post-install checks (roles/validate). Names: services, containers, agent,
-# backfill, prometheus, borg, ssh, portal, dns.
+# backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain, dns.
 # validate_skip: []
 # validate_tls_verify: true    # false while the portal is self-signed
 

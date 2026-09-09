@@ -1,5 +1,91 @@
 # Changelog
 
+## September 9, 2026
+
+* **Every availability zone gets its own load balancer domain.** `app_domain`
+  is a new optional node host var: the name that az's load balancer answers
+  on, and the CN of the wildcard certificate it serves. v1 had two variables
+  for this and v2 collapsed them into one, so a single scalar was rendered
+  into every az's load balancer — an estate whose nine regions each answer on
+  a different name could not be expressed at all. `cs_app_zone` is unchanged
+  and stays environment-wide: one parent tenant zone, one `pdnsutil
+  create-zone`, one `dns.zones` entry, and every `app_domain` under it. An
+  inventory that names no `app_domain` renders exactly the manifest it
+  rendered before, byte for byte.
+* **One self-signed wildcard per domain, generated once per domain.** The
+  `creates:` guard used to sit on a path with no domain in it, so the first
+  az to converge won the file and every other az was seeded with a
+  certificate for the first az's name. The default domain keeps the legacy
+  path deliberately — moving it would change the value the controller
+  compares against and push a fresh certificate to every load balancer in the
+  fleet on the next converge.
+* **Attach mode generates the new region's certificate instead of reusing
+  whatever sat at the legacy path.** `add-region.yml` runs
+  `roles/controller` with `tasks_from: attach_prep`, which previously
+  generated nothing: the seed then read the *existing* environment's pem and
+  installed it as the new region's shared certificate while the manifest
+  rendered the new region's own domain. Preflight now requires a new az to
+  name an `app_domain` of its own, and to differ from `cs_app_zone`.
+* **The seed refuses to rotate a certificate onto a load balancer whose
+  domain it cannot change.** The apply writes a load balancer's
+  `shared_certificate` on an existing row but only *reports* its `domain`, so
+  a stale manifest would leave a live load balancer serving a certificate for
+  a name it no longer answers on. The `DRY_RUN` preview is now unconditional
+  and the run fails when it reports drift on a load balancer domain;
+  `controller_seed_dry_run_first` governs only whether the preview is
+  printed. Changing an existing load balancer's domain stays a
+  controller-side, human-operated action.
+* **`validate` closes the loop against reality.** A new `lb_domain` check
+  reads back the controller's own asynchronous verdict — that the load
+  balancer reached `domain_valid`, and that its domain matches its
+  certificate's CN. A missing `*.<app_domain>` CNAME used to pass preflight,
+  pass the seed, end the run green, and surface weeks later as one region
+  with no working ingress. `docs/install.md` now spells out both records; the
+  wildcard must be a **CNAME**, an A record fails.
+* **The bootstrap manifest has a render harness** (`tests/manifest_render.yml`,
+  run by `make check` against both shipped inventories). The single most
+  consequential template in the tree could previously only be exercised
+  against a live controller.
+* `controller_wildcard_domain` and `controller_seed_lb_domain` are retired;
+  an inventory that still sets either fails the run rather than being
+  silently ignored.
+
+***
+
+## September 4, 2026
+
+* **`site` — the physical facility a host lives in — is a first-class
+  concept.** A provisioner-only one: the controller has no column for it and
+  nothing about it is seeded. It decides which metrics host scrapes a node
+  and which backup server that node writes to, which is the case no
+  controller-side grouping expresses — two Locations can share one metrics
+  server. One metrics host and at most one backup server per site.
+* **Every per-site value resolves through the site maps, never a global.**
+  The backup server was `groups['backup'] | first`, which in a two-site fleet
+  handed every node whichever host sorted first: the node then SSHed at
+  another site's server, failed on a key that was never installed there, and
+  named the wrong host in the failure. The prometheus endpoint had the same
+  shape through `cs_metrics_domain`, and so did the loki push URL.
+* **The metrics nginx basic-auth username is per site too, not just the
+  password.** A wrong username is a 401 indistinguishable from a wrong
+  password, and a v1-built metrics host answers to whatever its own htpasswd
+  holds.
+* **One metric client and one log client per site**, matched by exact
+  endpoint string; `file_sd` fragments and the metrics certificate are scoped
+  the same way.
+* **An inventory that never mentions `site` is unchanged.** Every host lands
+  in the site called `default`, every map has one key, and every role
+  resolves what it always did. `tests/fixtures/single-site` is that
+  inventory, frozen as the regression baseline.
+* `--limit region_*` works: a directory inventory is parsed alphabetically,
+  so the constructed plugin's source file has to sort before the plugin
+  config, and `make check` now regression-tests exactly that.
+* Attach mode no longer rewrites an existing backup server's configuration,
+  the v1 firewall append is anchored on the whole rule rather than the
+  address, and `attach_prep` is guarded before it touches the controller.
+
+***
+
 ## v2 — August 28, 2026
 
 Ground-up rewrite. The previous tree is tagged `v1-final`; an environment

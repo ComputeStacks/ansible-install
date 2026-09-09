@@ -1,0 +1,200 @@
+---
+# Does this az's load balancer actually answer on the domain the inventory
+# gave it, and does the certificate it serves cover that name?
+#
+# NOTHING ELSE IN THE RUN CLOSES THIS LOOP. `roles/preflight` checks the
+# inventory against itself; `roles/controller` writes a certificate;
+# `roles/controller_seed` writes a manifest. All three can be perfectly
+# consistent while the DNS the world resolves is not: a missing
+# `*.<app_domain>` CNAME passes preflight, passes the seed, ends the run
+# green, and surfaces weeks later as one region whose tenant containers have
+# no working ingress and whose wildcard certificates never issue.
+#
+# The controller does check it — `LoadBalancerWorkers::ValidateDomainWorker`
+# runs `LetsEncryptServices::ValidateDomainService` and writes
+# `load_balancers.domain_valid` — but it runs ASYNCHRONOUSLY, from an
+# `after_save` on the row this run just created, and nothing fails when it
+# comes back false. This check reads that verdict back and, separately,
+# compares the row's `domain` against the CN of the `shared_certificate` it
+# was seeded with.
+#
+# ## Asynchrony: three outcomes, not two
+#
+# `domain_valid` is a plain boolean and is `false` both before the worker has
+# run and after it has run and failed. Asserting on it alone would be flaky
+# by construction — every fast converge would fail on a job that had not
+# finished yet. `domain_valid_check` is the discriminator: the worker writes
+# BOTH columns in one `update_columns`, and nothing else ever writes
+# `domain_valid_check`, so
+#
+#   domain_valid_check empty       -> the verdict does not exist yet  (WARN)
+#   domain_valid_check set, false  -> a completed check said no       (FAIL)
+#   domain_valid_check set, true   -> validated                       (PASS)
+#
+# Only the middle one is a failure. The first is reported loudly, names the
+# tag to re-run, and does NOT fail the run — a check that goes red on a
+# healthy install is worse than no check at all, which is the same reasoning
+# that emptied the `services` list on an `existing_env` host.
+#
+# The task below waits for the verdict rather than warning immediately,
+# because on a greenfield converge the row is seconds old and the worker's
+# DNS lookups (Dnsruby, three retries per query, against the controller's own
+# resolver list) routinely take longer than the plays between the seed and
+# here. `validate_lb_domain_retries` x `validate_lb_domain_delay` bounds the
+# wait; it stops on the first non-pending answer, so the healthy path costs
+# one query and the broken path costs the full wait exactly once.
+#
+# ## What is NOT asserted
+#
+# That the row's `domain` equals this node's `cs_app_domain`. A load
+# balancer's domain is operator-owned on the controller side: it is edited by
+# humans in the admin UI and the apply deliberately never writes it on an
+# existing row (see "Create-only, and the domain gate" in
+# roles/controller_seed/README.md). Asserting equality here would turn that
+# supported edit into a red validate on every subsequent converge. The gate
+# that DOES care — a manifest whose domain disagrees with a row it cannot
+# rewrite — is gate G in `roles/controller_seed`, which fails the run before
+# the apply. The inventory value is carried in the messages below so the
+# difference is visible without being fatal.
+
+- name: Read this az's load balancer domain state from the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ validate_cstacks_bin }}"
+      - runner
+      - "{{ validate_lb_domain_query }}"
+  vars:
+    # One `puts` of pipe-joined fields, built by concatenation with `%q{}`
+    # around the az exactly as the backfill check does. Fields:
+    #
+    #   OK | domain | yes|no | domain_valid_check | CN
+    #
+    # or the single token NOREGION / NOLB when there is no row to read.
+    # `shared_certificate` is decrypted inside the runner and only its CN is
+    # printed, so nothing secret crosses the wire and this task is
+    # deliberately NOT `no_log` — the values are the whole diagnostic.
+    # `OpenSSL::X509::Certificate.new` is the same call `LoadBalancer`'s own
+    # `valid_custom_cert?` makes, and it reads the first PEM block, which is
+    # what makes it work on the cert+key pem haproxy wants.
+    validate_lb_domain_query: >-
+      {{ 'r = Region.find_by(name: %q{' ~ az ~ '});'
+         ~ ' lb = r&.load_balancer;'
+         ~ ' puts lb.nil? ? (r.nil? ? "NOREGION" : "NOLB")'
+         ~ ' : ["OK", lb.domain.to_s, (lb.domain_valid ? "yes" : "no"),'
+         ~ ' lb.domain_valid_check.to_s,'
+         ~ ' (lb.shared_certificate.blank? ? "NOCERT" :'
+         ~ ' ((OpenSSL::X509::Certificate.new(lb.shared_certificate)'
+         ~ '.subject.to_a.assoc("CN").to_a[1].to_s) rescue "BADCERT"))'
+         ~ '].join("|")' }}
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_lb_domain_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  # Stop as soon as the answer is anything other than "the row exists and the
+  # worker has not written a verdict yet" — a lookup error, a missing row and
+  # a finished verdict are all final, and only the pending case is worth
+  # waiting on.
+  retries: "{{ validate_lb_domain_retries | int }}"
+  delay: "{{ validate_lb_domain_delay | int }}"
+  until: >-
+    validate_lb_domain_state.rc != 0
+    or not (validate_lb_domain_state.stdout | default('') | trim).startswith('OK|')
+    or ((validate_lb_domain_state.stdout | trim).split('|')[3] | length) > 0
+
+- name: Split the load balancer state into its fields
+  ansible.builtin.set_fact:
+    validate_lb_domain_fields: >-
+      {{ (validate_lb_domain_state.stdout | default('') | trim).split('|') }}
+
+- name: Assert the controller has a load balancer row for this az
+  ansible.builtin.assert:
+    that:
+      - validate_lb_domain_state.rc == 0
+      - (validate_lb_domain_fields | length) == 5
+      - validate_lb_domain_fields[0] == 'OK'
+    fail_msg: >-
+      Could not read a load balancer for az '{{ az }}' from
+      {{ validate_controller_host }} — the runner returned
+      "{{ validate_lb_domain_state.stdout | default('') | trim }}"
+      {{ '(and failed: ' ~ (validate_lb_domain_state.stderr | default('') | trim) ~ ')'
+         if validate_lb_domain_state.rc != 0 else '' }}.
+      NOREGION means the manifest's Region '{{ az }}' was never created —
+      re-read the seed output. NOLB means the Region exists with no load
+      balancer, which is a `locations[].regions[].load_balancer` section the
+      apply did not reach. Anything else is `cstacks runner` itself failing;
+      `validate_cstacks_bin` sets its path when it is not on the controller's
+      non-interactive PATH.
+    quiet: true
+
+- name: Assert this az's shared certificate covers the domain the load balancer serves
+  ansible.builtin.assert:
+    that:
+      - validate_lb_domain_fields[4] == validate_lb_domain_fields[1]
+    fail_msg: >-
+      Load balancer for az '{{ az }}' serves domain
+      '{{ validate_lb_domain_fields[1] }}' but its shared certificate's CN is
+      '{{ validate_lb_domain_fields[4] }}'
+      (this node's inventory `app_domain` resolves to
+      '{{ cs_app_domain }}').
+      Every TLS handshake for every tenant container in this az presents that
+      certificate for that name, so a mismatch is a browser warning on every
+      customer site here. NOCERT means the row carries no shared certificate
+      at all; BADCERT means what it carries does not parse as a certificate.
+      The two are seeded from the same value and cannot disagree on a fresh
+      row — a mismatch means this load balancer already existed and the apply
+      rotated its certificate without being able to rewrite its domain, which
+      is exactly what gate G in roles/controller_seed refuses to do. Fix the
+      domain on the controller (admin UI) and re-run the seed.
+    success_msg: >-
+      {{ az }}: certificate CN and load balancer domain agree on
+      '{{ validate_lb_domain_fields[1] }}'
+    quiet: true
+
+- name: Assert this az's load balancer validated its domain
+  ansible.builtin.assert:
+    that:
+      - validate_lb_domain_fields[2] == 'yes'
+    fail_msg: >-
+      The controller checked '{{ validate_lb_domain_fields[1] }}' for az
+      '{{ az }}' at {{ validate_lb_domain_fields[3] }} and marked it INVALID.
+      Until `domain_valid` is true this load balancer never becomes
+      `active?`, so nothing deploys into this region. It needs BOTH records,
+      published in the PUBLIC DNS this domain is delegated to: an A record
+      for '{{ validate_lb_domain_fields[1] }}' pointing at {{ public_ip }},
+      and a CNAME record for '*.{{ validate_lb_domain_fields[1] }}' pointing
+      at '{{ validate_lb_domain_fields[1] }}'.
+      The wildcard MUST be a CNAME. `ValidateDomainService` proves it by
+      querying a random label under the domain for a CNAME record, so a
+      wildcard A record answers nothing and fails with event_code
+      2721edc59787a807 ("Missing CNAME record"). A wildcard CNAME pointing
+      somewhere other than the domain itself fails with 635285f7f2889009,
+      and an A record that is not one of this load balancer's own public
+      addresses fails with 510806d5621c97d5. Read the load balancer's event
+      log in the admin UI for which one fired, fix the zone, and re-run
+      `--tags lb_domain`.
+    success_msg: >-
+      {{ az }}: {{ validate_lb_domain_fields[1] }} validated at
+      {{ validate_lb_domain_fields[3] }}
+    quiet: true
+  when: (validate_lb_domain_fields[3] | length) > 0
+
+# NOT a failure. The verdict is written by a background job on the row this
+# run created minutes ago, and its absence says nothing about the DNS.
+- name: Report that this az's domain validation has not finished yet
+  ansible.builtin.debug:
+    msg: >-
+      {{ az }}: the controller has not yet checked
+      '{{ validate_lb_domain_fields[1] }}' —
+      `domain_valid_check` is still empty after
+      {{ (validate_lb_domain_retries | int) * (validate_lb_domain_delay | int) }}s.
+      LoadBalancerWorkers::ValidateDomainWorker runs asynchronously from the
+      load balancer's `after_save`, so this is normal on a fast converge and
+      is NOT asserted — it would fail every healthy install that finished
+      quicker than sidekiq. It does mean this run has NOT proved that
+      '{{ validate_lb_domain_fields[1] }}' resolves and that
+      '*.{{ validate_lb_domain_fields[1] }}' is a CNAME to it. Re-run
+      `--tags lb_domain` in a few minutes, or read the load balancer's event
+      log in the admin UI; nothing deploys into this region until
+      `domain_valid` is true.
+  when: (validate_lb_domain_fields[3] | length) == 0

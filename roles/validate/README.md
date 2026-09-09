@@ -28,6 +28,7 @@ this role exists to catch at install time.
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
+| `lb_domain` | nodes (new azs only) | **the controller** | This az's `LoadBalancer` reached `domain_valid`, and its `domain` equals the CN of its `shared_certificate`. |
 | `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone`. |
 
 Each check is a task file included under its own tag, so
@@ -86,6 +87,57 @@ what is being asserted is routing. The fail message names the az, the derived
 address, how it was derived, and the `controller_acme_address` host var that
 overrides it.
 
+**The load balancer domain check has three outcomes, and only one of them
+fails.** Every az's load balancer answers on its own `app_domain`
+(`playbooks/group_vars/all/app_domains.yml`) and serves a wildcard
+certificate whose CN is that name. Nothing else in a run closes the loop
+between the inventory and the public DNS: preflight checks the inventory
+against itself, `roles/controller` writes a certificate, `controller_seed`
+writes a manifest, and all three can agree while `*.<app_domain>` does not
+exist. The controller *does* check it —
+`LoadBalancerWorkers::ValidateDomainWorker` runs from the row's `after_save`
+and writes `domain_valid` — but asynchronously, and nothing fails when it
+comes back false: a missing wildcard CNAME passes preflight, passes the seed,
+ends the run green, and surfaces weeks later as one region with no working
+ingress.
+
+`domain_valid` is a plain boolean and is `false` both before the worker has
+run and after it has run and failed, so asserting on it alone would go red on
+every install that finished quicker than sidekiq. `domain_valid_check` is the
+discriminator — the worker writes both columns in one `update_columns` and
+nothing else writes it:
+
+| `domain_valid_check` | `domain_valid` | Outcome |
+| --- | --- | --- |
+| empty | — | **reported, not asserted**: the verdict does not exist yet |
+| set | `false` | **fail**, with the two DNS records and the event codes |
+| set | `true` | pass |
+
+The task waits up to `validate_lb_domain_retries` × `_delay` for the verdict
+rather than warning at once, and stops on the first non-pending answer — a
+healthy install pays for one query.
+
+The failure message names the exact pair of records the controller demands:
+`<app_domain>` A to that load balancer's public IP, and `*.<app_domain>`
+**CNAME** to `<app_domain>`. The wildcard cannot be an A record:
+`ValidateDomainService` queries a random label under the domain for a CNAME,
+so an A record answers nothing and fails with event_code
+`2721edc59787a807`.
+
+**It does not assert that the row's `domain` equals `cs_app_domain`.** A load
+balancer's domain is operator-owned controller-side — it is edited in the
+admin UI and the apply deliberately never rewrites it on an existing row — so
+asserting equality would turn a supported edit into a permanently red
+validate. The case that matters, a manifest whose domain disagrees with a row
+it cannot rewrite, is caught before anything is written by gate G in
+`roles/controller_seed`. The CN comparison is asserted, because CN and domain
+are seeded from the same value and cannot legitimately disagree on a row this
+run created.
+
+The check runs only for hosts in `cs_new_nodes`. An `existing_env` region's
+load balancer was never in this run's manifest, and its DNS is not this run's
+claim to make.
+
 **Every per-site value comes from the site maps, never from a global.** The
 prometheus query dials `cs_site_metrics_domains[cs_site]` with the
 `cs_site_metrics_credentials[cs_site]` pair, and the borg check SSHes to
@@ -130,6 +182,13 @@ warning.
 `add-region.yml` runs this on `controller:nodes` only — the existing metrics
 and backup hosts are not v2-built and their unit set is not this role's to
 assert.
+
+`lb_domain` is the check attach mode most needs, and it runs there unchanged:
+the new az is in `cs_new_nodes`, its `app_domain` is required to differ from
+`cs_app_zone` (`roles/preflight`), and its wildcard CNAME is the record most
+likely to have been forgotten when a region is added years after the
+environment was built. No `existing_env` region is checked — those load
+balancers were never in this run's manifest.
 
 **That principle applies to the existing controller too, and the `services`
 check therefore asserts nothing at all on any `existing_env` host.** It used to
@@ -177,6 +236,7 @@ is a property of the control plane rather than of how the host was built.
 | `validate_prometheus_endpoint` | `https://{{ cs_site_metrics_domains[cs_site] \| default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}` | This host's site's metrics vhost. |
 | `validate_prometheus_username` / `_password` | this host's site's entry in `cs_site_metrics_credentials`, else `cs_metrics_credentials_default` | Both halves matter — a wrong username is an indistinguishable 401. |
 | `validate_prometheus_metric` / `_job` | `node_cpu_seconds_total` / `node-exporter` | The controller's own label contract. |
+| `validate_lb_domain_retries` / `_delay` | `12` / `10` | Ceiling on the wait for the controller's asynchronous domain verdict — two minutes. `1` takes whatever answer is there. |
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
 | `validate_portal_url` / `_status_codes` | `https://{{ cs_portal_domain }}/` | |
@@ -188,8 +248,10 @@ Computed in `vars/main.yml`, not overridable: `validate_backup_host`
 `cs_metrics_credentials_default`), `validate_expected_services` /
 `_enabled_services` / `_containers`, and the tailnet and ACME derivations.
 
-Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `az`,
-`cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`, `dns_driver`,
+Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
+`az`, `cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`,
+`cs_app_domain` and `cs_new_nodes`
+(`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`), `dns_driver`,
 `borg_version`, `borg_image`, `existing_env`, `tailscale_authkey` /
 `tailscale_enabled`, `controller_acme_address`, and the frozen site contract
 `cs_site`, `cs_site_backup_hosts`, `cs_site_metrics_domains`,

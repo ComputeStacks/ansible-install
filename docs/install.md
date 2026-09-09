@@ -70,6 +70,43 @@ ns1.example.com.         IN A   <ns1 public ip>
 ns2.example.com.         IN A   <ns2 public ip>
 ```
 
+### Every load balancer needs its own pair of records
+
+**One per az, and this is the step that is most often missed.** Each node runs
+its own haproxy load balancer, and each answers on its own `app_domain`
+(`cs_app_zone` itself if the node sets none — a single-az install therefore
+needs exactly one pair). Tenant containers are published as
+`<container>.<app_domain>`, so for every az:
+
+```
+exm-001.usercontent.example.com.    IN A     <that node's public ip>
+*.exm-001.usercontent.example.com.  IN CNAME exm-001.usercontent.example.com.
+```
+
+**The wildcard MUST be a CNAME. An A record fails.** The controller proves the
+wildcard exists by querying a random label under the domain *for a CNAME
+record* (`LetsEncryptServices::ValidateDomainService#load_wildcard_cname!`), so
+a wildcard A record answers nothing and the load balancer is marked
+`domain_valid: false` with event_code `2721edc59787a807` ("Missing CNAME
+record"). Two neighbouring failures worth recognising: a wildcard CNAME
+pointing anywhere other than the domain itself is `635285f7f2889009`, and an A
+record that is not one of that load balancer's own public addresses is
+`510806d5621c97d5`.
+
+Until `domain_valid` is true the load balancer never becomes `active?` and
+nothing deploys into that region. Nothing in the run fails on it, because the
+check is asynchronous — `LoadBalancerWorkers::ValidateDomainWorker` runs from
+the row's `after_save` and writes the verdict minutes later. `roles/validate`'s
+`lb_domain` check reads that verdict back, waits a couple of minutes for it,
+and fails the run if it came back negative; if it has not been written yet the
+check says so and does not fail, so **re-run `--tags lb_domain` if you see
+that message.**
+
+These names must resolve in the *public* DNS this domain is delegated to, not
+in the tenant zone the bundled nameservers serve. They point at the load
+balancers, and the zone the nameservers host is where the controller creates
+records *for* tenant containers underneath them.
+
 Port 80 must be reachable from the internet on the controller for the default
 HTTP-01 challenge. The metrics and registry hosts also serve HTTP-01 on 80.
 If a host cannot expose 80, use a DNS-01 provider —
@@ -89,9 +126,18 @@ $EDITOR inventories/prod/group_vars/all/secrets.yml
 every nameserver needs a unique `powerdns_name` (its FQDN — it becomes the
 zone's NS records).
 
-`main.yml` carries the domains (`cs_portal_domain`, `cs_metrics_domain`,
-`cs_registry_domain`, `cs_app_zone`), the admin email, locale/currency, the
-DNS driver, and the ACME settings.
+Each node may also carry `app_domain`, the domain that az's load balancer
+answers on — the pair of DNS records above. It is optional and must be unique
+per az; a node that sets none uses `cs_app_zone`, which is what a single-az
+install wants and what every inventory written before per-az domains existed
+does. `app_domain` must sit at or under `cs_app_zone`, and `cs_app_zone`
+itself must be 2 to 5 labels long; preflight asserts both, and
+`docs/contracts.md` §Per-az application domains explains why.
+
+`main.yml` carries the environment-wide domains (`cs_portal_domain`,
+`cs_metrics_domain`, `cs_registry_domain`, `cs_app_zone` — the single parent
+tenant zone), the admin email, locale/currency, the DNS driver, and the ACME
+settings.
 
 `secrets.yml` carries everything else. Generate the immutable pair **once**:
 

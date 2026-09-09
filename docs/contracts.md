@@ -9,6 +9,15 @@ Change requests go to the engineering manager, not into the code.
 (e.g. exm-005). Exactly ONE node per az — enforced by preflight, relied on
 everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
 
+`app_domain` == the domain ONE az's load balancer answers on, and the CN of
+the wildcard certificate it serves. An OPTIONAL inventory HOST var on a node,
+defaulting to `cs_app_zone`. Every az has exactly one load balancer and in a
+real estate every one of them answers on a different name, so this is per node
+and never one environment-wide scalar. `cs_app_zone` is NOT retired by it and
+does not become per-az: it stays the single parent tenant `Dns::Zone` — one
+`pdnsutil create-zone`, one `dns.zones` entry — and every `app_domain` lives
+at or under it.
+
 `site` == the physical facility a host lives in. A provisioner-only concept:
 the controller has no column for it, and nothing about it is ever seeded. One
 metrics host and AT MOST one backup server per site (zero backup servers means
@@ -147,6 +156,140 @@ then `selectattr('existing_env')`, NOT `rejectattr('existing_env', 'defined')`:
 the latter also drops a host that explicitly says `existing_env: false`, which
 every other consumer in the repo (`existing_env | default(false)`) counts as
 new.
+
+### Per-az application domains (spellings are frozen — `playbooks/group_vars/all/app_domains.yml`)
+
+Roles CONSUME these names. `cs_app_zone` keeps its meaning and stays
+environment-wide; what splits off per az is the load balancer's domain.
+
+| Name | Lives in | Shape | Cross-host read |
+|---|---|---|---|
+| `app_domain` | the INVENTORY, as a node host var | optional; a bare lowercase domain | it is a plain host var — `hostvars[h].app_domain` is fine |
+| `cs_app_domain` | `playbooks/group_vars/all/app_domains.yml` | `app_domain \| default(cs_app_zone, true)` | **safe** — `hostvars[h].cs_app_domain` |
+| `cs_app_wildcard_dir` | `playbooks/group_vars/all/app_domains.yml` | `app_wildcard_dir \| default('/var/lib/computestacks/.ssl_wildcard')` | **safe** |
+| `cs_app_domains` | `roles/controller/vars/` **and** `roles/controller_seed/vars/` | sorted unique `cs_app_domain` over `cs_new_nodes` | **local only** |
+| `cs_app_domain_cert_paths` | the same two role `vars/` files | domain -> pem path | **local only** |
+
+**Where each one lives is part of the contract, not an accident.**
+`cs_app_domain` is deliberately trivial — it reads only a plain inventory host
+var and one global, no `hostvars` — because it is the one value in the feature
+that MUST survive a cross-host read: the manifest is rendered on the
+controller and needs every node's load balancer domain. Everything derived
+from it is a map the rendering host indexes locally, which is hard rule 10's
+shape and exactly why `cs_site` exists the same way. The two maps cannot move
+into `playbooks/group_vars/`: their `cs_app_zone` entry is the legacy
+certificate path, which is a `roles/controller` default and is not in scope in
+the seeding play — and `add-region.yml` never runs that role's `main.yml` at
+all.
+
+`default(..., true)` — the second argument — is load-bearing. A plain
+`default()` fires only on Undefined, so `app_domain: ""` would render a blank
+load balancer domain, and `ValidateDomainWorker` returns early on a blank
+domain rather than complaining. Empty means unset and takes the zone;
+`roles/preflight` rejects it outright.
+
+**The `cs_`-prefixed names in the two role `vars/` files are a deliberate
+cross-role contract — do not "fix" them.** ansible-lint's production profile
+wants a role's own vars prefixed with the role name, and both files carry
+`# noqa: var-naming[no-role-prefix]` for these two. Prefixing them per role
+would give one frozen contract two names in the two roles that MUST agree
+about which domain maps to which pem — one writes those files, the other
+slurps them back — and that disagreement is the precise thing the contract
+exists to prevent. They are defined character-for-character identically in
+both files; only the legacy branch differs, and each file says why.
+
+#### Certificate path scheme
+
+    domain == cs_app_zone  ->  the LEGACY path, unchanged
+                               <controller_wildcard_dir>/sharedcert.pem
+    otherwise              ->  <cs_app_wildcard_dir>/<domain>/sharedcert.pem
+
+`cs_app_wildcard_dir` is the ONE spelling of the per-az root, and it is a
+hostvars-free global precisely so it is in scope in the seeding play and in
+attach mode. Neither role may re-derive that root from
+`controller_wildcard_dir`: two role vars each carrying the same literal are
+two literals that drift, and the drift is silent — the seed finds no pem, or
+on a re-run a stale one, and the load balancer ends up serving a certificate
+for a name it does not answer on. `roles/controller` is the one place both
+names are in scope, so that role asserts they agree and names
+`app_wildcard_dir` when they do not. `roles/controller_seed` has no
+`controller_wildcard_cert` in scope, so its `cs_app_zone` entry uses
+`controller_seed_shared_cert_path`, which carries the identical literal as its
+own fallback and doubles as the attach-mode escape hatch.
+
+**AN OPERATOR WHO MOVES `controller_data_dir` MUST SET TWO MORE VARIABLES**,
+not one:
+
+* `app_wildcard_dir` — where the per-az certificates are written AND read
+  back. Without it `roles/controller` writes under the moved root while
+  `roles/controller_seed` reads under the default one.
+* `controller_seed_shared_cert_path` — the legacy `cs_app_zone` entry on the
+  seeding side. Its fallback is the hard-coded default path, so a moved data
+  directory leaves it pointing at a file that is not there.
+
+`roles/controller` asserts the first. Nothing can assert the second from
+inside the seeding play, which is why it is written down here.
+
+**The legacy carve-out is load-bearing.** `Bootstrap::Writer#rotate!` skips a
+credential whose DECRYPTED value already matches, so generate-once at a stable
+path re-seeds as a genuine no-op. Move the default domain's certificate to a
+new path and the value really does change, and the next converge pushes a
+fresh certificate to every load balancer in the fleet — the exact fleet-wide
+rotation the `creates:` guard exists to prevent. The default domain therefore
+keeps the path v1 and v2 have always used.
+
+#### The `LetsEncryptAuth#dns_zone` label walk
+
+`LetsEncryptAuth#dns_zone` resolves a container's zone by walking **up** the
+container's FQDN — the last 2 labels, then 3, then 4, then 5 — and taking the
+first exact `Dns::Zone` match. The broadest zone that exists wins, which is
+what lets ONE parent zone serve every load balancer domain beneath it.
+
+Two consequences, and only two:
+
+1. **`cs_app_zone` must be 2–5 labels.** A deeper zone is never reached by the
+   walk and matches nothing.
+2. **Every `app_domain` must be at or under `cs_app_zone`,** at a label
+   boundary.
+
+**`app_domain`'s own depth is NOT constrained.** The walk runs over the
+container FQDN and stops at the first match, so a deep `app_domain` under a
+3-label zone is perfectly fine — only `cs_app_zone`'s label count matters.
+`roles/preflight` implements exactly these two checks, as hard asserts:
+production's load balancer domains all live in one zone file, and the failure
+they prevent — a tenant wildcard certificate that silently never issues — is
+invisible at install time.
+
+#### This change is CREATE-ONLY
+
+`Bootstrap::ApplyService#apply_load_balancer` splits the row's fields two
+ways, and the split decides the whole scope:
+
+* `domain` goes in `attrs`, so on an EXISTING row `Writer#create_or_report!`
+  reports drift and **never writes it**. No `addresses:` hash is passed, so
+  `UPDATE_ADDRESSES=1` does not reach it either. A live load balancer's domain
+  is operator-owned: humans edit it in the admin UI for years and a stale
+  manifest must not roll that back.
+* `shared_certificate` goes in `credential_secrets`, and `rotate!` **does**
+  write it whenever the decrypted value differs.
+
+So a per-az `app_domain` lands correctly when the `LoadBalancer` row is
+CREATED — greenfield, and every new region attached — and applying it to an
+already-seeded row would replace the certificate while leaving the domain
+alone, handing that load balancer a certificate whose CN no longer matches the
+name it still serves. Changing an existing load balancer's domain is
+deliberately **out of scope** and stays a controller-side, human-operated
+action.
+
+`roles/controller_seed` therefore runs `DRY_RUN=1` **unconditionally** and
+fails the run when the preview reports drift on a load balancer's `domain`
+(gate G). `controller_seed_dry_run_first` governs only whether that preview is
+PRINTED; it can no longer switch the gate off.
+
+**Operator remediation when gate G fires:** change that load balancer's domain
+in the admin UI first, then re-run the seed. Do not edit the inventory to
+match the stale row unless the row is what you actually want — the inventory
+is also what `roles/controller` names the certificate after.
 
 ### Controller invocation helper (used by cs_agent enroll; provided by cstacks)
 The v2 `cstacks` CLI provides:

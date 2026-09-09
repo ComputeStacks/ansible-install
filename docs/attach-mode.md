@@ -156,10 +156,27 @@ ansible-playbook -i inventories/prod playbooks/add-region.yml --ask-vault-pass
 The run stops and waits once, on purpose. `controller_seed` applies the
 manifest with `DRY_RUN=1` first, prints what it would create plus any drift
 warnings, and pauses for you to read it. That is the last point before
-anything is written to the controller's database. Set
-`controller_seed_confirm: false` to skip the prompt in CI (the `pause` module
-needs a tty), and `controller_seed_dry_run_first: false` to skip the preview
-entirely — both are deliberate opt-outs, not defaults.
+anything is written to the controller's database.
+
+**The `DRY_RUN` pass itself is unconditional and cannot be switched off.** It
+is the input to gate G, which fails the run when the preview reports drift on
+a load balancer's `domain` — the apply rotates a load balancer's certificate
+on an existing row but never rewrites its domain, so a manifest that disagrees
+would hand a live load balancer a certificate whose CN no longer matches the
+name it still serves. A gate whose input never ran passes without checking
+anything, so the preview always runs. `DRY_RUN=1` writes nothing.
+
+The two opt-outs govern only the human-facing half:
+`controller_seed_confirm: false` skips the prompt in CI (the `pause` module
+needs a tty), and `controller_seed_dry_run_first: false` stops the preview
+being PRINTED. Neither disables the gate.
+
+Each new az also needs its own `app_domain` and its own pair of public DNS
+records — `<app_domain>` A to that node's public IP and `*.<app_domain>`
+**CNAME** to `<app_domain>` (docs/install.md §3). `roles/preflight` requires
+the new node's `app_domain` to be set and to differ from `cs_app_zone`;
+`roles/validate`'s `lb_domain` check reads the controller's verdict on those
+records back at the end of the run.
 
 The attach manifest carries **topology only**: the new location, region, node,
 network and load balancer, plus the user-group region link without which the

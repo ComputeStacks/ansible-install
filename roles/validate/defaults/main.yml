@@ -6,7 +6,7 @@
 #   validate_skip: [borg, dns]
 #
 # Check names: services, containers, agent, backfill, prometheus, borg, ssh,
-# portal, acme_backend, dns.
+# portal, acme_backend, lb_domain, dns.
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name
@@ -141,3 +141,23 @@ validate_portal_status_codes: [200, 301, 302, 303, 401, 403]
 # reports status -1 on a connection error, so the assertion is simply "a
 # status came back".
 validate_acme_timeout: 10
+
+# --- lb_domain ------------------------------------------------------------
+# How long to wait for the controller to finish validating this az's load
+# balancer domain before reporting the verdict as "not yet available".
+#
+# `LoadBalancerWorkers::ValidateDomainWorker` is enqueued from the load
+# balancer's `after_save`, so on a greenfield converge the row is seconds old
+# when validate reaches it and the worker's DNS queries (Dnsruby, three
+# retries each) routinely outlast the plays in between. The task polls until
+# `domain_valid_check` is written and stops on the first non-pending answer,
+# so a healthy install pays for one query and only a genuinely pending one
+# waits.
+#
+# Retries x delay is the ceiling: 12 x 10 = two minutes. Set
+# `validate_lb_domain_retries: 1` to take whatever answer is there and move
+# on. Waiting longer never turns a failure into a pass — a verdict of
+# INVALID is final and fails immediately — it only converts "not checked
+# yet", which is reported and NOT asserted, into a real answer.
+validate_lb_domain_retries: 12
+validate_lb_domain_delay: 10

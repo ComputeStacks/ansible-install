@@ -1,4 +1,28 @@
 profile: production
+
+# NO `skip_list` AND NO `.ansible-lint-ignore` FOR var-naming[no-role-prefix].
+#
+# `roles/controller/vars/main.yml` and `roles/controller_seed/vars/main.yml`
+# each define `cs_app_domains` and `cs_app_domain_cert_paths`, which the
+# production profile flags because they are not prefixed with the owning
+# role's name. That is deliberate: the two spellings are a frozen cross-role
+# contract (docs/contracts.md §Per-az application domains), defined
+# character-for-character identically in the role that GENERATES each
+# certificate and the role that SLURPS it back. Prefixing them per role would
+# give one contract two names in the two places that must agree.
+#
+# The exclusion stays as a `# noqa: var-naming[no-role-prefix]` marker on each
+# of those lines, and NOT as configuration here, because this file cannot
+# express the scope that is actually wanted. ansible-lint scopes an exclusion
+# by path (`exclude_paths`, which drops every rule for that file) or by rule
+# (`skip_list`, repository-wide); the only path+rule form is a
+# `.ansible-lint-ignore` entry, which silences the rule for the WHOLE file and
+# would therefore cover any future variable added to it — and it downgrades
+# the findings to printed warnings rather than removing them. The `noqa`
+# marker is per line, per name, sits beside the comment explaining itself, and
+# leaves `make lint` genuinely clean. Do not "tidy" the markers away into this
+# file.
+
 exclude_paths:
   - workspace-plan-DO-NOT-COMMIT.md
   # Installed dependencies, not our code: `ansible-galaxy ... -p galaxy_roles`
