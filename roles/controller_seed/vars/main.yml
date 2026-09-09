@@ -28,8 +28,10 @@ controller_seed_controller_tailnet: >-
 # The sites this run actually seeds, sorted. Derived from `cs_new_nodes`, NOT
 # from groups['nodes']: an existing host's az is not in the document (its load
 # balancer would be re-rendered, and Bootstrap::Writer#create_or_report!
-# rotates stats_password and shared_certificate unconditionally on a row that
-# already exists), so a client row for a site that contributes no new node
+# ROTATES stats_password and shared_certificate on a row that already exists,
+# where every other column is only reported as drift -- see the note in
+# templates/manifest.yml.j2 for why "unchanged values are skipped" is not the
+# same as "safe"), so a client row for a site that contributes no new node
 # would be created with nothing referencing it.
 controller_seed_manifest_sites: >-
   {{ cs_new_nodes | map('extract', hostvars, 'cs_site') | list | unique | sort }}
@@ -63,6 +65,93 @@ controller_seed_site_endpoints_json: >-
   {% endfor %}
   }
 controller_seed_site_endpoints: "{{ controller_seed_site_endpoints_json | from_json }}"
+
+### Per-az application domains (playbooks/group_vars/all/app_domains.yml).
+# Role vars, not defaults: the spellings are frozen cross-role contract, not
+# operator knobs. The operator knobs are `app_domain` (per node),
+# `app_wildcard_dir` (environment-wide) and, for the one legacy entry,
+# `controller_seed_shared_cert_path`.
+#
+# BOTH MAPS ARE LOCAL USE ONLY -- read them HERE, on the controller, which is
+# the host rendering the manifest. They are derived from `hostvars`, so
+# `hostvars[h].cs_app_domains` / `hostvars[h].cs_app_domain_cert_paths` are
+# silently Undefined and a hard-rule violation (docs/contracts.md §Variable
+# scope, rule 10). The value that DOES survive a cross-host read is
+# `cs_app_domain`, which is deliberately trivial for exactly that reason, and
+# it is the one the template uses per node. Same shape as the site maps: the
+# cross-host read is a plain scalar; anything needing `hostvars` is a map the
+# rendering host indexes locally.
+#
+# These two are defined IDENTICALLY in roles/controller/vars/main.yml, which
+# is the role that generates the certificates these paths point at. The one
+# difference is the `cs_app_zone` entry: roles/controller has
+# `controller_wildcard_cert` in scope and uses it; this role does not (it is a
+# roles/controller default, and the seeding play -- and the whole of attach
+# mode -- never loads that role), so it uses
+# `controller_seed_shared_cert_path`, which carries the same literal as its
+# fallback and doubles as the attach-mode override. See defaults/main.yml.
+#
+# THE `# noqa: var-naming[no-role-prefix]` MARKERS ARE DELIBERATE, and they
+# are in roles/controller/vars/main.yml for the same reason. Every other
+# variable this role owns is `controller_seed_`-prefixed and ansible-lint's
+# production profile enforces that -- but these spellings are a cross-role
+# contract, not this role's property. Prefixing them per role would give one
+# frozen contract two names, in the two roles that MUST agree about which
+# domain maps to which pem: one writes those files, the other reads them back.
+# That disagreement is exactly what the contract exists to prevent.
+
+# Every distinct load balancer domain this run seeds, deduplicated and sorted.
+# Character-for-character what roles/controller derives -- diff the two blocks.
+#
+# `cs_new_nodes`, NOT `groups['nodes']`, for the same reason
+# `controller_seed_manifest_sites` above uses it: an already-provisioned az is
+# not in the document, so demanding its domain's certificate on disk (and
+# slurping it) would fail a run over a pem the manifest never reads. On an
+# attach run against a v1 controller the other regions' pems are not on this
+# host at all. In a greenfield converge the two lists are identical.
+#
+# `| sort` is not decoration: `cs_new_nodes` is built with `difference()`,
+# which does not preserve inventory order, and this list is the loop order of
+# three tasks whose output a human reads.
+cs_app_domains: >-  # noqa: var-naming[no-role-prefix]
+  {{ (cs_new_nodes | default([])) | map('extract', hostvars, 'cs_app_domain')
+     | map('string') | list | unique | sort }}
+
+# domain -> the pem holding that domain's certificate AND key (one file,
+# which is the form haproxy wants).
+#
+#   domain == cs_app_zone  ->  controller_seed_shared_cert_path   (LEGACY)
+#   otherwise              ->  <cs_app_wildcard_dir>/<domain>/sharedcert.pem
+#
+# The ONLY line that differs from roles/controller's copy is the legacy
+# branch, and it has to: that role names `controller_wildcard_cert` directly,
+# which is a roles/controller DEFAULT and is not in scope in the seeding play
+# or anywhere in attach mode. `controller_seed_shared_cert_path` carries the
+# identical literal as its own fallback, so the two agree by construction --
+# and it is also the operator's attach-mode override, which is the one case
+# where they are MEANT to differ (defaults/main.yml says when and why).
+#
+# `cs_app_wildcard_dir` is the ONE spelling of the path root and it is a
+# hostvars-free global (playbooks/group_vars/all/app_domains.yml), so it is in
+# scope in the seeding play and in attach mode. Neither role may re-derive the
+# root from `controller_wildcard_dir`: two role vars each carrying the same
+# literal are two literals that drift.
+#
+# Built as JSON and parsed back, the same idiom and for the same reason as
+# `controller_seed_site_endpoints` above and playbooks/group_vars/all/sites.yml:
+# the legacy branch needs a jinja for-loop, a template carrying one renders to
+# a string, and the round-trip is what turns it back into a mapping. `to_json`
+# on every scalar is what makes an arbitrary domain safe to embed.
+cs_app_domain_cert_paths_json: >-  # noqa: var-naming[no-role-prefix]
+  {
+  {% for cs_ad in cs_app_domains %}
+  {{ cs_ad | to_json }}:
+  {{ (controller_seed_shared_cert_path | trim
+      if cs_ad == cs_app_zone
+      else (cs_app_wildcard_dir ~ '/' ~ cs_ad ~ '/sharedcert.pem')) | to_json }}{{ ',' if not loop.last else '' }}
+  {% endfor %}
+  }
+cs_app_domain_cert_paths: "{{ cs_app_domain_cert_paths_json | from_json }}"  # noqa: var-naming[no-role-prefix]
 
 controller_seed_schema_sections:
   - schema_version

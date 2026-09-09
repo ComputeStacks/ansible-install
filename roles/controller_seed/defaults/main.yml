@@ -42,6 +42,12 @@ controller_seed_update_addresses: false
 # Attach mode always previews with DRY_RUN=1 first and then waits for the
 # operator to confirm. Set controller_seed_confirm: false for CI (the pause
 # module needs a tty).
+#
+# This flag now governs only whether the preview is PRINTED, not whether it
+# RUNS. The DRY_RUN pass is unconditional because gate G reads it, and a gate
+# whose input never ran passes without checking anything -- see the long
+# comment on the preview task. Setting this false still gives CI a quiet run;
+# it no longer disables the load balancer domain gate.
 controller_seed_dry_run_first: true
 controller_seed_confirm: true
 
@@ -93,8 +99,12 @@ controller_seed_log_endpoint: "https://{{ cs_metrics_domain }}:{{ cs_ports.metri
 # role used to own were single-site by construction and are RETIRED --
 # tasks/main.yml fails loudly if an inventory still sets one, rather than
 # ignoring it silently and writing the wrong password to a live client (the
-# apply rotates a client's username/password unconditionally on an existing
-# row -- controller repo doc/bootstrap_manifest.md §Credential rotation).
+# apply rotates a client's username/password on an existing row -- controller
+# repo doc/bootstrap_manifest.md §Credential rotation). Not
+# "unconditionally": Bootstrap::Writer#rotate! assigns only the fields it is
+# given and only those that differ, so an unchanged password is left alone.
+# That is no comfort here -- a dropped override is by definition a value that
+# differs from what the row holds, which is exactly when rotate! writes.
 controller_seed_create_clients: true
 
 # --- dns ------------------------------------------------------------------
@@ -138,11 +148,24 @@ controller_seed_node_port_begin: "{{ cs_ports.tenant_port_begin }}"
 controller_seed_node_port_end: "{{ cs_ports.tenant_port_end }}"
 
 # --- load balancer --------------------------------------------------------
-# The shared wildcard domain tenant containers are published under
-# (<container>.<domain>). It MUST equal the CN/SAN of the wildcard
-# certificate below or every tenant TLS handshake mismatches; both come from
-# cs_app_zone through roles/controller's controller_wildcard_domain.
-controller_seed_lb_domain: "{{ controller_wildcard_domain | default(cs_app_zone) }}"
+# THE LOAD BALANCER DOMAIN IS NOT A KNOB OF THIS ROLE. It is per AZ -- every
+# availability zone has its own load balancer and in a real estate every one
+# of them answers on a DIFFERENT domain -- so it comes from `cs_app_domain`
+# (playbooks/group_vars/all/app_domains.yml) and the template reads it per
+# node as the cross-host-safe `hostvars[host].cs_app_domain`. It still MUST
+# equal the CN/SAN of that domain's wildcard certificate or every tenant TLS
+# handshake to that az mismatches, which is why the certificate is looked up
+# BY THE SAME DOMAIN (`cs_app_domain_cert_paths`, vars/main.yml) rather than
+# from a second variable that could disagree with it.
+#
+# `controller_seed_lb_domain` -- one scalar for the whole fleet, derived from
+# roles/controller's `controller_wildcard_domain` -- is RETIRED. It could only
+# ever render one domain into every az's load balancer, which is the bug this
+# feature exists to fix. tasks/main.yml FAILS if an inventory still sets it,
+# rather than ignoring it silently: an operator who set it meant to choose the
+# LB domain, and quietly rendering `cs_app_domain` instead would give them a
+# certificate whose CN does not match the domain it is served on -- a tenant
+# TLS failure with nothing anywhere saying why. Set `app_domain` per node.
 controller_seed_lb_stats_bind: "*:{{ cs_ports.haproxy_stats }}"
 # The column ships a hard-coded default, so leaving this unset would publish
 # the same stats password on every install. Derived deterministically from
@@ -153,9 +176,45 @@ controller_seed_lb_stats_password: >-
      | default((secret_key_base ~ '|haproxy-stats') | hash('sha256') | truncate(32, true, '')) }}
 controller_seed_lb_direct_connect: false
 controller_seed_lb_le: false
-# The self-signed tenant wildcard roles/controller generates once (cert AND
-# key in one pem). v1 kept it at the same path, so attach mode reads the
-# existing environment's certificate here too.
+# THE LEGACY CERTIFICATE PATH, AND THE ONE OPERATOR OVERRIDE IN THE PER-DOMAIN
+# MAP. `cs_app_domain_cert_paths` (vars/main.yml) maps every load balancer
+# domain this run seeds to the pem roles/controller generated for it. Every
+# domain OTHER than `cs_app_zone` derives its path from `cs_app_wildcard_dir`;
+# the `cs_app_zone` entry -- the default domain, the one an inventory that
+# names no `app_domain` at all uses for every az -- resolves to THIS value
+# instead, and it is deliberately the path v1 used.
+#
+# Two reasons it is carved out rather than folded into the scheme:
+#
+#   * `Writer#rotate!` compares a credential through the DECRYPTED reader and
+#     skips a value that has not changed, so generate-once at a stable path is
+#     a genuine no-op on re-converge. Move the default domain's certificate to
+#     a new path and the value really does change, and the next converge
+#     pushes a fresh certificate to every load balancer in the fleet.
+#   * It is the documented ATTACH-MODE ESCAPE HATCH. Attach mode runs against
+#     a controller this repository did not build, whose `controller_data_dir`
+#     may be anywhere; point this at that environment's existing shared
+#     certificate pem and the `cs_app_zone` entry finds it. (A new az attached
+#     to an existing environment should set its own `app_domain`, which takes
+#     the per-domain path and never touches this one -- roles/preflight
+#     asserts exactly that. This override is for the case where the existing
+#     environment's own default domain still has to be read.)
+#
+# The fallback literal is the same one roles/controller derives by default.
+# `controller_wildcard_cert` is a roles/controller default and is NOT in scope
+# in the seeding play, which is why the fallback exists at all rather than the
+# expression simply being wrong -- see the note on cs_app_wildcard_dir in
+# playbooks/group_vars/all/app_domains.yml.
+#
+# GREENFIELD OPERATORS MOVING `controller_data_dir` MUST SET THIS TOO, and the
+# reason is the sentence above. roles/controller derives the legacy pem from
+# `controller_data_dir`, so moving that directory moves the file -- but this
+# variable cannot see the move, takes the hard-coded fallback, and looks for
+# the certificate where it is not. It fails loudly, with the path named, at
+# the per-domain existence assert rather than seeding anything wrong. The
+# per-az half of the same problem is `app_wildcard_dir`; a moved data
+# directory needs BOTH. Nothing can assert it: neither name is in scope on
+# the host that would have to check.
 controller_seed_shared_cert_path: >-
   {{ controller_wildcard_cert | default('/var/lib/computestacks/.ssl_wildcard/sharedcert.pem') }}
 

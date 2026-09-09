@@ -131,13 +131,30 @@ locations:
     fill_by_qty: true
     regions:
 {# cs_new_nodes, NOT groups['nodes']: an existing host must never reach this
-   document. Bootstrap::Writer#create_or_report! rotates a load balancer's
-   stats_password and shared_certificate UNCONDITIONALLY on a row that already
-   exists (controller repo doc/bootstrap_manifest.md, Credential rotation) --
-   there is no flag and no preview beyond the DRY_RUN text, so rendering an
-   existing az here pushes a new haproxy stats password to a production node
-   at its next LB update. `difference` does not preserve order, hence the
-   sort. #}
+   document. Bootstrap::Writer#create_or_report! ROTATES a load balancer's
+   stats_password and shared_certificate on a row that already exists
+   (controller repo doc/bootstrap_manifest.md, Credential rotation) -- they
+   are the narrow enumerated exception to bootstrap-only, and every other
+   column, `domain` included, is compared and reported as drift and never
+   written.
+
+   Not "unconditionally", to be exact: Writer#rotate! compares each credential
+   through the DECRYPTED reader and skips one whose value has not actually
+   changed. That is what makes generate-once-at-a-stable-path idempotent, and
+   it is NOT what makes rendering an existing az safe -- nothing here
+   guarantees the rendered value matches what that row already carries. A
+   v1-seeded az holds a certificate this repository never generated, and the
+   stats password is derived from secret_key_base. So rendering an existing az
+   pushes a new certificate and a new haproxy stats password to a production
+   node at its next LB update, with no flag and no preview beyond the DRY_RUN
+   text.
+
+   That asymmetry -- certificate written, domain only reported -- is also why
+   this whole per-az feature is CREATE-ONLY, and why tasks/main.yml fails the
+   run when the DRY_RUN preview reports drift on a load balancer's `domain`:
+   the alternative is handing an already-seeded LB a certificate whose CN no
+   longer matches the domain it still serves. `difference` does not preserve
+   order, hence the sort. #}
 {% for host in (cs_new_nodes | sort) %}
 {% if hostvars[host].region == location %}
 {% set node_ts = hostvars[host].tailscale_ip | default(hostvars[host].ansible_local.computestacks.tailscale_ip | default('')) %}
@@ -191,7 +208,25 @@ locations:
             network_driver: {{ controller_seed_network_driver | to_json }}
         load_balancer:
           label: {{ (hostvars[host].az ~ ' lb') | to_json }}
-          domain: {{ controller_seed_lb_domain | to_json }}
+{# THIS AZ'S OWN load balancer domain, and THIS AZ'S OWN certificate. Every az
+   has its own load balancer and in a real estate every one of them answers on
+   a different domain; a single fleet-wide scalar was the bug.
+
+   `hostvars[host].cs_app_domain` is the cross-host-safe read (contracts.md
+   rule 10): cs_app_domain references only the plain inventory host var
+   `app_domain` and the environment-wide `cs_app_zone`, no hostvars, which is
+   precisely why it exists as its own trivial variable. NEVER
+   `hostvars[host].cs_app_domain_cert_paths` -- that map IS built from
+   hostvars, so across hosts it evaluates to Undefined, and the `| default()`
+   anyone would reach for next turns that into a wrong-but-plausible path with
+   no error and nothing in the drift report. The map is read LOCALLY, here on
+   the controller, keyed by the domain -- same shape as the site maps above.
+
+   `domain` and `shared_certificate` MUST agree: the certificate's CN/SAN is
+   the domain, and a mismatch is a failed TLS handshake for every tenant
+   container in that az. They are keyed off the same value here for that
+   reason -- there is no second variable that could disagree. #}
+          domain: {{ hostvars[host].cs_app_domain | to_json }}
           public_ip: {{ hostvars[host].public_ip | to_json }}
           ext_ip:
             - {{ hostvars[host].primary_ip | to_json }}
@@ -202,7 +237,7 @@ locations:
           stats_bind: {{ controller_seed_lb_stats_bind | to_json }}
           stats_password: {{ controller_seed_lb_stats_password | to_json }}
           shared_certificate: |
-{{ controller_seed_shared_certificate | trim | indent(12, true) }}
+{{ controller_seed_shared_certificates[hostvars[host].cs_app_domain] | trim | indent(12, true) }}
 {% endif %}
 {% endfor %}
 {% endfor %}

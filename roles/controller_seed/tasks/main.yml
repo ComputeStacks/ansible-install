@@ -38,8 +38,12 @@
 - name: Assert no inventory still sets the retired single-site client credentials
   # They were single-site by construction. Ignoring them silently would let an
   # operator believe they had set a password that the manifest never carried --
-  # and the apply ROTATES a client's username/password unconditionally on a row
-  # that already exists, so the wrong value lands on a live controller.
+  # and the apply ROTATES a client's username/password on a row that already
+  # exists, so the wrong value lands on a live controller. Not
+  # "unconditionally": Bootstrap::Writer#rotate! assigns only the fields it is
+  # given and only those that differ. That is no comfort here -- a dropped
+  # override is by definition a value that differs from what the row holds,
+  # which is exactly when rotate! writes.
   ansible.builtin.assert:
     that:
       - controller_seed_prometheus_username is not defined
@@ -53,6 +57,33 @@
       (and `acme_web_prometheus_username` / `acme_web_loki_username`), and any
       per-site override in the vaulted `metrics_site_credentials`
       (docs/contracts.md §Site scoping).
+    quiet: true
+
+- name: Assert no inventory still sets the retired fleet-wide load balancer domain
+  # `controller_seed_lb_domain` was ONE scalar rendered into EVERY az's load
+  # balancer. Every az has its own load balancer and in a real estate every
+  # one of them answers on a different domain, so the scalar could only ever
+  # be right for one of them -- it is the bug this feature exists to fix, and
+  # the domain now comes from `cs_app_domain` per node.
+  #
+  # Fail rather than ignore, for the same reason as the retired client
+  # credentials above. An operator who set this meant to CHOOSE the load
+  # balancer domain. Silently rendering `cs_app_domain` instead would seed a
+  # domain they did not ask for while `roles/controller` generated a wildcard
+  # certificate for that same `cs_app_domain` -- so the CN would match the
+  # seeded domain, both would be wrong, and the only symptom would be tenant
+  # containers published under a name their DNS does not answer for. Nothing
+  # in the run, the drift report or `validate` would mention this variable.
+  ansible.builtin.assert:
+    that:
+      - controller_seed_lb_domain is not defined
+    fail_msg: >-
+      controller_seed_lb_domain is retired: the load balancer domain is PER AZ
+      now. Set `app_domain` as a host var on each node
+      (playbooks/group_vars/all/app_domains.yml); a node that sets none takes
+      `cs_app_zone`, which is what this variable defaulted to. roles/preflight
+      validates the shape and the zone relationship, and roles/controller
+      generates one wildcard certificate per distinct domain.
     quiet: true
 
 - name: Assert every site this run seeds has metric and log client credentials
@@ -228,34 +259,67 @@
       from there.
   when: (controller_seed_acme_primary_ip_nodes | length) > 0
 
-- name: Check that the tenant wildcard certificate exists
+# ONE CERTIFICATE PER LOAD BALANCER DOMAIN, not one for the fleet. Each az's
+# load balancer serves the wildcard whose CN is that az's own `cs_app_domain`,
+# so the four tasks below are per domain: stat, assert, slurp, map. Only
+# domains of `cs_new_nodes` are looked at (`cs_app_domains`) -- an
+# already-provisioned az is not in the document, and on an attach run against
+# a v1 controller its pem is not on this host at all.
+- name: Check that every load balancer domain's tenant wildcard certificate exists
   ansible.builtin.stat:
-    path: "{{ controller_seed_shared_cert_path }}"
-  register: controller_seed_cert_stat
+    path: "{{ cs_app_domain_cert_paths[item] }}"
+  register: controller_seed_cert_stats
+  loop: "{{ cs_app_domains }}"
 
-- name: Assert the tenant wildcard certificate is present
+- name: Assert every load balancer domain's tenant wildcard certificate is present
+  # Deliberately NOT no_log, unlike the slurp below: nothing here has read the
+  # file, the only values in play are a domain and a path, and hiding them
+  # would leave an operator with "a certificate is missing" and no way to know
+  # which one. The path is named because that is the actionable half.
   ansible.builtin.assert:
     that:
-      - controller_seed_cert_stat.stat.exists
+      - item.stat.exists
     fail_msg: >-
-      No tenant wildcard certificate at {{ controller_seed_shared_cert_path }}.
-      Greenfield: roles/controller generates it (run the controller role
-      first). Attach mode: point controller_seed_shared_cert_path at the
-      existing environment's shared certificate pem -- every load balancer in
-      the fleet must serve the SAME certificate, so never let this render
-      empty.
+      No tenant wildcard certificate for load balancer domain
+      '{{ item.item }}' at {{ cs_app_domain_cert_paths[item.item] }}.
+      Greenfield: roles/controller generates one pem per distinct
+      `app_domain` (run the controller role first, and note that it generates
+      ONCE per domain -- a domain added to the inventory after the controller
+      was built needs that role re-run). Attach mode: `tasks_from:
+      attach_prep` generates the NEW az's domain only, which is why a new az
+      must set an `app_domain` of its own; for the existing environment's
+      default domain, point controller_seed_shared_cert_path at that
+      environment's shared certificate pem. Never let this render empty --
+      the load balancer would be created with no certificate at all.
     quiet: true
+  loop: "{{ controller_seed_cert_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
 
-- name: Read the tenant wildcard certificate
-  # Carries the private key: never logged, never diffed.
+- name: Read every load balancer domain's tenant wildcard certificate
+  # Carries the private keys: never logged, never diffed. `no_log` suppresses
+  # the CALLBACK output, not the registered value, so the map below still gets
+  # real content. This being a loop rather than a single slurp is exactly the
+  # shape where a key leaks -- a looped task prints one result per item, and
+  # `-v` on an un-no_log'd slurp puts the base64 of a private key on the
+  # terminal and in the ansible log. Every task from here to the manifest
+  # write carries it.
   ansible.builtin.slurp:
-    src: "{{ controller_seed_shared_cert_path }}"
+    src: "{{ cs_app_domain_cert_paths[item] }}"
   register: controller_seed_cert_raw
+  loop: "{{ cs_app_domains }}"
   no_log: true
 
-- name: Keep the certificate for the manifest render
+- name: Keep every domain's certificate for the manifest render
+  # domain -> pem text. Built in ONE task from the registered results rather
+  # than by accumulating with `combine` over a second loop: one task is one
+  # place for `no_log` to be missing from, and an accumulator prints the whole
+  # growing map on every iteration if it ever is.
   ansible.builtin.set_fact:
-    controller_seed_shared_certificate: "{{ controller_seed_cert_raw.content | b64decode }}"
+    controller_seed_shared_certificates: >-
+      {{ dict(controller_seed_cert_raw.results | map(attribute='item') | list
+              | zip(controller_seed_cert_raw.results | map(attribute='content')
+                    | map('b64decode') | list)) }}
   no_log: true
 
 - name: Render the manifest in memory
@@ -294,10 +358,30 @@
       diff: false
       no_log: true
 
-    # The preview gates two deliberate-operation paths: any apply against an
-    # existing environment, and any run with the address-update flag on (an
-    # address rewrite is a topology change and deserves eyes even greenfield).
-    - name: Preview the apply against the existing controller (DRY_RUN)
+    # UNCONDITIONAL, and the `when:` this task used to carry is the reason.
+    #
+    # The preview began life as the operator-facing half of two deliberate
+    # operations -- an apply against an existing environment, and any run with
+    # the address-update flag on -- so it ran only for those, and only when
+    # `controller_seed_dry_run_first` was left true. Gate G below then reads
+    # its output, and a gate that reads a task which did not run does not fail:
+    # it passes, silently, having checked nothing.
+    #
+    # Both skips cover the case the gate exists FOR. A v2 environment that has
+    # already converged has nothing flagged `existing_env` -- it is a
+    # greenfield inventory that happens to have been applied once -- so an
+    # operator who adds `app_domain` to those nodes and re-runs would have got
+    # no preview, no gate, and a certificate rotated onto every load balancer
+    # whose domain the apply will not touch. `dry_run_first: false`, the flag
+    # reached for to skip the prompt in CI, removed the gate the same way.
+    #
+    # So the PREVIEW is now a safety scan that always runs, and the PAUSE below
+    # keeps the deliberate-operation gating it always had. DRY_RUN=1 writes
+    # nothing (the apply is one transaction and the preview rolls it back), so
+    # the cost of the split is one extra read-only `cstacks seed` on a
+    # greenfield converge, which buys the only automated check that stands
+    # between a stale `app_domain` and nine mismatched tenant certificates.
+    - name: Preview the apply (DRY_RUN) -- always, so gate G has something to read
       ansible.builtin.command:
         argv:
           - "{{ controller_seed_cstacks_bin }}"
@@ -308,14 +392,107 @@
         UPDATE_ADDRESSES: "{{ '1' if controller_seed_update_addresses | bool else '0' }}"
       register: controller_seed_dry_run
       changed_when: false
-      when:
-        - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
-        - controller_seed_dry_run_first | bool
 
+    # The DISPLAY keeps the gating the preview used to carry, so a greenfield
+    # converge does not start dumping a diff it never printed before, and
+    # `controller_seed_dry_run_first: false` still means what
+    # docs/automation.md says it means -- "the preview is for humans", no
+    # human-facing output in CI. What it no longer does is remove gate G:
+    # the gate reads the registered result, not this task, and its own
+    # fail_msg carries the drifted lines an operator needs.
     - name: Show what the apply would change
       ansible.builtin.debug:
         var: controller_seed_dry_run.stdout_lines
-      when: (controller_seed_dry_run.stdout_lines | default([])) | length > 0
+      when:
+        - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
+        - controller_seed_dry_run_first | bool
+        - (controller_seed_dry_run.stdout_lines | default([])) | length > 0
+
+    # GATE G -- refuse to rotate a certificate onto a load balancer whose
+    # domain we cannot change.
+    #
+    # `Bootstrap::ApplyService#apply_load_balancer` splits the row's fields two
+    # ways, and the split is the whole reason this gate exists:
+    #
+    #   * `domain` goes in `attrs`, so on an EXISTING row
+    #     `Writer#create_or_report!` calls `report_drift` and never writes it.
+    #     No `addresses:` hash is passed either, so UPDATE_ADDRESSES=1 does not
+    #     reach it. The domain of a live load balancer is operator-owned: it is
+    #     edited by humans in the admin UI for years and a stale manifest must
+    #     not roll it back.
+    #   * `shared_certificate` goes in `credential_secrets`, and `rotate!` DOES
+    #     write it whenever the decrypted value differs.
+    #
+    # Left alone, an inventory whose `app_domain` disagrees with an
+    # already-seeded row therefore replaces that load balancer's CERTIFICATE
+    # and leaves its DOMAIN untouched -- a production load balancer serving a
+    # wildcard whose CN no longer matches the name it answers on, which fails
+    # every tenant TLS handshake in that az. That is this feature's own worst
+    # failure, inverted, and it would happen inside a green run.
+    #
+    # Changing the domain of an existing load balancer is deliberately out of
+    # scope for the provisioner and stays a human action in the admin UI. So
+    # the gate does not try to fix it: it stops before the real apply and says
+    # what to do. It is a guard against a future mistake, not a migration tool
+    # -- production's rows were created by v1 with their correct per-region
+    # domains already.
+    #
+    # It can only fire where the preview ran (attach mode, or any run with the
+    # address flag). Greenfield does not preview and does not need to: there
+    # are no existing rows to drift from.
+    - name: Find any load balancer domain drift in the preview
+      # `Recorder#drift` prints a subject line and then one line per changed
+      # attribute (recorder.rb, `drift`):
+      #
+      #     [warn  ] LoadBalancer exm-005 — manifest differs from database, ...
+      #              domain: database "a.example.com", manifest "b.example.com"
+      #
+      # (two leading spaces on the subject, thirteen on the attribute), so the
+      # attribute line does NOT name its own subject and a grep for
+      # `domain:` alone would also catch a drifted Region or Setting. The scan
+      # tracks the last subject line -- every one starts at column 2 with a
+      # bracketed action -- and only counts a `domain:` line underneath a
+      # `LoadBalancer` one. Both lines are kept verbatim: the operator gets the
+      # apply's own words, including which value is the database's.
+      ansible.builtin.set_fact:
+        controller_seed_lb_domain_drift: "{{ controller_seed_lb_domain_drift_json | from_json }}"
+      vars:
+        controller_seed_lb_domain_drift_json: >-
+          {% set ns = namespace(subject='') %}
+          {% set drifted = [] %}
+          {% for line in (controller_seed_dry_run.stdout_lines | default([])) %}
+          {% if line.startswith('  [') %}
+          {% set ns.subject = line | trim %}
+          {% elif ('] LoadBalancer ' in ns.subject)
+                  and line.strip().startswith('domain: database ') %}
+          {% set _ = drifted.append(ns.subject ~ '\n    ' ~ line.strip()) %}
+          {% endif %}
+          {% endfor %}
+          {{ drifted | to_json }}
+
+    - name: Refuse to seed a load balancer whose domain the apply cannot change
+      ansible.builtin.assert:
+        that:
+          - (controller_seed_lb_domain_drift | default([])) | length == 0
+        fail_msg: >-
+          The DRY_RUN preview reports DOMAIN drift on {{ (controller_seed_lb_domain_drift | length) }}
+          load balancer(s) that already exist, and nothing has been applied:
+
+
+          {{ controller_seed_lb_domain_drift | join('\n\n  ') }}
+
+
+          `domain` is bootstrap-only. The apply reports it and never writes it,
+          not even under UPDATE_ADDRESSES=1 -- but it DOES rotate that same row's
+          `shared_certificate`. Letting this run would give each load balancer
+          above a wildcard certificate whose CN is the manifest's domain while
+          it keeps answering on the database's, and every tenant TLS handshake
+          in that az would fail. Change the domain in the controller's admin UI
+          first (or correct `app_domain` in the inventory to match what the
+          database already holds), then re-run. This role will not do it for
+          you: a load balancer's domain is operator-owned and a stale manifest
+          must never roll it back.
+        quiet: true
 
     - name: Confirm the apply against the existing controller
       ansible.builtin.pause:
@@ -354,7 +531,8 @@
       ansible.builtin.debug:
         msg: >-
           The seed FAILED and nothing was written to the controller database
-          (the whole apply is one transaction). {{ controller_seed_manifest_path }}
+          (the whole apply is one transaction, and gate G stops before the
+          apply runs at all). {{ controller_seed_manifest_path }}
           has been kept for debugging -- it is root 0600 and carries secrets,
           so delete it once you are done. Re-running this role re-renders and
           re-applies it; the apply is idempotent.
@@ -362,5 +540,7 @@
     - name: Fail the play
       ansible.builtin.fail:
         msg: >-
-          cstacks seed failed on {{ inventory_hostname }} -- see the apply's
-          own error above, which names the manifest section and key path.
+          The seed step failed on {{ inventory_hostname }} -- see the error
+          above. From `cstacks seed` it names the manifest section and key
+          path; from the load balancer domain gate it names the load balancer
+          and the two domains, and nothing was applied.
