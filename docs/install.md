@@ -107,10 +107,47 @@ in the tenant zone the bundled nameservers serve. They point at the load
 balancers, and the zone the nameservers host is where the controller creates
 records *for* tenant containers underneath them.
 
-Port 80 must be reachable from the internet on the controller for the default
-HTTP-01 challenge. The metrics and registry hosts also serve HTTP-01 on 80.
-If a host cannot expose 80, use a DNS-01 provider —
-[acme-providers.md](acme-providers.md) has the matrix.
+### If you delegate per-az instead of delegating the whole tenant zone
+
+The shape above delegates `cs_app_zone` **as a whole** to the bundled
+nameservers, which then serve every az as ordinary records inside that one
+flat zone. There is no zone cut at an az name, so a NODATA answer under
+`<app_domain>` is proved by the SOA of `cs_app_zone` — in bailiwick, and
+accepted by every resolver.
+
+Delegating each `<app_domain>` separately (because the parent is a domain you
+already serve elsewhere and cannot hand over wholesale) creates a zone cut
+that the bundled nameservers have no zone for: they answer out of the flat
+parent zone, so their NODATA answers are proved by an SOA *above* the cut,
+which resolvers may reject with SERVFAIL. It shows up as intermittent
+failures on container hostnames rather than as an outage, because it only
+bites query types that find no record at the az apex.
+
+**The structural fix is a zone per delegated `app_domain`** on the bundled
+nameservers — `pdnsutil create-zone <app_domain> <ns1 fqdn>` — which puts the
+SOA below the cut and makes every negative answer in-bailiwick, for every
+query type.
+
+If you cannot do that, one record per az patches the type that is noticed
+first. It goes in the zone **the bundled nameservers serve** — not in the
+external parent that delegates to them, where `<app_domain>` is a delegation
+point and anything you add beside the NS records is occluded and never
+returned:
+
+```
+<app_domain>.  300  IN  HTTPS  1 .
+```
+
+Keep the minimal ServiceMode form `1 .`; an `alpn=` parameter advertises
+protocols the load balancer may not offer. It needs PowerDNS >= 4.5, and one
+record per az covers every container under it, because the wildcard CNAME
+resolves to the az apex and the apex record of the queried type is returned.
+
+Understand what this does and does not fix. Chrome asks for `HTTPS` (type 65)
+on every navigation, which is why that type is usually the first to be
+noticed — but an `AAAA` query on an IPv4-only az apex hits the identical
+out-of-bailiwick SOA, and so does any other type with no record there. The
+HTTPS record removes one symptom; only a zone at the cut removes the cause.
 
 ## 4. Build the inventory
 
