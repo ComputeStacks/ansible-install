@@ -66,6 +66,20 @@
       ansible.builtin.package_facts:
         manager: apt
 
+    # roles/docker_tls writes its ExecStart drop-in in a LATER play (it needs
+    # Vault). A drop-in left from a previous converge pins the address this
+    # host had THEN, and dockerd refuses to start if that address is gone --
+    # killing the run before the task that would fix it. See the task file.
+    #
+    # `nodes` ONLY, even though this play is wider: docker_tls runs on nodes
+    # alone, so a startup.conf on the controller, the metrics host or the
+    # registry was written by something else and is not ours to delete.
+    - name: Clear a docker TLS drop-in left pinning an address this host no longer has
+      ansible.builtin.include_role:
+        name: docker_tls
+        tasks_from: clear_stale_dropin
+      when: "'nodes' in group_names"
+
     - name: Release the docker apt holds before installing
       ansible.builtin.dpkg_selections:
         name: "{{ item | regex_replace('=.*$', '') }}"

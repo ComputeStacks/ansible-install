@@ -9,6 +9,12 @@ docker_tls_dropin_dir: /etc/systemd/system/docker.service.d
 # v1 used this exact filename; keeping it means a host can never end up with
 # two drop-ins setting a conflicting ExecStart.
 docker_tls_dropin_file: startup.conf
+docker_tls_dropin_path: "{{ docker_tls_dropin_dir }}/{{ docker_tls_dropin_file }}"
+
+# The exact `-H` value templates/docker-tls.conf.j2 renders. tasks/
+# clear_stale_dropin.yml matches on it to tell a drop-in this host can still
+# bind from one left over from a previous address.
+docker_tls_listen_endpoint: "tcp://{{ docker_tls_listen_ip }}:{{ cs_ports.docker_tls }}"
 
 # Inventory vars ONLY (contracts.md rule 1) -- never gathered facts: a
 # --limit'ed run must produce the same certificate as a full run.

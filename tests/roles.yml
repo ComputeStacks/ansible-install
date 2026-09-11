@@ -97,7 +97,7 @@
     - postgres_repo
     - powerdns
 
-# The alternate entry points. Four of these are what add-region.yml calls;
+# The alternate entry points. Five of these are what add-region.yml calls;
 # the two vault ones are included by docker_tls rather than by a play, so
 # nothing else parses them.
 - name: Reusable task-file entry points
@@ -118,6 +118,11 @@
       ansible.builtin.include_role:
         name: docker_tls
         tasks_from: issue
+
+    - name: Clear a stale docker TLS drop-in before the daemon starts
+      ansible.builtin.include_role:
+        name: docker_tls
+        tasks_from: clear_stale_dropin
 
     - name: Prepare an existing controller for a new region
       ansible.builtin.include_role:

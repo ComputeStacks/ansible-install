@@ -1,0 +1,55 @@
+---
+# Included as a pre_task by the docker plays in playbooks/site.yml and
+# playbooks/add-region.yml, BEFORE geerlingguy.docker starts the daemon.
+#
+# This role's own `Deploy the docker TLS systemd drop-in` (main.yml) runs in a
+# LATER play, because it needs Vault up on the controller to issue the
+# certificate. The drop-in it wrote on a previous converge pins
+# `-H tcp://<primary_ip>:<cs_ports.docker_tls>`, so if this host's primary_ip
+# has changed since then, dockerd exits immediately at startup:
+#
+#   failed to load listeners: listen tcp <old ip>:2376: bind: cannot assign
+#   requested address
+#
+# and the run dies in the docker play -- several plays before the task that
+# would have rewritten the file. The converge cannot reach its own fix, and no
+# amount of re-running helps. Observed on a smoke cluster whose DHCP leases
+# moved while it was powered off.
+#
+# So: remove a drop-in that names an endpoint this host cannot bind, let
+# docker start on the default socket, and leave main.yml to write the correct
+# one later in the same run (its handler restarts docker). Only the file THIS
+# role owns is ever removed -- any other drop-in on the host belongs to
+# someone else and is left alone.
+
+- name: Check for a docker TLS drop-in from a previous converge
+  ansible.builtin.stat:
+    path: "{{ docker_tls_dropin_path }}"
+  register: docker_tls_previous_dropin
+
+- name: Read the existing docker TLS drop-in
+  ansible.builtin.slurp:
+    src: "{{ docker_tls_dropin_path }}"
+  register: docker_tls_previous_content
+  when: docker_tls_previous_dropin.stat.exists
+
+- name: Decide whether that drop-in names an endpoint this host can still bind
+  ansible.builtin.set_fact:
+    docker_tls_dropin_is_stale: >-
+      {{ docker_tls_previous_dropin.stat.exists
+         and docker_tls_listen_endpoint
+             not in (docker_tls_previous_content.content | b64decode) }}
+
+- name: Remove a docker TLS drop-in that pins an address this host no longer has
+  ansible.builtin.file:
+    path: "{{ docker_tls_dropin_path }}"
+    state: absent
+  when: docker_tls_dropin_is_stale | bool
+
+# Immediately, not via a handler: geerlingguy.docker starts the daemon later
+# in THIS play's roles section, and systemd would otherwise still be holding
+# the removed unit's ExecStart.
+- name: Reload systemd so the removal takes effect before docker starts
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: docker_tls_dropin_is_stale | bool
