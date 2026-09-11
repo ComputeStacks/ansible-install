@@ -1,0 +1,78 @@
+---
+# ns_followers only. A follower serves pdns out of a postgres streaming
+# replica, and roles/powerdns's bootstrap gate asks only "can I read the pdns
+# database on this host" -- which a DETACHED replica answers yes to, out of
+# the copy it already holds. Nothing else notices either: pdns is running, the
+# database answers, and the `dns` check's NS query is served correctly from
+# that stale copy. So replication can stop (the leader readdressed, the slot
+# was dropped, a WAL gap) and every signal stays green while this nameserver
+# quietly serves older and older data.
+#
+# The honest test is the receiver itself, not the data it left behind.
+# Observed exactly that: a follower whose `primary_conninfo` still named the
+# leader's previous address had no WAL receiver at all, and both the converge
+# and `--tags dns` passed.
+
+- name: Read this follower's WAL receiver state
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: "SELECT status, sender_host FROM pg_stat_wal_receiver"
+  become: true
+  become_user: postgres
+  register: validate_wal_receiver
+  # A walreceiver that loses its connection exits and is respawned every
+  # `wal_retrieve_retry_interval` (5s by default), so pg_stat_wal_receiver on a
+  # HEALTHY follower is briefly empty during any reconnect -- including for a
+  # few seconds after roles/powerdns restarts the leader's postgres. Retrying
+  # keeps a `--tags dns_replication` run that lands in that window from failing
+  # a replica that is fine. As everywhere else in this repo, `retries` counts
+  # RE-tries: the default below is four attempts over ~15s.
+  until: >-
+    (validate_wal_receiver.query_result is defined)
+    and ((validate_wal_receiver.query_result | length) > 0)
+    and (validate_wal_receiver.query_result[0].status == 'streaming')
+  retries: "{{ validate_dns_replication_retries }}"
+  delay: "{{ validate_dns_replication_delay }}"
+  # The assert below owns every failure message. Without this, a follower whose
+  # postgres is simply DOWN -- one of the real ways replication dies -- reports
+  # a raw psycopg connection traceback instead.
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Assert this follower is streaming from the leader
+  ansible.builtin.assert:
+    # NOT `validate_wal_receiver.failed`: when `until` exhausts its retries
+    # ansible marks the result failed with "Action failed: Unknown error"
+    # whatever the cause, so that flag cannot tell a dead postgres from a
+    # detached replica. `query_result` can -- postgresql_query never sets it
+    # if the connection itself failed. (roles/validate/defaults documents the
+    # same until-exhaustion quirk for lb_domain.)
+    that:
+      - validate_wal_receiver.query_result is defined
+      - (validate_wal_receiver.query_result | default([])) | length > 0
+      - validate_wal_receiver.query_result[0].status == 'streaming'
+    fail_msg: >-
+      {{ inventory_hostname }} is not streaming from the PowerDNS leader:
+      {{ 'its postgres could not be queried at all (' ~ (validate_wal_receiver.msg | default('no message')) ~ ')'
+      if validate_wal_receiver.query_result is not defined
+      else ('pg_stat_wal_receiver is EMPTY, so this replica is detached and is
+      serving whatever it last received' if (validate_wal_receiver.query_result | default([])) | length == 0
+      else 'WAL receiver status is ' ~ validate_wal_receiver.query_result[0].status) }}.
+      It will still answer queries, from stale data, which is why nothing else
+      reports this. Check `primary_conninfo` in
+      /var/lib/postgresql/{{ postgresql_version | default('<version>') }}/main/postgresql.auto.conf
+      names the current leader address
+      ({{ (groups['ns_primary'] | default([]) | map('extract', hostvars, 'primary_ip') | list + ['unknown']) | first }}),
+      and that the leader still holds this host's replication slot
+      (`SELECT slot_name, active, wal_status FROM pg_replication_slots`). A
+      slot whose wal_status is `lost` needs a fresh pg_basebackup; roles/powerdns
+      bootstraps that only when the local pdns database is unreadable, so it
+      will not redo it on its own.
+    quiet: true
+
+- name: Report the replication source
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is streaming from
+      {{ validate_wal_receiver.query_result[0].sender_host }}.

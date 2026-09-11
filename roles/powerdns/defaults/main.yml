@@ -15,7 +15,18 @@ powerdns_query_cache_ttl: 20
 # Dual-stack listener (v1 parity: PowerDNS binds both families from one
 # comma-separated local-address list).
 powerdns_dns_address: "0.0.0.0, ::"
-powerdns_web_address: "0.0.0.0"
+# The API listener. Bound to this host's inventory address, NOT 0.0.0.0:
+# `webserver-allow-from` (pdns.conf.j2) already restricts callers to the
+# controller, but that is an application-level check on a socket otherwise
+# open to every interface, and this API can rewrite every tenant zone. v1
+# bound 0.0.0.0 with `pdns_web_allow: "0.0.0.0/0"` and relied entirely on a
+# host firewall.
+#
+# primary_ip is the address the controller actually dials -- see
+# `controller_seed_dns_primary_ip`, which is deliberately not a tailscale
+# derivation. Override only if the controller reaches this host on some other
+# interface.
+powerdns_web_address: "{{ primary_ip }}"
 
 powerdns_replication_user: repuser
 

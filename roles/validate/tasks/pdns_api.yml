@@ -1,0 +1,53 @@
+---
+# Controller, once. The PowerDNS HTTP API on the leader is how the controller
+# creates every tenant DNS record; `controller_seed_dns_endpoint` dials
+# `http://<ns_primary primary_ip>:<cs_ports.pdns_api>/api/v1/servers`.
+#
+# This exists because the failure is silent in both directions. PowerDNS binds
+# `webserver-address` (roles/powerdns defaults it to the leader's primary_ip)
+# and, if that address is not configured when pdns starts, logs
+#
+#   [webserver] Listening on HTTP socket failed: While binding: Cannot assign
+#   requested address
+#
+# and CARRIES ON SERVING DNS. Verified against pdns 5.0.2: the unit reports
+# active, the zone answers correctly, and nothing is listening on the API port
+# at all. Every other signal in this repo stays green -- `services` sees an
+# active pdns, `dns` gets its NS records -- and the first thing to notice is a
+# customer deployment failing to create a record, long after the run.
+#
+# Any HTTP response proves the socket is there; the probe sends no API key on
+# purpose, because a 401 from PowerDNS is a stronger liveness signal than a
+# 200 (it proves pdns itself answered, not something else on the port) and it
+# keeps the key out of the check.
+
+- name: Probe the PowerDNS API on the leader from the controller
+  ansible.builtin.uri:
+    url: "http://{{ validate_pdns_api_address }}:{{ cs_ports.pdns_api }}/api/v1/servers"
+    method: GET
+    follow_redirects: none
+    timeout: "{{ validate_pdns_api_timeout }}"
+  register: validate_pdns_api_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the controller can reach the PowerDNS API
+  ansible.builtin.assert:
+    that:
+      - validate_pdns_api_probe.status | default(0) | int > 0
+    fail_msg: >-
+      The controller cannot reach the PowerDNS API at
+      http://{{ validate_pdns_api_address }}:{{ cs_ports.pdns_api }}/ —
+      got "{{ validate_pdns_api_probe.status | default('no response') }}
+      {{ validate_pdns_api_probe.msg | default('') }}".
+      pdns serves DNS perfectly well with its webserver dead, so this does not
+      show up anywhere else. That address is the one the controller dials
+      (`controller_seed_dns_endpoint`, from ns_primary's inventory
+      `primary_ip`); this check does not read the leader's pdns.conf. On the
+      leader, confirm `webserver-address` is set to an address the host
+      actually has -- `journalctl -u pdns | grep webserver` reports a bind
+      failure and keeps serving DNS -- that it is the address above, and that
+      `webserver-allow-from` lists this controller. Until it answers, the controller cannot create a single
+      tenant DNS record.
+    quiet: true

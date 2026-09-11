@@ -36,6 +36,15 @@ regardless of leader/follower role.
    data bootstrap, not a "service already installed" guard -- see its file
    header for why that is not the convergent-role anti-pattern
    `docs/contracts.md` rule 3 forbids.
+
+   It then rewrites `primary_conninfo`'s `host=` field to the leader's current
+   `primary_ip` (in place, preserving everything `pg_basebackup` chose) and
+   notifies a postgres **reload**. That part IS convergent and runs every time:
+   `pg_basebackup -R` sets the leader address once, so without it a leader that
+   changes address detaches every follower silently -- the replica keeps
+   answering queries from the copy it already holds, which is why neither the
+   converge nor an NS lookup notices. `roles/validate`'s `dns_replication`
+   check reports that state; this is what stops it arising.
 5. **Both roles** (`tasks/pdns.yml`): stops/disables `systemd-resolved` (it
    holds port 53), installs `pdns-server` + `pdns-backend-pgsql`, removes the
    default bind-backend files, renders the postgres-backend config and
@@ -123,6 +132,9 @@ version 17"; they are unrelated running instances on different hosts.
   restricts it to the controller's inventory addresses
   (`groups['controller']`'s `primary_ip` and `public_ip`), matching the
   `cs_ports.pdns_api` contract comment ("controller -> primary nameserver").
+  It also binds `webserver-address` to the leader's `primary_ip` rather than
+  `0.0.0.0`, so the socket is not open on every interface for
+  `webserver-allow-from` to then reject.
 * **One unified `pdns.conf.j2`** instead of v1's two near-duplicate templates
   (`pdns.conf.j2` / `pdns-follower.conf.j2`); the api/webserver block is
   gated by `powerdns_is_leader` inside the one file.
@@ -165,7 +177,7 @@ version 17"; they are unrelated running instances on different hosts.
 | `powerdns_default_ttl` | `14400` | |
 | `powerdns_query_cache_ttl` | `20` | |
 | `powerdns_dns_address` | `"0.0.0.0, ::"` | Dual-stack DNS listener. |
-| `powerdns_web_address` | `"0.0.0.0"` | Leader-only; access restricted via `webserver-allow-from` (see above). |
+| `powerdns_web_address` | `"{{ primary_ip }}"` | Leader-only. Bound to the inventory address the controller dials, not `0.0.0.0`; `webserver-allow-from` restricts callers on top of that (see above). |
 | `powerdns_replication_user` | `repuser` | Postgres replication role name. |
 | `powerdns_manage_zone` | `true` | Set `false` to skip `pdnsutil create-zone`. |
 | `powerdns_enable_dnsupdate` | `true` | v1 parity; per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |

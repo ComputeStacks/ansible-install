@@ -61,7 +61,8 @@ acme_account_email: admin@example.com
 # Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
 
 # Post-install checks (roles/validate). Names: services, containers, agent,
-# backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain, dns.
+# backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain, dns,
+# dns_replication, pdns_api.
 # validate_skip: []
 # validate_tls_verify: true    # false while the portal is self-signed
 

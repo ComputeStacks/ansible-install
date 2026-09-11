@@ -5,6 +5,14 @@
     state: restarted
     enabled: true
 
+# primary_conninfo is SIGHUP-reloadable (postgres 12+), so a changed leader
+# address needs a reload, not a restart: the walreceiver is respawned against
+# the new address without dropping the read-only connections pdns holds.
+- name: Reload postgres
+  ansible.builtin.systemd_service:
+    name: postgresql
+    state: reloaded
+
 - name: Restart pdns
   ansible.builtin.systemd_service:
     name: pdns

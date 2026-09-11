@@ -30,6 +30,8 @@ this role exists to catch at install time.
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
 | `lb_domain` | nodes (new azs only) | **the controller** | This az's `LoadBalancer` reached `domain_valid`, and its `domain` equals the CN of its `shared_certificate`. |
 | `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone`. |
+| `pdns_api` | controller (once) | the controller | The PowerDNS HTTP API answers on the address `controller_seed_dns_endpoint` dials. pdns keeps serving DNS with its webserver dead, so no other check sees this. |
+| `dns_replication` | PowerDNS followers | itself | `pg_stat_wal_receiver` shows this replica actually streaming. A detached replica keeps answering queries from stale data, so `dns` above passes while the zone silently rots. |
 
 Each check is a task file included under its own tag, so
 
@@ -268,8 +270,12 @@ Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
 
 ## Requirements
 
-`community.docker` (container state), pinned in `requirements.yml`. `dig`
-comes from `dnsutils`, which `roles/common` installs on every host.
+`community.docker` (container state) and `community.postgresql` (the
+`dns_replication` check's WAL-receiver query), both pinned in
+`requirements.yml`. `dig` comes from `dnsutils`, which `roles/common`
+installs on every host; `python3-psycopg2` comes from
+`roles/powerdns/tasks/postgres.yml`, which runs on exactly the hosts
+`dns_replication` queries.
 
 ## Deviations from v1 (`roles/validate`)
 

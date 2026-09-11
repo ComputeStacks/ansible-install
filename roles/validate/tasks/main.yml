@@ -131,6 +131,28 @@
     - groups['nameservers'] | default([]) | length > 0
   tags: [validate, dns]
 
+- name: Assert the controller can reach the PowerDNS API
+  ansible.builtin.include_tasks:
+    file: pdns_api.yml
+    apply:
+      tags: [validate, pdns_api]
+  when:
+    - "'pdns_api' not in validate_skip"
+    - "'controller' in group_names"
+    - dns_driver | default('none') == 'powerdns'
+    - groups['ns_primary'] | default([]) | length > 0
+  tags: [validate, pdns_api]
+
+- name: Assert every PowerDNS follower is still streaming from the leader
+  ansible.builtin.include_tasks:
+    file: dns_replication.yml
+    apply:
+      tags: [validate, dns_replication]
+  when:
+    - "'dns_replication' not in validate_skip"
+    - "'ns_followers' in group_names"
+  tags: [validate, dns_replication]
+
 - name: Report the checks that ran on this host
   ansible.builtin.debug:
     msg: >-

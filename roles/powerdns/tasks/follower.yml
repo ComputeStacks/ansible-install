@@ -64,3 +64,29 @@
         name: postgresql
         state: started
         enabled: true
+
+# --- keep primary_conninfo pointing at the current leader -------------------
+# `pg_basebackup -R` writes primary_conninfo ONCE, during the bootstrap above,
+# and until this task nothing ever reconciled it. The bootstrap deliberately
+# does not re-run -- it is a destructive data operation, not an install guard
+# -- so a leader that changes address used to leave every follower dialling an
+# address that no longer answers. Replication stops and the replica keeps
+# serving the copy it already holds: pdns is up, the database reads fine, and
+# NS queries are answered correctly out of stale data. Nothing in a converge
+# noticed. (roles/validate's `dns_replication` check now REPORTS that state;
+# this is what prevents it.)
+#
+# primary_conninfo is SIGHUP-reloadable in postgres 12+, so this rewrites only
+# the `host=` field, in place, leaving the passfile/sslmode/slot settings
+# pg_basebackup chose, and reloads postgres -- which restarts the walreceiver
+# against the new address. No base backup and no data movement, so it is safe
+# to run on every converge; on a healthy follower it matches and does nothing.
+- name: Point primary_conninfo at the current leader address
+  ansible.builtin.replace:
+    path: "{{ powerdns_postgresql_main_dir }}/postgresql.auto.conf"
+    # Non-greedy to the FIRST `host=`, with a word boundary so the `hosts=` in
+    # `load_balance_hosts=disable` cannot match.
+    regexp: "^(primary_conninfo = .*?)\\bhost=[^ ']+"
+    replace: "\\1host={{ powerdns_primary_ip }}"
+  become: true
+  notify: Reload postgres
