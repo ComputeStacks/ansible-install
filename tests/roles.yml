@@ -134,7 +134,12 @@
         name: metrics
         tasks_from: file_sd
 
-    - name: Append new node addresses to an existing v1 firewall
+    - name: Append new node addresses to an existing host's firewall
       ansible.builtin.include_role:
         name: firewall
-        tasks_from: v1_append
+        tasks_from: append
+
+    - name: Append new node addresses to an existing v2 firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: v2_append

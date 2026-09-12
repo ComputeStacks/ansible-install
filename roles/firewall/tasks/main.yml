@@ -24,8 +24,8 @@
   # un-targeted hosts have no facts at all. Only the LENGTH of the authkey is
   # ever evaluated, so no secret reaches the output.
 
-- name: Apply the additive v1 firewall updates (attach mode)
-  ansible.builtin.include_tasks: v1_append.yml
+- name: Apply the additive firewall updates (attach mode)
+  ansible.builtin.include_tasks: append.yml
   when: existing_env | default(false) | bool
 
 - name: Apply the ComputeStacks nftables table

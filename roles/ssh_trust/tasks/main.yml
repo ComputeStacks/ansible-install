@@ -4,30 +4,44 @@
 # (docs/contracts.md control-plane rows #4 and #19). Additive
 # authorized_key entries only — never exclusive.
 
-- name: Stat the controller app pubkey
+- name: Probe the controller for its application SSH key
   ansible.builtin.stat:
-    path: "{{ ssh_trust_app_pubkey_path }}"
-  register: ssh_trust_app_pubkey_stat
+    path: "{{ item }}"
+  loop: "{{ ssh_trust_app_pubkey_candidates }}"
+  register: ssh_trust_app_pubkey_probe
   delegate_to: "{{ groups['controller'] | first }}"
   run_once: true
+  when: (ssh_trust_app_pubkey_path | length) == 0
 
-# HARD fail, in both modes. Greenfield: site.yml runs the controller role
+- name: Select the controller application SSH key path
+  ansible.builtin.set_fact:
+    ssh_trust_app_pubkey_resolved: >-
+      {{ ssh_trust_app_pubkey_path
+         if (ssh_trust_app_pubkey_path | length) > 0
+         else ((ssh_trust_app_pubkey_probe.results | default([]))
+               | selectattr('stat.exists', 'defined')
+               | selectattr('stat.exists')
+               | map(attribute='item') | list + ['']) | first }}
+  run_once: true
+
+# HARD fail, in every mode. Greenfield: site.yml runs the controller role
 # (which creates the key) before this play, so a missing key means the
-# controller converge did not do its job. Attach: a live v1 controller always
-# has one. Skipping the app key instead installs only the root key and every
-# controller-driven volume/haproxy/LB operation on this host fails later,
-# invisibly.
+# controller converge did not do its job. Attach: a live controller of either
+# generation always has one. Skipping the app key instead installs only the
+# root key and every controller-driven volume/haproxy/LB operation on this
+# host fails later, invisibly.
 - name: Assert the controller app pubkey exists
   ansible.builtin.assert:
     that:
-      - ssh_trust_app_pubkey_stat.stat.exists
+      - (ssh_trust_app_pubkey_resolved | length) > 0
     fail_msg: >-
-      {{ ssh_trust_app_pubkey_path }} does not exist on
-      {{ groups['controller'] | first }}. The controller's application SSH
-      key is what drives volume management, haproxy certificate deploys and
-      LB reloads on this host. If the controller is a v1 install, flag it
-      `existing_env: true` in the inventory so ssh_trust looks in v1's
-      ssh_keys_directory; otherwise run the controller role first.
+      No application SSH key was found on {{ groups['controller'] | first }}.
+      Looked for {{ ssh_trust_app_pubkey_candidates | join(', ') }}. The
+      controller's application SSH key is what drives volume management,
+      haproxy certificate deploys and LB reloads on this host. On a v2
+      controller the `controller` role creates it, so run that first; on a v1
+      controller it lives in v1's `ssh_keys_directory`. Set
+      `ssh_trust_app_pubkey_path` if this environment keeps it somewhere else.
   run_once: true
 
 - name: Slurp the controller root pubkey
@@ -39,7 +53,7 @@
 
 - name: Slurp the controller app pubkey
   ansible.builtin.slurp:
-    src: "{{ ssh_trust_app_pubkey_path }}"
+    src: "{{ ssh_trust_app_pubkey_resolved }}"
   register: ssh_trust_app_pubkey_raw
   delegate_to: "{{ groups['controller'] | first }}"
   run_once: true

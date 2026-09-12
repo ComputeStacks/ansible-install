@@ -31,7 +31,8 @@ generated on the controller.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ssh_trust_app_pubkey_path` | v1 path on an `existing_env` controller, v2 path otherwise | Where the controller's **application** ed25519 pubkey lives, on the controller host. |
+| `ssh_trust_app_pubkey_path` | `""` (detect) | Forces where the controller's **application** ed25519 pubkey lives, on the controller host. Empty means probe `ssh_trust_app_pubkey_candidates` and take the first that exists. |
+| `ssh_trust_app_pubkey_candidates` | v2 `/etc/computestacks/.ssh/`, then v1 `ssh_keys_directory` | Probed in order, so a controller migrated from v1 resolves to the key its running application actually uses. |
 
 The default is a conditional on the **controller host's** `existing_env`
 flag (`hostvars[groups['controller'] | first]`), not on the host this role is

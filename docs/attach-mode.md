@@ -1,9 +1,15 @@
 # Attach mode: a new region against an existing environment
 
 `playbooks/add-region.yml` provisions a new region, availability zone and node
-against an environment that already exists — typically one built by the v1
+against an environment that already exists — classically one built by the v1
 playbooks, on Debian, with a containerized metrics stack and an iptables
 firewall.
+
+**An environment this repository built works too.** `existing_env` means "not
+mine to rebuild, and this inventory is a partial view of the fleet" — it does
+not mean "v1". The two differ in exactly one place, the host firewall, and the
+role picks the path by looking for v1's script rather than by assuming: see the
+firewall rows in the write set below.
 
 It builds the new node in full, exactly as `site.yml` would. On the existing
 shared hosts it performs **only** the write set enumerated below, and nothing
@@ -90,7 +96,24 @@ corrected — it just fails, usually somewhere unhelpful:
   though an attach manifest carries no `admin_user` section. Any valid value
   will do; the existing admin account is not touched.
 
-**Flag every existing host** in the inventory:
+**The inventory for an attach run holds the existing SHARED hosts and the one
+new node — and no other node.** An already-provisioned node must not appear at
+all: preflight stops the run with
+
+```
+node1001 is in `nodes` and flagged `existing_env: true`. Attach mode builds
+the new node from bare metal; an already-provisioned node does not belong in
+this run.
+```
+
+and leaving it unflagged is worse, because it would then be in `cs_new_nodes`
+and this playbook would rebuild it from bare metal. So keep a separate
+inventory directory for attach runs, or drop the other nodes from the copy you
+run this with. Everything the new region needs from its siblings comes from
+the controller, not from their inventory entries.
+
+**Flag every existing shared host** — controller, metrics, backup, registry,
+nameservers:
 
 ```yaml
 controller:
@@ -104,7 +127,8 @@ controller:
 ```
 
 The playbook asserts this: an unflagged shared host stops the run with a
-pointer to `site.yml`. The new node must **not** be flagged.
+pointer to `site.yml`. The new node must **not** be flagged — that flag is
+exactly what `cs_new_nodes` subtracts to work out which node this run builds.
 
 **Tailscale is off by default.** An existing v1 controller and metrics host
 are not on a tailnet, and joining them is an operator action taken *before*
@@ -126,7 +150,7 @@ Exactly this, and nothing else:
 | controller | `NODE_ENROLLMENT_TOKEN` and `CS_PROXY_IPS_PATH` appended to `/etc/default/computestacks` | `lineinfile`, append-only, only when the key is absent. No `regexp`, so an existing value can never be rewritten. |
 | controller | the v2 `cstacks` script | One of the two whole-file exceptions. It holds no environment-specific values and adds the `seed`, `runner` and `database-backup` subcommands plus the proxy_ips mount. |
 | controller | portal container recreated | ~30 seconds of downtime — see below. |
-| controller | firewall: one blanket accept per new node address | v1's own `lineinfile` idiom against `/usr/local/bin/cs-recover_iptables`, plus the same rules made live. |
+| controller | firewall: one accept per new node address | **v1-built host:** v1's own `lineinfile` idiom against `/usr/local/bin/cs-recover_iptables`, plus the same rules made live. **v2-built host:** one `add rule` line per address appended to `/etc/nftables.d/cs-peers.nft`, which `cs-firewall.service` loads straight after `cs-static.nft`. Neither path re-renders anything. |
 | metrics | `/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml` | New per-AZ fragment files, in v1's exact paths, on **the metrics host in the new node's site** and no other. Prometheus picks them up within one scrape interval; nothing is restarted. The other whole-file exception. |
 | metrics | firewall: the same node-address appends | |
 | backup | the `cstacks` account's `~/.ssh` | On **the backup server in the new node's site**. The repository path is only `stat`ed, never chowned — v1's value is `/mnt`, and 0770 on it would clear world traverse for every unrelated process reading a filesystem mounted underneath. The existing account's shell and shadow entry are left alone. v2's borg is **not** installed over the server's existing one. |

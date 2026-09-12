@@ -13,6 +13,12 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart={{ firewall_nft_bin }} -f {{ firewall_config_file }}
 ExecReload={{ firewall_nft_bin }} -f {{ firewall_config_file }}
+# Additive peer rules, applied after the table. The `-` prefix makes a missing
+# file a no-op: a greenfield host has none until a region is attached to it.
+# Order matters -- cs-static.nft deletes and recreates the table, so these have
+# to be re-added after it, on every apply and every boot.
+ExecStart=-{{ firewall_nft_bin }} -f {{ firewall_peers_file }}
+ExecReload=-{{ firewall_nft_bin }} -f {{ firewall_peers_file }}
 # Deliberately NO ExecStop. Tearing our table down on stop/shutdown would leave
 # the host wide open, and `nft flush ruleset` here would destroy docker's and
 # cs-agent's tables (docs/contracts.md rule 7).

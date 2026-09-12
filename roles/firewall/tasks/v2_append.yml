@@ -1,0 +1,119 @@
+---
+# Attach mode, v2-built host. The counterpart to v1_append.yml: same job, same
+# additive discipline, different firewall underneath.
+#
+# This host already runs our own `inet cs_static` table, rendered by
+# tasks/nftables.yml during the converge that built it. A new region's node
+# cannot reach it until its addresses are allowed -- the input chain's policy is
+# `drop`.
+#
+# It is NOT re-rendered here, and that restriction is the whole reason this file
+# exists. Under `existing_env` the inventory is a PARTIAL view of the fleet
+# (docs/contracts.md rule 9): an attach inventory lists the shared hosts and ONE
+# new node, never the regions already attached. Re-rendering cs-static.nft from
+# it would drop the accepts belonging to every node it does not list and cut the
+# existing regions off from their metrics host mid-run.
+#
+# A separate TABLE would not work either, and it is worth writing down why. Base
+# chains at the same hook are all evaluated, and an `accept` in one chain does
+# not stop another chain applying its own `policy drop` -- so accepts in a
+# second table would be overruled by cs_static's. The rules have to land in
+# cs_static's own input chain, which is what `add rule inet cs_static input`
+# does.
+#
+# Ordering inside the chain is safe: the only explicit drops are the tailnet
+# anti-spoof pair and `ct state invalid`, both of which a node's LAN traffic
+# passes, and everything else is accept-or-fall-through-to-policy. Appending at
+# the end therefore reaches the same verdict as an inventory-rendered accept.
+
+- name: Assert this is an attach-mode host
+  ansible.builtin.assert:
+    that:
+      - existing_env | default(false) | bool
+    fail_msg: >-
+      tasks/v2_append.yml only applies to hosts flagged 'existing_env: true'.
+      A host this run builds gets the whole table instead (tasks/nftables.yml).
+
+- name: Check that this host carries the v2 table
+  ansible.builtin.stat:
+    path: "{{ firewall_config_file }}"
+  register: firewall_v2_table_stat
+
+- name: Fail when the host has neither firewall this role knows
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is flagged 'existing_env: true' but has neither
+      {{ firewall_v1_script }} (the v1 script tasks/v1_append.yml extends) nor
+      {{ firewall_config_file }} (the v2 table this file extends), so there is
+      nothing here to allow the new node into. Stopping rather than guessing --
+      inspect the host's firewall and report.
+  when: not (firewall_v2_table_stat.stat.exists | default(false))
+
+# The unit is role-owned and carries NO inventory-derived data -- only the
+# binary path, the table name and the two file paths -- so re-templating it on
+# an existing_env host is safe under rule 9 in a way re-rendering cs-static.nft
+# is not. It also has to happen: a host converged before the peers file existed
+# has a unit with a single ExecStart, so the rules below would be written to
+# disk and never loaded. Observed exactly that -- the file was correct, the live
+# chain had no matching rule, and the new node timed out reaching the
+# controller.
+- name: Ensure the firewall unit loads the additive peer rules
+  ansible.builtin.template:
+    src: cs-firewall.service.j2
+    dest: "{{ firewall_unit_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd for the ComputeStacks firewall
+    - Apply the ComputeStacks firewall
+
+- name: Ensure the additive peer rules file exists
+  ansible.builtin.copy:
+    dest: "{{ firewall_peers_file }}"
+    content: |
+      #!/usr/sbin/nft -f
+      #
+      # Additive peer rules for table inet {{ firewall_table }}, loaded by
+      # {{ firewall_service }} immediately after {{ firewall_config_file }}.
+      #
+      # Owned by roles/firewall (tasks/v2_append.yml), which only ever ADDS
+      # lines here -- it never rewrites or prunes the file, so anything you add
+      # by hand survives. cs-static.nft deletes and recreates the table on every
+      # apply, which is why these are re-applied after it rather than written
+      # into it.
+    owner: root
+    group: root
+    mode: "0644"
+    # Never clobber an existing file: its whole value is that what is in it
+    # stays there.
+    force: false
+
+- name: Collect each new node's addresses
+  ansible.builtin.set_fact:
+    firewall_v2_new_nodes: >-
+      {{ (firewall_v2_new_nodes | default([]))
+         + [ { 'host': item,
+               'addresses': [hostvars[item].primary_ip | default(''),
+                             hostvars[item].public_ip | default('')]
+                            | reject('equalto', '') | unique | list } ] }}
+  loop: "{{ groups['nodes'] | default([]) }}"
+  when: not (hostvars[item].existing_env | default(false) | bool)
+  # Inventory vars only, so this is identical under --limit (contracts rule 1).
+
+- name: Allow each new node's addresses through the existing table
+  ansible.builtin.lineinfile:
+    path: "{{ firewall_peers_file }}"
+    line: >-
+      add rule inet {{ firewall_table }} input
+      {{ 'ip6' if ':' in item.1 else 'ip' }} saddr {{ item.1 }} accept
+      comment "attached node {{ item.0.host }}"
+    # Keyed on the ADDRESS alone: re-running an attach after a node was
+    # renamed must not leave two accepts for the same source.
+    regexp: >-
+      ^add rule inet {{ firewall_table }} input .* saddr {{ item.1 | regex_escape }} accept
+    state: present
+  loop: "{{ (firewall_v2_new_nodes | default([])) | subelements('addresses') }}"
+  loop_control:
+    label: "{{ item.1 }} ({{ item.0.host }})"
+  notify: Apply the ComputeStacks firewall

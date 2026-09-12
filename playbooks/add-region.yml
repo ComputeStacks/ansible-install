@@ -115,9 +115,6 @@
         - tailscale_enabled | default(false) | bool
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
-    - node_kernel
-    - haproxy
-    - node_observability
 
 - name: New node docker
   hosts: nodes
@@ -175,6 +172,23 @@
   roles:
     - docker_tls
 
+# AFTER the docker plays, exactly as site.yml orders it (Docker hosts, then
+# Node base stack). `node_observability` creates the cadvisor and fluentd
+# containers and preloads the pinned images over the local docker socket, so a
+# bare node has nothing for it to talk to until docker is installed: running it
+# in the base play failed every attach with
+#
+#   Error connecting: ... FileNotFoundError(2, 'No such file or directory')
+#
+# which is the missing /var/run/docker.sock, not a registry problem.
+- name: New node base stack
+  hosts: nodes
+  roles:
+    - node_kernel               # sysctls, modules, BBR, inotify, accept_ra
+    - haproxy                   # apt + certs/errors dirs (config comes from
+                                # the controller at runtime)
+    - node_observability        # cadvisor + fluentd containers, image preloads
+
 - name: New node firewall
   hosts: nodes
   roles:
@@ -196,10 +210,10 @@
 
     # v1's INPUT-policy-DROP script blocks the new node's loki ingest and the
     # exporter scrape return path until its addresses are allowed.
-    - name: Append the new node addresses to the v1 firewall
+    - name: Append the new node addresses to this host's firewall
       ansible.builtin.include_role:
         name: firewall
-        tasks_from: v1_append
+        tasks_from: append
 
 - name: Existing controller — firewall appends only
   hosts: controller
@@ -207,10 +221,10 @@
     # :3000 (the node's haproxy ACME backend), :2376 return traffic, the
     # enrolment path — v1 grants a peer its whole inbound set with one
     # blanket accept per address, which is what this appends.
-    - name: Append the new node addresses to the v1 firewall
+    - name: Append the new node addresses to this host's firewall
       ansible.builtin.include_role:
         name: firewall
-        tasks_from: v1_append
+        tasks_from: append
 
 # roles/backup_server gates itself on `existing_env`: only tasks/account.yml
 # runs, so v2's borg is never installed over the server's existing one. What
@@ -229,10 +243,10 @@
     # accepts 22 from anywhere when `default_allow_ssh` is true; with it
     # false, the new node's backups fail silently until its addresses are
     # allowed. Same append as the metrics and controller plays.
-    - name: Append the new node addresses to the v1 firewall
+    - name: Append the new node addresses to this host's firewall
       ansible.builtin.include_role:
         name: firewall
-        tasks_from: v1_append
+        tasks_from: append
 
 # The controller trusts the new node over SSH (control-plane row #4: volumes,
 # haproxy certificate deploy, LB reload). ssh_trust skips the controller's

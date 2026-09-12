@@ -1,0 +1,39 @@
+---
+# Attach mode dispatch. THIS is the entry point the add-region plays call for an
+# existing shared host; it picks the additive path that matches the firewall the
+# host actually runs.
+#
+# `existing_env` means "not mine to rebuild, and this inventory is a PARTIAL
+# view of the fleet" (docs/contracts.md rule 9). It does NOT mean "built by v1".
+# An environment this repository built is v2 all the way down and still needs
+# the partial-inventory protection, so it gets its own additive path rather than
+# the v1 script appends:
+#
+#   v1-built host (cs-recover_iptables present) -> v1_append.yml
+#   v2-built host (our cs_static table)         -> v2_append.yml
+#
+# Detected, never assumed: the two failure modes -- appending iptables lines to
+# a host with no such script, and re-rendering an nftables table from a partial
+# inventory -- are both silent-until-it-matters, so neither is worth guessing
+# at.
+
+- name: Assert this is an attach-mode host
+  ansible.builtin.assert:
+    that:
+      - existing_env | default(false) | bool
+    fail_msg: >-
+      tasks/append.yml only applies to hosts flagged 'existing_env: true'. A
+      host this run builds gets the whole table instead (tasks/nftables.yml).
+
+- name: Detect the v1 firewall script on this existing host
+  ansible.builtin.stat:
+    path: "{{ firewall_v1_script }}"
+  register: firewall_v1_script_present
+
+- name: Append the new node addresses to the v1 firewall
+  ansible.builtin.include_tasks: v1_append.yml
+  when: firewall_v1_script_present.stat.exists | default(false)
+
+- name: Append the new node addresses to the v2 firewall
+  ansible.builtin.include_tasks: v2_append.yml
+  when: not (firewall_v1_script_present.stat.exists | default(false))

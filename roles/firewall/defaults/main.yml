@@ -6,6 +6,18 @@
 firewall_table: cs_static
 firewall_config_dir: /etc/nftables.d
 firewall_config_file: "{{ firewall_config_dir }}/cs-static.nft"
+# Additive peer rules, loaded AFTER the table above by the same unit. This file
+# is the v2 equivalent of v1's script appends: attach mode (tasks/v2_append.yml)
+# adds one accept per new node address here rather than re-rendering
+# cs-static.nft, because under `existing_env` the inventory is a PARTIAL view of
+# the fleet (docs/contracts.md rule 9) and a re-render would silently delete the
+# accepts belonging to every host the attach inventory does not list.
+#
+# Nothing ever rewrites this file as a whole -- entries are added line by line
+# and never removed -- so hand-written rules put here survive every converge and
+# every reboot. Rules that belong to the inventory belong in
+# `firewall_extra_input_rules` instead, which is rendered into cs-static.nft.
+firewall_peers_file: "{{ firewall_config_dir }}/cs-peers.nft"
 firewall_service: cs-firewall.service
 firewall_unit_file: "/etc/systemd/system/{{ firewall_service }}"
 firewall_nft_bin: /usr/sbin/nft
