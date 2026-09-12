@@ -1,0 +1,112 @@
+---
+# Every az's load balancer answers on its own `app_domain`, and BOTH of its
+# public records have to exist before the run (docs/install.md §3). Getting
+# them wrong is the most commonly missed step of an install and the most
+# expensive to discover late: nothing in the converge fails, the region comes
+# up, and containers are published on names that do not resolve.
+#
+# So check it FIRST, from the control machine, before a thirty-minute converge
+# and before the controller has a single row to unpick.
+#
+# WHAT THIS DOES AND DOES NOT ASSERT. It asserts that public DNS agrees with
+# the inventory: the apex resolves to this node's own `public_ip`, and the
+# wildcard is a CNAME to the apex. That is what provisioning needs, and it is
+# deliberately silent about whether the address is routable from the internet.
+#
+# The controller applies a further rule of its own that this cannot mirror:
+# `LoadBalancer#full_public_ip_list` drops a private `public_ip` when
+# Rails.env is production, so a private-addressed environment can pass here and
+# still never reach `domain_valid`. That is a LetsEncrypt concern, not a
+# provisioning one -- a real estate never has a private `public_ip` -- and a
+# check that failed on it would fail every private test environment for a
+# reason that has nothing to do with whether the install is correct.
+
+- name: Resolve each new az's load balancer domain
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ hostvars[item].cs_app_domain }}"
+      - A
+  loop: "{{ cs_new_nodes | sort }}"
+  loop_control:
+    label: "{{ hostvars[item].cs_app_domain }} ({{ item }})"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: preflight_app_domain_a
+
+- name: Assert each load balancer domain resolves to that node's public address
+  ansible.builtin.assert:
+    that:
+      - (item.stdout_lines | default([])) | length > 0
+      - hostvars[item.item].public_ip in (item.stdout_lines | default([]))
+    fail_msg: >-
+      {{ hostvars[item.item].cs_app_domain }} (az
+      {{ hostvars[item.item].az | default('unknown') }}, node {{ item.item }})
+      {{ 'has no A record at all'
+         if (item.stdout_lines | default([])) | length == 0
+         else ('resolves to ' ~ (item.stdout_lines | join(', ')) ~ ', which does not
+               include the address this node is given') }}
+      ({{ hostvars[item.item].public_ip }} is what the inventory gives it).
+      Create it before the run:
+      `{{ hostvars[item.item].cs_app_domain }}. IN A {{ hostvars[item.item].public_ip }}`.
+      The controller reaches the same verdict later and records it as event
+      510806d5621c97d5, by which point the region is built and seeded.
+    quiet: true
+  loop: "{{ preflight_app_domain_a.results | default([]) }}"
+  loop_control:
+    label: "{{ hostvars[item.item].cs_app_domain }}"
+  run_once: true
+
+# The wildcard MUST be a CNAME to the apex. The controller proves it by asking
+# for a CNAME on a random label (ValidateDomainService#load_wildcard_cname!),
+# so an A record there answers nothing and the load balancer is marked invalid
+# with event 2721edc59787a807 -- a failure with no symptom until a tenant
+# deploys. Any label exercises the wildcard; a fixed one keeps this run
+# reproducible.
+- name: Resolve each new az's wildcard record
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ preflight_app_domain_probe_label }}.{{ hostvars[item].cs_app_domain }}"
+      - CNAME
+  loop: "{{ cs_new_nodes | sort }}"
+  loop_control:
+    label: "*.{{ hostvars[item].cs_app_domain }} ({{ item }})"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: preflight_app_domain_wildcard
+
+- name: Assert each wildcard is a CNAME to its own apex
+  ansible.builtin.assert:
+    that:
+      - ((item.stdout | default('')) | trim) == (hostvars[item.item].cs_app_domain ~ '.')
+    fail_msg: >-
+      *.{{ hostvars[item.item].cs_app_domain }} (az
+      {{ hostvars[item.item].az | default('unknown') }}, node {{ item.item }})
+      {{ 'returned no CNAME -- an A record there does not work, and neither does
+         a missing wildcard (controller event 2721edc59787a807)'
+         if ((item.stdout | default('')) | trim) | length == 0
+         else ('is a CNAME to ' ~ ((item.stdout | default('')) | trim) ~ ' rather than to
+               itself (controller event 635285f7f2889009)') }}.
+      Create it before the run:
+      `*.{{ hostvars[item.item].cs_app_domain }}. IN CNAME
+      {{ hostvars[item.item].cs_app_domain }}.`
+      Tenant containers are published as <container>.{{ hostvars[item.item].cs_app_domain }},
+      so nothing this region deploys resolves until it exists.
+    quiet: true
+  loop: "{{ preflight_app_domain_wildcard.results | default([]) }}"
+  loop_control:
+    label: "*.{{ hostvars[item.item].cs_app_domain }}"
+  run_once: true

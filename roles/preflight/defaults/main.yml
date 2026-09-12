@@ -223,3 +223,19 @@ preflight_registry_manifest_accept: >-
   application/vnd.docker.distribution.manifest.list.v2+json,
   application/vnd.oci.image.manifest.v1+json,
   application/vnd.docker.distribution.manifest.v2+json
+
+# --- app_domain DNS -------------------------------------------------------
+# Check, before anything is built, that every new az's load balancer domain
+# already resolves the way docs/install.md §3 requires: the apex to that node's
+# own `public_ip`, and the wildcard as a CNAME to the apex. Both records are an
+# operator step, both are easy to miss, and neither failure has a symptom until
+# a tenant deploys into the region.
+#
+# Set false for an environment whose records are published after the converge,
+# or one whose control machine cannot see the public zone (split horizon). It
+# is the only escape hatch: the check itself has no opinion about whether the
+# address is routable, so a private-addressed test environment passes it.
+preflight_check_app_domain_dns: true
+# Label used to exercise the wildcard. Any label matches a wildcard; a fixed
+# one keeps the run reproducible. It must not exist as a real record.
+preflight_app_domain_probe_label: cs-preflight-probe

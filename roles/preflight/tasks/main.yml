@@ -493,6 +493,16 @@
     - controller_image_tag | default('') in ['latest', 'stable', 'main', 'master']
     - controller_image_allow_floating_tag | default(false) | bool
 
+# DNS before the registry: both are network checks, but this one fails on an
+# operator step that has to be fixed outside this repository (and outside this
+# run), so it is the more useful thing to learn first.
+- name: Verify each new az's load balancer DNS records
+  ansible.builtin.include_tasks: app_domain_dns.yml
+  when:
+    - preflight_check_app_domain_dns | bool
+    - (cs_new_nodes | default([])) | length > 0
+  run_once: true
+
 # Network checks last: everything above is a pure inventory/facts assertion
 # that costs nothing, and there is no point reaching out to a registry for a
 # run that a missing host var was going to stop anyway.

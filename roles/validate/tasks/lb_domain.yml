@@ -2,21 +2,26 @@
 # Does this az's load balancer actually answer on the domain the inventory
 # gave it, and does the certificate it serves cover that name?
 #
-# NOTHING ELSE IN THE RUN CLOSES THIS LOOP. `roles/preflight` checks the
-# inventory against itself; `roles/controller` writes a certificate;
-# `roles/controller_seed` writes a manifest. All three can be perfectly
-# consistent while the DNS the world resolves is not: a missing
-# `*.<app_domain>` CNAME passes preflight, passes the seed, ends the run
-# green, and surfaces weeks later as one region whose tenant containers have
-# no working ingress and whose wildcard certificates never issue.
+# THE DNS HALF IS NOW CHECKED EARLIER, and honestly: roles/preflight
+# (tasks/app_domain_dns.yml) resolves every new az's apex and wildcard before
+# the converge starts and fails the run there. This file is no longer the only
+# thing standing between a missing CNAME and a green install, and it should
+# not be read as if it were.
 #
-# The controller does check it — `LoadBalancerWorkers::ValidateDomainWorker`
-# runs `LetsEncryptServices::ValidateDomainService` and writes
-# `load_balancers.domain_valid` — but it runs ASYNCHRONOUSLY, from an
-# `after_save` on the row this run just created, and nothing fails when it
-# comes back false. This check reads that verdict back and, separately,
-# compares the row's `domain` against the CN of the `shared_certificate` it
-# was seeded with.
+# What it still uniquely does is compare the row's `domain` against the CN of
+# the `shared_certificate` it was seeded with — a mismatch no DNS check can
+# see — and surface a NEGATIVE verdict if the controller has recorded one.
+#
+# READ THIS BEFORE TRUSTING `domain_valid`. `load_balancers.domain_valid` is
+# `default: true` in the controller schema, and only
+# `LoadBalancerWorkers::ValidateDomainWorker` ever overwrites it — together
+# with `domain_valid_check`, in one `update_columns`. So `domain_valid: true`
+# with an empty `domain_valid_check` means NOBODY HAS CHECKED, not that the
+# domain is good. On a freshly seeded load balancer that is the normal state
+# and it persists: observed on three azs at once, with sidekiq healthy and its
+# queues empty. v1 behaved identically — `v1-final`'s bootstrap.rake created
+# load balancers the same way and never validated them either — so this is
+# inherited, not a regression, and not this repository's to change.
 #
 # ## Asynchrony: three outcomes, not two
 #
@@ -188,13 +193,15 @@
       '{{ validate_lb_domain_fields[1] }}' —
       `domain_valid_check` is still empty after
       {{ (validate_lb_domain_retries | int) * (validate_lb_domain_delay | int) }}s.
-      LoadBalancerWorkers::ValidateDomainWorker runs asynchronously from the
-      load balancer's `after_save`, so this is normal on a fast converge and
-      is NOT asserted — it would fail every healthy install that finished
-      quicker than sidekiq. It does mean this run has NOT proved that
-      '{{ validate_lb_domain_fields[1] }}' resolves and that
-      '*.{{ validate_lb_domain_fields[1] }}' is a CNAME to it. Re-run
-      `--tags lb_domain` in a few minutes, or read the load balancer's event
-      log in the admin UI; nothing deploys into this region until
-      `domain_valid` is true.
+      This is EXPECTED on a seeded load balancer, not a symptom: nothing in a
+      provisioning run makes the controller record a verdict, and in practice
+      one is never written until someone edits the domain or deploys the load
+      balancer from the admin UI. It is therefore reported and NOT asserted —
+      asserting it would fail every healthy install, v1 and v2 alike.
+      Note what `domain_valid` does and does not tell you here: it is
+      `default: true` in the schema, so with `domain_valid_check` empty it
+      means unchecked, not verified. The DNS itself was checked before this
+      run started (roles/preflight, tasks/app_domain_dns.yml), which is what
+      actually proves '{{ validate_lb_domain_fields[1] }}' resolves and that
+      '*.{{ validate_lb_domain_fields[1] }}' is a CNAME to it.
   when: (validate_lb_domain_fields[3] | length) == 0
