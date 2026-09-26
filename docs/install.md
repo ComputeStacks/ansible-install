@@ -70,18 +70,45 @@ ns1.example.com.         IN A   <ns1 public ip>
 ns2.example.com.         IN A   <ns2 public ip>
 ```
 
+With `dns_driver: powerdns` **that delegation is the whole of your DNS work
+for the tenant zone.** Preflight checks it before anything is built: it asks
+the parent zone's own nameservers for the referral and fails unless it names
+exactly the `powerdns_name` of every host in `nameservers`
+(`preflight_check_app_domain_dns: false` skips it, for a control machine that
+cannot see public DNS). The load balancer records below are then written by
+the provisioner itself — see the next section.
+
 ### Every load balancer needs its own pair of records
 
-**One per az, and this is the step that is most often missed.** Each node runs
-its own haproxy load balancer, and each answers on its own `app_domain`
-(`cs_app_zone` itself if the node sets none — a single-az install therefore
-needs exactly one pair). Tenant containers are published as
-`<container>.<app_domain>`, so for every az:
+Each node runs its own haproxy load balancer, and each answers on its own
+`app_domain` (`cs_app_zone` itself if the node sets none — a single-az install
+therefore needs exactly one pair). Tenant containers are published as
+`<container>.<app_domain>`, so every az needs:
 
 ```
 exm-001.usercontent.example.com.    IN A     <that node's public ip>
 *.exm-001.usercontent.example.com.  IN CNAME exm-001.usercontent.example.com.
 ```
+
+**With `dns_driver: powerdns` you do not create these.** `roles/powerdns`
+writes them on the primary nameserver, into `cs_app_zone` — the zone the
+bundled nameservers serve — right after the zone is created, together with an
+ownership marker, `_cs-lb.<app_domain>. TXT "owner=<node>"`. Every run
+converges the records it owns (address, CNAME target, TTL). A pair you already
+made by hand that matches is adopted; anything else at those names — records
+that differ, or a marker naming some other node — fails the run before
+anything is written, and it never overwrites a name it cannot show is its
+own. `roles/validate` then checks the records on every nameserver and through
+public resolution. `roles/powerdns/README.md` has the rules, and one caveat:
+the controller rewrites the whole zone when it saves DNS changes, so an admin
+edit or controller write already in flight while the records are written can
+delete them again — a re-run restores them.
+
+**Otherwise they are yours, and this is the step that is most often missed.**
+With `dns_driver: none` or an external DNS provider, or with
+`powerdns_manage_lb_records: false` set on the nameservers, create the pair
+for every az yourself, in the public DNS that serves `<app_domain>`, before
+the run — preflight digs for it and fails if it is missing.
 
 **The wildcard MUST be a CNAME. An A record fails.** The controller proves the
 wildcard exists by querying a random label under the domain *for a CNAME
@@ -102,10 +129,10 @@ and fails the run if it came back negative; if it has not been written yet the
 check says so and does not fail, so **re-run `--tags lb_domain` if you see
 that message.**
 
-These names must resolve in the *public* DNS this domain is delegated to, not
-in the tenant zone the bundled nameservers serve. They point at the load
-balancers, and the zone the nameservers host is where the controller creates
-records *for* tenant containers underneath them.
+Wherever they live, these names must resolve publicly: when `cs_app_zone` is
+delegated to the bundled nameservers they belong *inside* that zone. A pair
+put in the parent zone sits beneath the delegation point, is occluded, and is
+never served.
 
 ### If you delegate per-az instead of delegating the whole tenant zone
 
@@ -127,6 +154,12 @@ bites query types that find no record at the az apex.
 nameservers — `pdnsutil create-zone <app_domain> <ns1 fqdn>` — which puts the
 SOA below the cut and makes every negative answer in-bailiwick, for every
 query type.
+
+**The provisioner does not handle per-az delegation.** It never creates a
+per-az zone, and when one exists on the bundled nameservers it skips that
+az's load balancer records with a warning: they are yours to create and
+maintain, in that zone — the pair above, by hand. `roles/validate` still
+checks what the nameservers actually serve for it.
 
 If you cannot do that, one record per az patches the type that is noticed
 first. It goes in the zone **the bundled nameservers serve** — not in the

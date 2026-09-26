@@ -74,7 +74,8 @@ help:
 	@echo "lint                              ansible-lint, production profile"
 	@echo "check                             syntax-check the playbooks and the role harness, then"
 	@echo "                                  parse both inventories and render the site contract"
-	@echo "                                  and the bootstrap manifest against each"
+	@echo "                                  and the bootstrap manifest against each, and prove"
+	@echo "                                  the powerdns load balancer record plan"
 	@echo ""
 	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honoured."
 	@echo ""
@@ -145,5 +146,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/site_contract.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
-	@echo "       bootstrap manifest renders and parses as schema 1"
+	@echo "       bootstrap manifest renders and parses as schema 1,"
+	@echo "       load balancer record plan follows the ownership rules"

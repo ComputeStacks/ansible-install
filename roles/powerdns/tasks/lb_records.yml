@@ -1,0 +1,185 @@
+---
+# ns_primary only. Writes each az's load balancer records into cs_app_zone:
+#
+#   <app_domain>.         A      <public_ip>
+#   *.<app_domain>.       CNAME  <app_domain>.
+#   _cs-lb.<app_domain>.  TXT    "owner=<node inventory_hostname>"
+#
+# The first two are what the controller's domain validation and every tenant
+# container name need; the third is how a later run -- this inventory's or
+# another's -- tells a pair this provisioner wrote from one a human (or a
+# different environment's az) owns. The rules live in lb_records_plan.yml,
+# which is pure and decides everything before a single write here.
+#
+# STANDALONE ENTRY POINT. add-region.yml runs this as
+# `include_role: name=powerdns tasks_from=lb_records` against an EXISTING
+# nameserver, possibly a v1 Debian box on PowerDNS 4.x, where none of this
+# role's other task files run. So nothing here depends on a fact another task
+# file sets: the zone is read with its own commands, and the only role inputs
+# are defaults (powerdns_lb_records_nodes, powerdns_lb_record_ttl).
+#
+# pdnsutil, not the HTTP API: `webserver-allow-from` admits only the
+# controller, and this host is reached over SSH anyway. Every subcommand used
+# (list-all-zones, list-zone, replace-rrset, delete-rrset, rectify-zone)
+# exists in 4.x and 5.x. Writes land in the leader's database; the followers
+# are postgres streaming replicas, so there is no NOTIFY or serial bump to do.
+#
+# No `become`, like the rest of this role: the playbooks connect as root.
+
+# Read-only, so it runs in check mode too -- the planned operations are the
+# useful part of a --check run.
+- name: List the zones this nameserver serves
+  ansible.builtin.command:
+    argv:
+      - pdnsutil
+      - list-all-zones
+  register: powerdns_lb_all_zones_cmd
+  changed_when: false
+  # In check mode on a box where PowerDNS is not installed yet (a greenfield
+  # --check), there is nothing to read; "Say why nothing is planned" reports it.
+  failed_when: powerdns_lb_all_zones_cmd.rc != 0 and not ansible_check_mode
+  check_mode: false
+
+- name: Check whether the tenant zone exists
+  ansible.builtin.set_fact:
+    powerdns_lb_zone_present: >-
+      {{ (cs_app_zone | lower | regex_replace('[.]$', ''))
+         in ((powerdns_lb_all_zones_cmd.stdout_lines | default([]))
+             | map('trim') | map('lower') | map('regex_replace', '[.]$', '') | list) }}
+
+- name: Fail when the tenant zone does not exist on this nameserver
+  ansible.builtin.assert:
+    that:
+      - powerdns_lb_zone_present | bool
+    fail_msg: >-
+      The zone {{ cs_app_zone }} does not exist on {{ inventory_hostname }},
+      so the load balancer records cannot be written into it. Either
+      `powerdns_manage_zone: false` is set and nobody created it
+      (`pdnsutil create-zone {{ cs_app_zone }} <primary nameserver>`), or
+      this nameserver serves some other zone -- an existing environment's
+      nameserver whose cs_app_zone differs from this inventory's. Fix
+      cs_app_zone or create the zone; or set `powerdns_manage_lb_records:
+      false` on the nameservers and publish the records yourself.
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Say why nothing is planned in check mode
+  ansible.builtin.debug:
+    msg: >-
+      {{ cs_app_zone }} does not exist on {{ inventory_hostname }} yet (a
+      check-mode run does not create it), so no load balancer records are
+      planned. A real run creates the zone first and then writes them.
+  when: ansible_check_mode and not (powerdns_lb_zone_present | bool)
+
+- name: Plan and write the load balancer records
+  when: powerdns_lb_zone_present | bool
+  block:
+    - name: Read the tenant zone
+      ansible.builtin.command:
+        argv:
+          - pdnsutil
+          - list-zone
+          - "{{ cs_app_zone }}"
+      register: powerdns_lb_zone_cmd
+      changed_when: false
+      check_mode: false
+
+    - name: Decide what to write
+      ansible.builtin.include_tasks: lb_records_plan.yml
+      vars:
+        powerdns_lb_zone_listing: "{{ powerdns_lb_zone_cmd.stdout_lines }}"
+        powerdns_lb_all_zones: "{{ powerdns_lb_all_zones_cmd.stdout_lines }}"
+
+    # Before any write: a conflict on one domain must not leave another
+    # half-done, and every conflict is reported at once, not one per run.
+    - name: Fail on records this provisioner does not own
+      ansible.builtin.fail:
+        msg: "{{ powerdns_lb_conflicts }}"
+      when: powerdns_lb_conflicts | length > 0
+
+    - name: Warn about domains served from their own zone
+      ansible.builtin.debug:
+        msg: "{{ powerdns_lb_skipped }}"
+      when: powerdns_lb_skipped | length > 0
+
+    # Names only. Removing one is a human decision -- the old name may still
+    # be in tenants' hands -- so no delete command is offered.
+    - name: Warn about load balancer names no az of this inventory uses any more
+      ansible.builtin.debug:
+        msg: >-
+          These names in {{ cs_app_zone }} carry an ownership marker naming a
+          node of this inventory that now answers on a different app_domain:
+          {{ powerdns_lb_stale | join(', ') }}. Their records were left in
+          place and are still served. Remove them when nothing uses the old
+          names any more.
+      when: powerdns_lb_stale | length > 0
+
+    - name: Show the planned record changes
+      ansible.builtin.debug:
+        msg: >-
+          {{ powerdns_lb_ops
+             if powerdns_lb_ops | length > 0
+             else 'load balancer records in ' ~ cs_app_zone ~ ' are already correct' }}
+
+    # Kept apart from powerdns_lb_ops on purpose: the re-plan below
+    # overwrites powerdns_lb_ops, and a block's `when` is re-evaluated for
+    # every task in it, so gating the verification on powerdns_lb_ops would
+    # make its own final assert skip itself.
+    - name: Count the record changes this run makes
+      ansible.builtin.set_fact:
+        powerdns_lb_write_count: "{{ 0 if ansible_check_mode else (powerdns_lb_ops | length) }}"
+
+    - name: Apply the record changes
+      ansible.builtin.command:
+        argv: >-
+          {{ ['pdnsutil', item.op ~ '-rrset', cs_app_zone, item.name, item.type]
+             + (([item.ttl | string] + item.contents) if item.op == 'replace' else []) }}
+      loop: "{{ powerdns_lb_ops }}"
+      loop_control:
+        label: "{{ item.op }} {{ item.fqdn }} {{ item.type }}"
+      changed_when: true
+      when: not ansible_check_mode
+
+    - name: Verify the written records
+      when: powerdns_lb_write_count | int > 0
+      block:
+        # Recomputes ordering names and empty non-terminals; the _cs-lb and
+        # wildcard names can create the latter.
+        - name: Rectify the tenant zone
+          ansible.builtin.command:
+            argv:
+              - pdnsutil
+              - rectify-zone
+              - "{{ cs_app_zone }}"
+          changed_when: true
+
+        - name: Re-read the tenant zone
+          ansible.builtin.command:
+            argv:
+              - pdnsutil
+              - list-zone
+              - "{{ cs_app_zone }}"
+          register: powerdns_lb_zone_after
+          changed_when: false
+
+        # The plan against the zone as it is now: with our marker in place
+        # every domain is in the converge branch, so "no ops, no conflicts"
+        # means every desired rrset is present exactly, TTL included.
+        - name: Re-plan against the written zone
+          ansible.builtin.include_tasks: lb_records_plan.yml
+          vars:
+            powerdns_lb_zone_listing: "{{ powerdns_lb_zone_after.stdout_lines }}"
+            powerdns_lb_all_zones: "{{ powerdns_lb_all_zones_cmd.stdout_lines }}"
+
+        - name: Assert the load balancer records are now exactly as planned
+          ansible.builtin.assert:
+            that:
+              - powerdns_lb_ops | length == 0
+              - powerdns_lb_conflicts | length == 0
+            fail_msg: >-
+              After writing, {{ cs_app_zone }} still differs from the plan:
+              {{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}. pdnsutil
+              accepted the writes but the zone does not read back as
+              written -- check `pdnsutil list-zone {{ cs_app_zone }}` on
+              {{ inventory_hostname }}.
+            quiet: true

@@ -1,0 +1,237 @@
+---
+# With `dns_driver: powerdns` and roles/powerdns writing each az's load
+# balancer records (`preflight_lb_records_managed`), the one DNS step left to
+# the operator is the delegation: the PARENT of `cs_app_zone` must hand the
+# zone to the bundled nameservers (docs/install.md §3). The records are
+# written into the bundled tenant zone early in this run, so they are served
+# the moment the zone is — and served to nobody while the delegation is
+# missing or points elsewhere. A wrong delegation has no symptom inside the
+# converge; it surfaces at the very end, in roles/validate's
+# `lb_domain_public`, after thirty minutes of building. So check it FIRST.
+#
+# HOW. From the control machine, like tasks/app_domain_dns.yml:
+#
+#   1. find the parent zone's authoritative servers — `dig +short NS` on
+#      `cs_app_zone` minus its first label, walking one label further up
+#      whenever a name has no NS of its own (an empty non-terminal in the
+#      parent zone, e.g. `apps.example.com` for `lb.apps.example.com` when
+#      only `example.com` is a zone). Bounded by the zone's own labels, which
+#      preflight has already capped at five.
+#   2. ask up to `preflight_app_zone_delegation_servers` of them, NON-
+#      recursively, for `cs_app_zone NS`, and read the referral they hand out.
+#      Asking the parent directly is the point: a recursive resolver would
+#      answer from whatever the CHILD serves (or from its cache), which is the
+#      bundled nameservers talking about themselves — and they do not exist
+#      yet on a greenfield run.
+#   3. the set of NS names in that referral must equal the set of
+#      `powerdns_name` across `groups['nameservers']` — those names ARE the
+#      zone's NS records (roles/powerdns/tasks/zone.yml), and a delegation
+#      naming any other server sends part of the world's queries to a server
+#      that has never heard of these records.
+#
+# Names are compared normalized — lowercase, trailing dot stripped — because
+# DNS names are case-insensitive and dig prints them absolute.
+#
+# Glue is NOT checked. When the nameserver names lie under `cs_app_zone`
+# itself the parent also needs A records for them, and the failure message
+# says so; whether the glue matches an address is a question about the
+# nameservers' public addresses, which the inventory does not carry.
+
+- name: Assert every nameserver names itself with powerdns_name
+  ansible.builtin.assert:
+    that:
+      - (groups['nameservers'] | map('extract', hostvars, 'powerdns_name') | select('defined') | list | length)
+        == (groups['nameservers'] | length)
+    fail_msg: >-
+      Every host in groups['nameservers'] must set 'powerdns_name' (its FQDN —
+      it becomes an NS record of {{ cs_app_zone }}). Missing on:
+      {{ groups['nameservers'] | reject('in', groups['nameservers'] | map('extract', hostvars)
+         | selectattr('powerdns_name', 'defined') | map(attribute='inventory_hostname') | list)
+         | join(', ') }}.
+    success_msg: "every nameserver sets powerdns_name"
+    quiet: true
+  run_once: true
+
+- name: Derive the delegation this run expects and the parent names to look under
+  ansible.builtin.set_fact:
+    # `cs_app_zone` minus one label, then minus two, ... down to its TLD. The
+    # first of these that has NS records is the zone the delegation lives in.
+    preflight_delegation_parent_candidates: >-
+      {%- set labels = (cs_app_zone | string).split('.') -%}
+      {%- set out = [] -%}
+      {%- for i in range(1, labels | length) -%}
+      {%- set _ = out.append(labels[i:] | join('.')) -%}
+      {%- endfor -%}
+      {{ out }}
+    preflight_delegation_expected: >-
+      {{ groups['nameservers'] | map('extract', hostvars, 'powerdns_name')
+         | map('string') | map('lower') | map('regex_replace', '\.$', '')
+         | unique | sort }}
+  run_once: true
+
+- name: Find the parent zone's nameservers
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ item }}"
+      - NS
+  loop: "{{ preflight_delegation_parent_candidates }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: preflight_delegation_parent_ns
+
+# `+short` on a name that is a CNAME prints the target too, so keep only lines
+# that look like a hostname; the first candidate with any left is the parent.
+# The walk stops there — that zone is the one that must hold the delegation,
+# and a grandparent's servers would only refer the question back down to it.
+- name: Pick the closest enclosing zone that has nameservers
+  ansible.builtin.set_fact:
+    preflight_delegation_parent_found: >-
+      {%- set out = [] -%}
+      {%- for r in preflight_delegation_parent_ns.results | default([]) -%}
+      {%- set names = (r.stdout_lines | default([])) | map('trim')
+           | select('match', '^[A-Za-z0-9_.-]+[.]$')
+           | map('lower') | map('regex_replace', '[.]$', '') | unique | sort | list -%}
+      {%- if r.rc | default(1) == 0 and names | length > 0 -%}
+      {%- set _ = out.append({'zone': r.item, 'servers': names}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out[:1] }}
+  run_once: true
+
+- name: Record the parent zone and the servers to ask
+  ansible.builtin.set_fact:
+    preflight_delegation_parent: >-
+      {{ (preflight_delegation_parent_found | first).zone
+         if preflight_delegation_parent_found | length > 0 else '' }}
+    preflight_delegation_parent_servers: >-
+      {{ (preflight_delegation_parent_found | first).servers[: preflight_app_zone_delegation_servers | int]
+         if preflight_delegation_parent_found | length > 0 else [] }}
+  run_once: true
+
+- name: Assert the parent zone's nameservers could be found
+  ansible.builtin.assert:
+    that:
+      - preflight_delegation_parent | length > 0
+      - preflight_delegation_parent_servers | length > 0
+    fail_msg: >-
+      Could not find the nameservers of any zone above {{ cs_app_zone }} —
+      `dig +short NS` returned nothing usable from this control machine for
+      {{ preflight_delegation_parent_candidates | join(', ') }}. This is a
+      LOOKUP failure, not a verdict on the delegation: the control machine's
+      resolver is unreachable, filtered, or does not see public DNS. Run
+      `dig NS {{ preflight_delegation_parent_candidates | first }}` here to
+      see why. If this control machine cannot see public DNS by design (split
+      horizon), set `preflight_check_app_domain_dns: false` — the records are
+      still validated at the end of the run (roles/validate, `dns`).
+    success_msg: >-
+      {{ cs_app_zone }} is delegated from {{ preflight_delegation_parent }}
+      (asking {{ preflight_delegation_parent_servers | join(', ') }})
+    quiet: true
+  run_once: true
+
+# `+norec` makes the parent answer from its own data: a referral, with the
+# child's NS set in the AUTHORITY section. `+answer` as well, because a parent
+# server that also hosts `cs_app_zone` as a zone of its own answers it
+# authoritatively instead — which is the classic mistake (the zone was
+# created at the parent's DNS provider rather than delegated) and must show
+# up as the wrong NS set, not as no answer. `+comments` keeps the header, so a
+# REFUSED or SERVFAIL can be told apart from an empty referral.
+- name: Ask the parent zone's nameservers for the tenant zone's delegation
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +norec
+      - +time=3
+      - +tries=1
+      - +noall
+      - +comments
+      - +answer
+      - +authority
+      - "@{{ item }}"
+      - "{{ cs_app_zone }}"
+      - NS
+  loop: "{{ preflight_delegation_parent_servers }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: preflight_delegation_referral
+
+- name: Read the NS set each parent server hands out for the tenant zone
+  ansible.builtin.set_fact:
+    preflight_delegation_answers: >-
+      {%- set out = [] -%}
+      {%- for r in preflight_delegation_referral.results | default([]) -%}
+      {%- set status = ((r.stdout | default('')) | regex_search('status: ([A-Z]+)', '\\1') or ['NONE']) | first -%}
+      {%- set names = (r.stdout_lines | default([])) | map('trim')
+           | select('match', '^' ~ (cs_app_zone | regex_escape) ~ '[.]?\\s+\\d+\\s+IN\\s+NS\\s+', ignorecase=True)
+           | map('regex_replace', '^.*\\s(\\S+)\\s*$', '\\1')
+           | map('lower') | map('regex_replace', '[.]$', '') | unique | sort | list -%}
+      {%- set _ = out.append({'server': r.item,
+                              'answered': r.rc | default(1) == 0 and status in ['NOERROR', 'NXDOMAIN'],
+                              'status': status if r.rc | default(1) == 0 else ('no reply (dig exit ' ~ r.rc | default('?') ~ ')'),
+                              'ns': names}) -%}
+      {%- endfor -%}
+      {{ out }}
+  run_once: true
+
+- name: Assert at least one parent nameserver answered
+  ansible.builtin.assert:
+    that:
+      - preflight_delegation_answers | selectattr('answered') | list | length > 0
+    fail_msg: >-
+      None of {{ preflight_delegation_parent }}'s nameservers answered a
+      non-recursive query for {{ cs_app_zone }} NS from this control machine:
+      {% for a in preflight_delegation_answers %}{{ a.server }}: {{ a.status }}{{ '; ' if not loop.last else '' }}{% endfor %}.
+      This is a REACHABILITY failure, not a verdict on the delegation —
+      outbound UDP/TCP 53 from this machine to arbitrary servers is filtered,
+      or the parent's servers refuse it. Try
+      `dig +norec @{{ preflight_delegation_parent_servers | first }} {{ cs_app_zone }} NS`
+      here. If direct queries are blocked by design, set
+      `preflight_check_app_domain_dns: false`; roles/validate still checks
+      the records at the end of the run.
+    quiet: true
+  run_once: true
+
+- name: Assert the parent delegates the tenant zone to exactly the bundled nameservers
+  ansible.builtin.assert:
+    that:
+      - item.ns == preflight_delegation_expected
+    fail_msg: >-
+      {{ item.server }} (a nameserver for {{ preflight_delegation_parent }})
+      {{ ('delegates ' ~ cs_app_zone ~ ' to ' ~ (item.ns | join(', ')))
+         if item.ns | length > 0
+         else ('hands out NO delegation for ' ~ cs_app_zone ~ ' (status ' ~ item.status ~ ')') }},
+      but this run's nameservers are
+      {{ preflight_delegation_expected | join(', ') }}. With
+      dns_driver: powerdns the bundled nameservers serve {{ cs_app_zone }},
+      and this run writes every az's load balancer records into it — none of
+      it is reachable until the parent delegates the zone to them. Create
+      exactly these records in the {{ preflight_delegation_parent }} zone at
+      its DNS provider, and remove any other NS records for
+      {{ cs_app_zone }} there:
+      {% for n in preflight_delegation_expected %}`{{ cs_app_zone }}. IN NS {{ n }}.`{{ '  ' if not loop.last else '' }}{% endfor %}
+      {{ ('Names under ' ~ cs_app_zone ~ ' also need glue A records at the parent: '
+          ~ (preflight_delegation_expected | select('search', '(^|\.)' ~ (cs_app_zone | regex_escape) ~ '$') | join(', ')) ~ '.')
+         if preflight_delegation_expected | select('search', '(^|\.)' ~ (cs_app_zone | regex_escape) ~ '$') | list | length > 0
+         else '' }}
+      If {{ cs_app_zone }} was created as a zone at the parent's provider
+      instead of delegated, delete it there — its records shadow the bundled
+      zone. A delegation just changed can take the parent's NS TTL to reach
+      every server; re-run once it has.
+    success_msg: >-
+      {{ item.server }} delegates {{ cs_app_zone }} to
+      {{ preflight_delegation_expected | join(', ') }}
+    quiet: true
+  loop: "{{ preflight_delegation_answers | selectattr('answered') | list }}"
+  loop_control:
+    label: "{{ item.server }}"
+  run_once: true

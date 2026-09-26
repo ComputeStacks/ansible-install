@@ -6,7 +6,8 @@
 #   validate_skip: [borg, dns]
 #
 # Check names: services, containers, agent, backfill, prometheus, borg, ssh,
-# portal, acme_backend, lb_domain, dns, dns_replication, pdns_api.
+# portal, acme_backend, lb_domain_public, lb_domain, dns, dns_replication,
+# pdns_api.
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name
@@ -184,3 +185,73 @@ validate_pdns_api_timeout: 10
 # remedy is to re-run `--tags lb_domain` rather than to treat it as broken.
 validate_lb_domain_retries: 12
 validate_lb_domain_delay: 10
+
+# --- load balancer records managed by roles/powerdns ----------------------
+# True when this run WROTE each new az's load balancer pair into the bundled
+# tenant zone (roles/powerdns/tasks/lb_records.yml). The same expression,
+# spelled the same way, gates roles/powerdns and roles/preflight — keep all
+# three in step. When true:
+#
+#   * `dns` additionally asks every nameserver for each new az's apex A and
+#     wildcard CNAME — the records this run wrote, served by every server;
+#   * `lb_domain_public` resolves the same pair through public DNS from the
+#     control machine — the check preflight makes for hand-made records,
+#     moved here because these do not exist until the run writes them.
+#
+# `powerdns_manage_lb_records` is read from the LEADER's hostvars because that
+# is where roles/powerdns reads it: override it on the nameservers
+# (group_vars/nameservers or ns_primary's host vars). The powerdns role's own
+# default (true) is not in scope in the validate play, hence `default(true)`.
+# Never read a powerdns role variable here for the same reason — the node list
+# is `cs_new_nodes`, which is exactly what that role writes for.
+validate_lb_records_managed: >-
+  {{ dns_driver | default('none') == 'powerdns'
+     and groups['ns_primary'] | default([]) | length > 0
+     and (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool }}
+
+# Label used to exercise each wildcard, by `dns` and `lb_domain_public` both.
+# Any label matches a wildcard; a fixed one keeps the run reproducible. It must
+# not exist as a real record. It mirrors preflight's
+# `preflight_app_domain_probe_label`; the roles cannot share a default.
+validate_app_domain_probe_label: cs-validate-probe
+
+# --- lb_domain_public -----------------------------------------------------
+# The shared second half of both `lb_domain_public` failure messages: why a
+# public lookup can disagree with records this run wrote, and what to do —
+# which is never "create them by hand". `powerdns_name` is an inventory var on
+# each nameserver, so reading it through hostvars is safe from any host.
+validate_lb_public_hint: >-
+  These records belong to the provisioner — do not create them by hand; a
+  re-run converges them. When the `dns` check passed, every bundled
+  nameserver serves them, and a public lookup that disagrees means the path
+  to those servers is wrong: the parent of {{ cs_app_zone }} must delegate it
+  to exactly
+  {% for n in groups['nameservers'] | default([]) | map('extract', hostvars, 'powerdns_name')
+     | select('defined') | map('regex_replace', '[.]$', '') %}`{{ cs_app_zone }}. IN NS {{ n }}.` {% endfor %}
+  and nothing else (roles/preflight checks this before a greenfield run, but
+  not in attach mode). A resolver that looked the name up before the records
+  existed serves its cached negative answer until the zone's SOA negative TTL
+  runs out; wait, then re-run `--tags lb_domain_public`. If this control
+  machine cannot see public DNS by design (split horizon), add
+  `lb_domain_public` to `validate_skip`.
+
+# --- dns (load balancer records) ------------------------------------------
+# Where to look when a nameserver does not serve a load balancer record this
+# run wrote, split by role: the leader holds the only writable copy, a
+# follower serves a streaming replica of it. `__RECORD__` is replaced with
+# the record in question.
+validate_dns_lb_where_leader: >-
+  This is the LEADER, where roles/powerdns writes `__RECORD__` into
+  {{ cs_app_zone }} — check `pdnsutil list-zone {{ cs_app_zone }}` there and
+  re-run; the write converges. If the domain is a zone of its own on these
+  servers, roles/powerdns skipped it (it says so in its output) and the
+  record is yours to create in that zone. Something else editing the zone
+  (the controller writing a stale in-memory copy back) can also remove it; a
+  re-run restores it.
+validate_dns_lb_where_follower: >-
+  This is a FOLLOWER: it serves a streaming postgres replica of the leader and
+  nothing writes to it directly, so a record the leader has and this server
+  lacks is REPLICATION — check `pg_stat_wal_receiver` here (the
+  `dns_replication` check) and compare against
+  `pdnsutil list-zone {{ cs_app_zone }}` on the leader. If the leader lacks
+  `__RECORD__` too, fix it there first.

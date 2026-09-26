@@ -40,3 +40,116 @@
   loop_control:
     label: "{{ item.item }}"
   run_once: true
+
+# When roles/powerdns wrote each new az's load balancer records
+# (`validate_lb_records_managed`), every nameserver must also SERVE them: the
+# apex A must include that node's `public_ip`, and a label under the wildcard
+# must come back as a CNAME to the apex. Same shape as the NS check above —
+# from the controller, one query per nameserver per new az, against that
+# nameserver's own address — so a follower whose replication stalled after
+# the zone was created (NS present, new records missing) is caught here even
+# when `dns_replication` is skipped.
+#
+# The node list is `cs_new_nodes`, read HERE on the controller (docs/
+# contracts.md rule 10), never a powerdns role variable: this play does not
+# load that role, and `cs_new_nodes` is exactly what it writes for.
+#
+# Every new node is checked, including one whose `cs_app_domain` is a
+# separate zone on these servers (roles/powerdns skips writing those and
+# leaves them to the operator). This play cannot see which domains are
+# zones, and it does not need to: what the nameservers SERVE is what the
+# controller and every tenant will get, whichever zone it comes from.
+- name: Query each nameserver for each new az's load balancer apex
+  ansible.builtin.command:
+    argv:
+      - dig
+      - "+time=5"
+      - "+tries=2"
+      - "+short"
+      - "@{{ hostvars[item.0].primary_ip }}"
+      - "{{ hostvars[item.1].cs_app_domain }}"
+      - A
+  loop: "{{ groups['nameservers'] | product(cs_new_nodes | default([]) | sort) | list }}"
+  loop_control:
+    label: "{{ item.0 }}: {{ hostvars[item.1].cs_app_domain }}"
+  delegate_to: "{{ validate_controller_host }}"
+  run_once: true
+  register: validate_dns_lb_apex
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: validate_lb_records_managed | bool
+
+- name: Assert every nameserver serves each new az's load balancer apex
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - hostvars[item.item.1].public_ip in (item.stdout_lines | default([]))
+    fail_msg: >-
+      {{ item.item.0 }} ({{ hostvars[item.item.0].primary_ip }})
+      {{ ('did not answer (dig exit ' ~ item.rc ~ ')') if item.rc != 0
+         else ('has no A record for ' ~ hostvars[item.item.1].cs_app_domain)
+              if (item.stdout_lines | default([])) | length == 0
+         else ('answers ' ~ hostvars[item.item.1].cs_app_domain ~ ' A with '
+               ~ (item.stdout_lines | join(', '))) }},
+      but az {{ hostvars[item.item.1].az | default('unknown') }}'s load
+      balancer is {{ hostvars[item.item.1].public_ip }} (node
+      {{ item.item.1 }}). {{ validate_dns_lb_where
+         | replace('__RECORD__', hostvars[item.item.1].cs_app_domain ~ '. A '
+                   ~ hostvars[item.item.1].public_ip) }}
+    quiet: true
+  loop: "{{ validate_dns_lb_apex.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0 }}: {{ hostvars[item.item.1].cs_app_domain }}"
+  run_once: true
+  vars:
+    validate_dns_lb_where: "{{ validate_dns_lb_where_leader if item.item.0 in groups['ns_primary'] else validate_dns_lb_where_follower }}"
+  when: validate_lb_records_managed | bool
+
+- name: Query each nameserver for each new az's load balancer wildcard
+  ansible.builtin.command:
+    argv:
+      - dig
+      - "+time=5"
+      - "+tries=2"
+      - "+short"
+      - "@{{ hostvars[item.0].primary_ip }}"
+      - "{{ validate_app_domain_probe_label }}.{{ hostvars[item.1].cs_app_domain }}"
+      - CNAME
+  loop: "{{ groups['nameservers'] | product(cs_new_nodes | default([]) | sort) | list }}"
+  loop_control:
+    label: "{{ item.0 }}: *.{{ hostvars[item.1].cs_app_domain }}"
+  delegate_to: "{{ validate_controller_host }}"
+  run_once: true
+  register: validate_dns_lb_wildcard
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: validate_lb_records_managed | bool
+
+- name: Assert every nameserver serves each new az's wildcard as a CNAME to its apex
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - ((item.stdout | default('')) | trim) == (hostvars[item.item.1].cs_app_domain ~ '.')
+    fail_msg: >-
+      {{ item.item.0 }} ({{ hostvars[item.item.0].primary_ip }})
+      {{ ('did not answer (dig exit ' ~ item.rc ~ ')') if item.rc != 0
+         else 'returned no CNAME'
+              if ((item.stdout | default('')) | trim) | length == 0
+         else ('returned a CNAME to ' ~ ((item.stdout | default('')) | trim)) }}
+      for {{ validate_app_domain_probe_label }}.{{ hostvars[item.item.1].cs_app_domain }}
+      (az {{ hostvars[item.item.1].az | default('unknown') }}, node
+      {{ item.item.1 }}). The controller demands a wildcard CNAME to the apex
+      and marks the load balancer invalid without one.
+      {{ validate_dns_lb_where
+         | replace('__RECORD__', '*.' ~ hostvars[item.item.1].cs_app_domain ~ '. CNAME '
+                   ~ hostvars[item.item.1].cs_app_domain ~ '.') }}
+    quiet: true
+  loop: "{{ validate_dns_lb_wildcard.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0 }}: *.{{ hostvars[item.item.1].cs_app_domain }}"
+  run_once: true
+  vars:
+    validate_dns_lb_where: "{{ validate_dns_lb_where_leader if item.item.0 in groups['ns_primary'] else validate_dns_lb_where_follower }}"
+  when: validate_lb_records_managed | bool

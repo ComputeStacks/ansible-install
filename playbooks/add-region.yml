@@ -9,6 +9,16 @@
 # additive write set from docs/contracts.md §Attach mode. The new node is
 # built in full, exactly as site.yml builds one.
 #
+# With `dns_driver: powerdns`, the existing leader nameserver (ns_primary,
+# also `existing_env: true`) receives the new az's load balancer records in
+# cs_app_zone — apex A, wildcard CNAME and the `_cs-lb` ownership marker —
+# and nothing else. They are written only for the new region's names, and a
+# name holding records this provisioner cannot show are its own fails the
+# run before anything is written (roles/powerdns/README.md). An inventory
+# with no ns_primary, or `powerdns_manage_lb_records: false` on it, skips
+# that play; the records are then the operator's, and preflight digs for
+# them publicly as it does for dns_driver none.
+#
 # Read docs/attach-mode.md before running this. In short:
 #   * the existing controller must already be upgraded to a release carrying
 #     `rake bootstrap:apply`;
@@ -31,7 +41,7 @@
 # controller has never heard of. This inventory already describes exactly one
 # new region; that is the scoping.
 #
-# Why `include_role` and not `roles:` here. Four of these steps run a role's
+# Why `include_role` and not `roles:` here. Five of these steps run a role's
 # alternate entry point (`tasks_from:`), which is a parameter of
 # include_role/import_role and NOT of a play's `roles:` keyword — ansible
 # silently ignores it there and runs `tasks/main.yml` instead. That is a
@@ -92,6 +102,28 @@
           unless you really are extending a tailnet), or drop
           `tailscale_authkey` from this inventory's secrets.
       when: (tailscale_authkey | default('')) | length > 0
+
+# Early, before anything is built, so the records have the whole run to
+# propagate before roles/validate checks them (`dns` on every nameserver,
+# `lb_domain_public` through public resolution). Writes only the new
+# region's names: powerdns_lb_records_nodes defaults to cs_new_nodes, and
+# the other nodes of the fleet are not in this inventory.
+#
+# The `when:` is the "managed" expression roles/preflight and roles/validate
+# use, spelled the same way; with no ns_primary this play has no hosts at
+# all, and the expression is false, so preflight falls back to its public
+# dig for hand-made records.
+- name: Existing nameserver — the new az's load balancer records only
+  hosts: ns_primary
+  tasks:
+    - name: Write the new az's load balancer records into the tenant zone
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records
+      when:
+        - dns_driver | default('none') == 'powerdns'
+        - groups['ns_primary'] | default([]) | length > 0
+        - (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool
 
 # Gate for everything downstream: takes a pg_dump first, asserts the
 # secret_key_base match, appends the two new environment keys (never

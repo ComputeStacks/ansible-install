@@ -103,6 +103,26 @@
     - "'nodes' in group_names"
   tags: [validate, acme_backend]
 
+# Per az, as the check below, and only when roles/powerdns wrote the records
+# (`validate_lb_records_managed`): does public DNS, from the control machine,
+# actually hand out this az's pair? The records were written early in the run,
+# so this is where the check preflight makes for hand-made records lands.
+# Before `lb_domain`, whose wait for the controller's verdict is pointless if
+# the names do not resolve. Runs per node (not run_once) so it works on either
+# playbook's validate play: site.yml's `hosts: all` and add-region.yml's
+# `controller:nodes` both contain every new node.
+- name: Assert this az's load balancer records resolve publicly
+  ansible.builtin.include_tasks:
+    file: lb_domain_public.yml
+    apply:
+      tags: [validate, lb_domain_public]
+  when:
+    - "'lb_domain_public' not in validate_skip"
+    - "'nodes' in group_names"
+    - inventory_hostname in (cs_new_nodes | default([]))
+    - validate_lb_records_managed | bool
+  tags: [validate, lb_domain_public]
+
 # Per az, and only for an az this run actually seeded: `cs_new_nodes` is
 # `groups['nodes']` minus every host flagged `existing_env`, and an existing
 # region's load balancer was never in this run's manifest. It is read HERE,

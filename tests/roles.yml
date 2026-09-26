@@ -143,3 +143,20 @@
       ansible.builtin.include_role:
         name: firewall
         tasks_from: v2_append
+
+# The powerdns entry points. add-region.yml includes `lb_records` against an
+# existing ns_primary; `lb_records_plan` is the pure step it (and
+# tests/lb_records_plan.yml) includes.
+- name: Nameserver task-file entry points
+  hosts: ns_primary
+  gather_facts: false
+  tasks:
+    - name: Write the load balancer records into the tenant zone
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records
+
+    - name: Plan the load balancer records
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan

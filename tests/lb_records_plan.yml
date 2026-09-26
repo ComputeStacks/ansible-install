@@ -1,0 +1,516 @@
+---
+# Does roles/powerdns decide the right load balancer record writes? -- every
+# ownership rule in roles/powerdns/tasks/lb_records_plan.yml, proven without a
+# nameserver.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
+#
+# (run by `make check`)
+#
+# The plan step is pure (set_fact only), so this feeds it canned
+# `pdnsutil list-zone` / `pdnsutil list-all-zones` output and asserts the
+# operations, conflicts, skips and stale names it computes. The role file is
+# included for real (`include_role ... tasks_from`), so its defaults are
+# loaded exactly as a converge loads them; only the three inputs a converge
+# reads off the nameserver are supplied here.
+#
+# THE TEST NODES ARE REAL INVENTORY HOSTS, added with `add_host` into the
+# `nodes` group. The plan reads `hostvars[n].cs_app_domain`,
+# `hostvars[n].public_ip` and `groups['nodes']`, and faking those as play vars
+# would not exercise the cross-host read at all (play vars are not part of
+# another host's hostvars -- tests/roles.yml has the full account, and it is
+# why `tests/group_vars` is a symlink to `playbooks/group_vars`). The fixture's
+# own node1001 and node2001 set no app_domain, so they answer on cs_app_zone
+# (usercontent.example.com) -- the case where the domain IS the zone, and the
+# case where two nodes share one name.
+#
+# Fields in the fixture lines below are separated by `|`, and every case
+# turns those into real tabs (`lbt_tab`) before the plan sees them. Real tabs
+# in this file would trip ansible-lint's no-tabs rule, and a `\t` inside a
+# Jinja string literal stays a backslash and a `t` -- the line then splits
+# into one field and the plan drops it as not-a-record, which makes a test
+# pass for nothing (case 2 asserts every fixture line parsed, for that reason).
+#
+# What the listings look like is what list-zone prints: a `$ORIGIN .` header,
+# then `name<TAB>ttl<TAB>IN<TAB>type<TAB>content` with absolute names. The real
+# format on a live box (4.x and 5.x) is still to be confirmed by hand; if it
+# ever differs, this file's listings are what to update first.
+
+- name: Add the test nodes to the inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add a node per shape of app_domain
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: nodes
+        app_domain: "{{ item.app_domain }}"
+        public_ip: "{{ item.public_ip }}"
+      loop:
+        # one label below the zone -- most cases
+        - {name: lbt1, app_domain: lb1.usercontent.example.com, public_ip: 192.0.2.101}
+        # two labels below the zone
+        - {name: lbt2, app_domain: deep.lb2.usercontent.example.com, public_ip: 192.0.2.102}
+        # a domain the nameserver serves as a zone of its own
+        - {name: lbt3, app_domain: az3.usercontent.example.com, public_ip: 192.0.2.103}
+      loop_control:
+        label: "{{ item.name }}"
+
+- name: Plan the load balancer records against canned zone listings
+  hosts: localhost
+  gather_facts: false
+  vars:
+    lbt_tab: "{{ '%c' | format(9) }}"
+    lbt_zones: ["usercontent.example.com"]
+    # Present in every listing: the zone's own SOA/NS and records that have
+    # nothing to do with any load balancer. No case may touch them.
+    lbt_base:
+      - "$ORIGIN ."
+      - "usercontent.example.com.|3600|IN|SOA|ns1.example.com. hostmaster.usercontent.example.com. 7 10800 3600 604800 3600"
+      - "usercontent.example.com.|3600|IN|NS|ns1.example.com."
+      - "usercontent.example.com.|3600|IN|NS|ns2.example.com."
+      - "other.usercontent.example.com.|300|IN|A|192.0.2.200"
+      - "_acme-challenge.other.usercontent.example.com.|60|IN|TXT|\"token with spaces\""
+    # lbt1's correct records, and the extra types at its apex the rules must
+    # leave alone.
+    lbt1_a: "lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+    lbt1_cname: "*.lb1.usercontent.example.com.|300|IN|CNAME|lb1.usercontent.example.com."
+    lbt1_marker: "_cs-lb.lb1.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
+    lbt1_apex_extras:
+      - "lb1.usercontent.example.com.|300|IN|AAAA|2001:db8::101"
+      - "lb1.usercontent.example.com.|300|IN|TXT|\"v=spf1 -all\""
+      - "lb1.usercontent.example.com.|300|IN|MX|10 mail.example.com."
+    lbt1_create:
+      - {op: replace, name: lb1, fqdn: lb1.usercontent.example.com., type: A, ttl: 300, contents: [192.0.2.101]}
+      - op: replace
+        name: "*.lb1"
+        fqdn: "*.lb1.usercontent.example.com."
+        type: CNAME
+        ttl: 300
+        contents: [lb1.usercontent.example.com.]
+      - {op: replace, name: _cs-lb.lb1, fqdn: _cs-lb.lb1.usercontent.example.com., type: TXT, ttl: 300, contents: ['"owner=lbt1"']}
+  tasks:
+    # --- 1. empty zone: create all three ---------------------------------
+    - name: "Case: empty zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: empty zone creates the pair and the marker"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == lbt1_create
+          - powerdns_lb_conflicts == []
+          - powerdns_lb_skipped == []
+          - powerdns_lb_stale == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 2. already correct, with marker; unrelated records untouched -----
+    - name: "Case: already correct"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname, lbt1_marker] + lbt1_apex_extras) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: already correct plans nothing, and leaves AAAA/TXT/MX at the apex alone"
+      ansible.builtin.assert:
+        that:
+          # Every line but `$ORIGIN .` parsed. Guards the listings themselves:
+          # a fixture line with no real tabs would be dropped silently, and
+          # every "nothing planned" assertion would then pass for nothing.
+          - powerdns_lb_zone_records | length == (lbt_base | length) - 1 + 3 + (lbt1_apex_extras | length)
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts == []
+          - powerdns_lb_stale == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 3. hand-made correct pair, no marker: adopt -----------------------
+    - name: "Case: hand-made pair without a marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname] + lbt1_apex_extras) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a correct unmarked pair is adopted -- marker only"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == [lbt1_create[2]]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 3b. only a correct wildcard, no apex, no marker: adopt too -------
+    - name: "Case: correct unmarked wildcard, no apex A"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname]) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: nothing differs, so the missing A and the marker are filled in"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == [lbt1_create[0], lbt1_create[2]]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 4. wrong apex IP, marker ours: converge ---------------------------
+    - name: "Case: wrong apex address with our marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.99"
+          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+        powerdns_lb_zone_listing: >-
+          {{ (lbt_base + [lbt1_cname, lbt1_marker] + lbt1_apex_extras + powerdns_lbt_extra)
+             | map('replace', '|', lbt_tab) | list }}
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: our apex A is replaced with exactly this node's address"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == [lbt1_create[0]]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 5. wrong apex IP, no marker: conflict -----------------------------
+    - name: "Case: wrong apex address without a marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.99"
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: unmarked content that differs is a conflict, and nothing is planned"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'192.0.2.99' in powerdns_lb_conflicts[0]"
+          - "'lb1.usercontent.example.com' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 6. wildcard A, marker ours: delete it, write the CNAME ------------
+    - name: "Case: wildcard A with our marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+          - "*.lb1.usercontent.example.com.|300|IN|AAAA|2001:db8::101"
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: every non-CNAME at the wildcard is deleted before the CNAME is written"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | length == 3
+          - >-
+            powerdns_lb_ops[0] == {'op': 'delete', 'name': '*.lb1', 'fqdn': '*.lb1.usercontent.example.com.',
+              'type': 'A', 'ttl': none, 'contents': []}
+          - >-
+            powerdns_lb_ops[1] == {'op': 'delete', 'name': '*.lb1', 'fqdn': '*.lb1.usercontent.example.com.',
+              'type': 'AAAA', 'ttl': none, 'contents': []}
+          - powerdns_lb_ops[2] == lbt1_create[1]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 7. wildcard A, no marker: conflict --------------------------------
+    - name: "Case: wildcard A without a marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: an unmarked non-CNAME wildcard is a conflict"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'*.lb1.usercontent.example.com. holds A' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 7b. wildcard CNAME to the wrong target, no marker: conflict -------
+    - name: "Case: unmarked wildcard CNAME to another name"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "*.lb1.usercontent.example.com.|300|IN|CNAME|lb9.usercontent.example.com."
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: an unmarked wildcard pointing elsewhere is a conflict"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'lb9.usercontent.example.com.' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 8. marker naming another host: conflict ---------------------------
+    - name: "Case: marker naming another host"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "_cs-lb.lb1.usercontent.example.com.|300|IN|TXT|\"owner=node9001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: another owner's name is a conflict even when the records match"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'owner=node9001' in powerdns_lb_conflicts[0]"
+          - "'lbt1' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 9. wrong TTLs, marker ours ------------------------------------------
+    - name: "Case: wrong TTLs with our marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|3600|IN|A|192.0.2.101"
+          - "_cs-lb.lb1.usercontent.example.com.|60|IN|TXT|\"owner=lbt1\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a TTL that differs is rewritten"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == [lbt1_create[0], lbt1_create[2]]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 10. apex CNAME, marker ours -----------------------------------------
+    - name: "Case: CNAME at the apex with our marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|300|IN|CNAME|Elsewhere.Example.NET"
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the apex CNAME is deleted before the A is written"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | length == 2
+          - >-
+            powerdns_lb_ops[0] == {'op': 'delete', 'name': 'lb1', 'fqdn': 'lb1.usercontent.example.com.',
+              'type': 'CNAME', 'ttl': none, 'contents': []}
+          - powerdns_lb_ops[1] == lbt1_create[0]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 11. the domain IS the zone: @, *, _cs-lb ----------------------------
+    - name: "Case: app_domain equals cs_app_zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: zone-apex names are @, * and _cs-lb, and SOA/NS are untouched"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | length == 3
+          - >-
+            powerdns_lb_ops[0] == {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.',
+              'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10']}
+          - >-
+            powerdns_lb_ops[1] == {'op': 'replace', 'name': '*', 'fqdn': '*.usercontent.example.com.',
+              'type': 'CNAME', 'ttl': 300, 'contents': ['usercontent.example.com.']}
+          - >-
+            powerdns_lb_ops[2] == {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.',
+              'type': 'TXT', 'ttl': 300, 'contents': ['"owner=node1001"']}
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 11b. two nodes on one name (every pre-app_domain inventory) --------
+    - name: "Case: two nodes sharing cs_app_zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node2001, node1001]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a shared name carries one address and one owner per node"
+      ansible.builtin.assert:
+        that:
+          # The marker names node1001 only, not the set this run writes for.
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'node1001, node2001' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: two nodes sharing cs_app_zone, empty zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node2001, node1001]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: both addresses in one A rrset, both owners in one marker"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | length == 3
+          - powerdns_lb_ops[0].contents == ['203.0.113.10', '203.0.113.20']
+          - powerdns_lb_ops[2].contents == ['"owner=node1001"', '"owner=node2001"']
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 12. two labels below the zone ---------------------------------------
+    - name: "Case: app_domain two labels below the zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt2]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: relative names keep both labels"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | map(attribute='name') | list == ['deep.lb2', '*.deep.lb2', '_cs-lb.deep.lb2']
+          - powerdns_lb_ops[1].contents == ['deep.lb2.usercontent.example.com.']
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 13. stale marker ------------------------------------------------------
+    - name: "Case: a marker left at a name the node no longer uses"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "old.usercontent.example.com.|300|IN|A|192.0.2.101"
+          - "*.old.usercontent.example.com.|300|IN|CNAME|old.usercontent.example.com."
+          - "_cs-lb.old.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
+          - "_cs-lb.far.usercontent.example.com.|300|IN|TXT|\"owner=not-in-this-inventory\""
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node2001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: only this inventory's node at an old name is stale, and nothing is deleted"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_stale == ['old.usercontent.example.com']
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_stale }} {{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 14. the domain is a zone of its own ---------------------------------
+    - name: "Case: a node whose app_domain is its own zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt3, lbt1]
+        powerdns_lbt_extra:
+          - "_cs-lb.oldaz3.usercontent.example.com.|300|IN|TXT|\"owner=lbt3\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        # list-all-zones may print trailing dots and a summary line.
+        powerdns_lb_all_zones:
+          - usercontent.example.com.
+          - AZ3.usercontent.example.com.
+          - "All zonecount: 2"
+
+    - name: "Assert: it is skipped with a note, left out of stale, and the other node still planned"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_skipped | length == 1
+          - "'az3.usercontent.example.com (lbt3) is served from its own zone' in powerdns_lb_skipped[0]"
+          - "'yours to manage' in powerdns_lb_skipped[0]"
+          - powerdns_lb_ops == lbt1_create
+          - powerdns_lb_stale == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }} {{ powerdns_lb_stale }}"
+        quiet: true
+
+    # --- 15. conflicts are all found before any write ------------------------
+    - name: "Case: one domain conflicts, another is fine"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1, lbt2]
+        powerdns_lbt_extra:
+          - "deep.lb2.usercontent.example.com.|300|IN|CNAME|somewhere.example.net."
+          - "_cs-lb.lb1.usercontent.example.com.|300|IN|CNAME|somewhere.example.net."
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: every conflict is reported in one pass"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_conflicts | length == 2
+          - "'_cs-lb.lb1.usercontent.example.com. holds CNAME' in powerdns_lb_conflicts | join(' ')"
+          - "'deep.lb2.usercontent.example.com. is a CNAME to somewhere.example.net.' in powerdns_lb_conflicts | join(' ')"
+        fail_msg: "{{ powerdns_lb_conflicts }}"
+        quiet: true

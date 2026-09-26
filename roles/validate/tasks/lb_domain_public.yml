@@ -1,0 +1,101 @@
+---
+# Does public DNS hand out this az's load balancer records?
+#
+# Only when roles/powerdns wrote them (`validate_lb_records_managed`). For
+# hand-made records roles/preflight (tasks/app_domain_dns.yml) makes exactly
+# this check before the run starts; for records this run writes, nothing
+# exists to check until roles/powerdns has run, so the check lands here. It
+# is the same check with the same shape — from the control machine, through
+# its ordinary recursive resolver, the apex A must include this node's
+# `public_ip` and a label under the wildcard must be a CNAME to the apex —
+# because that is what the controller's `ValidateDomainService` and every
+# tenant's browser will see.
+#
+# What a failure MEANS is different, and the messages say so. The records are
+# in the bundled zone (the `dns` check asks every nameserver for them
+# directly, and roles/powerdns asserted them after writing), so a public
+# lookup that disagrees is almost always the path TO those servers: the
+# parent of `cs_app_zone` does not delegate to them, or a resolver is still
+# serving an older answer it cached. Telling the operator to create the
+# records by hand would be wrong — the provisioner owns them and a re-run
+# converges them.
+#
+# Runs on each new node, delegated to the control machine, reading only this
+# node's own `cs_app_domain` and `public_ip` — no cross-host read at all, so
+# the same file works in site.yml's validate play (`hosts: all`) and
+# add-region.yml's (`controller:nodes`).
+#
+# The records' public addresses are not judged for routability, exactly as in
+# preflight: a private-addressed test environment passes.
+
+- name: Resolve this az's load balancer domain publicly
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ cs_app_domain }}"
+      - A
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: validate_lb_public_a
+
+- name: Resolve this az's wildcard record publicly
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ validate_app_domain_probe_label }}.{{ cs_app_domain }}"
+      - CNAME
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: validate_lb_public_wildcard
+
+- name: Assert this az's load balancer domain resolves publicly to its public address
+  ansible.builtin.assert:
+    that:
+      - validate_lb_public_a.rc == 0
+      - public_ip in (validate_lb_public_a.stdout_lines | default([]))
+    fail_msg: >-
+      {{ cs_app_domain }} (az {{ az }}) {{ validate_lb_public_hint_answer }}
+      through public DNS from this control machine, but this run wrote
+      `{{ cs_app_domain }}. A {{ public_ip }}` into {{ cs_app_zone }} on the
+      bundled nameservers. {{ validate_lb_public_hint }}
+    success_msg: "{{ cs_app_domain }} resolves publicly to {{ public_ip }}"
+    quiet: true
+  vars:
+    validate_lb_public_hint_answer: >-
+      {{ ('could not be looked up (dig exit ' ~ validate_lb_public_a.rc ~ ': '
+          ~ (validate_lb_public_a.stderr | default('') | trim) ~ ')')
+         if validate_lb_public_a.rc != 0
+         else ('has no A record'
+               if (validate_lb_public_a.stdout_lines | default([])) | length == 0
+               else ('resolves to ' ~ (validate_lb_public_a.stdout_lines | join(', ')))) }}
+
+- name: Assert this az's wildcard is publicly a CNAME to its own apex
+  ansible.builtin.assert:
+    that:
+      - validate_lb_public_wildcard.rc == 0
+      - ((validate_lb_public_wildcard.stdout | default('')) | trim) == (cs_app_domain ~ '.')
+    fail_msg: >-
+      {{ validate_app_domain_probe_label }}.{{ cs_app_domain }} (az {{ az }})
+      {{ ('could not be looked up (dig exit ' ~ validate_lb_public_wildcard.rc ~ ')')
+         if validate_lb_public_wildcard.rc != 0
+         else ('returned no CNAME'
+               if ((validate_lb_public_wildcard.stdout | default('')) | trim) | length == 0
+               else ('is a CNAME to ' ~ ((validate_lb_public_wildcard.stdout | default('')) | trim))) }}
+      through public DNS from this control machine, but this run wrote
+      `*.{{ cs_app_domain }}. CNAME {{ cs_app_domain }}.` into
+      {{ cs_app_zone }} on the bundled nameservers. The controller proves the
+      wildcard the same way and marks the load balancer invalid without it
+      (event 2721edc59787a807 for no CNAME, 635285f7f2889009 for the wrong
+      target). {{ validate_lb_public_hint }}
+    success_msg: "*.{{ cs_app_domain }} is publicly a CNAME to {{ cs_app_domain }}."
+    quiet: true

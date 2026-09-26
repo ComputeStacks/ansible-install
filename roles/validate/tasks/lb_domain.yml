@@ -2,11 +2,21 @@
 # Does this az's load balancer actually answer on the domain the inventory
 # gave it, and does the certificate it serves cover that name?
 #
-# THE DNS HALF IS NOW CHECKED EARLIER, and honestly: roles/preflight
-# (tasks/app_domain_dns.yml) resolves every new az's apex and wildcard before
-# the converge starts and fails the run there. This file is no longer the only
-# thing standing between a missing CNAME and a green install, and it should
-# not be read as if it were.
+# THE DNS HALF IS CHECKED ELSEWHERE, and honestly — where depends on who
+# writes the records:
+#
+#   * hand-made (dns_driver other than powerdns, or powerdns_manage_lb_records
+#     off): roles/preflight (tasks/app_domain_dns.yml) resolves every new az's
+#     apex and wildcard before the converge starts and fails the run there.
+#   * written by roles/powerdns (`validate_lb_records_managed`): they cannot
+#     exist before the run, so preflight checks only the zone's delegation
+#     (tasks/app_zone_delegation.yml), and the records themselves are checked
+#     by this role: `lb_domain_public` (tasks/lb_domain_public.yml), through
+#     public resolution, just before this file, and `dns`, on every
+#     nameserver directly, from the controller.
+#
+# Either way this file is not the only thing standing between a missing CNAME
+# and a green install, and it should not be read as if it were.
 #
 # What it still uniquely does is compare the row's `domain` against the CN of
 # the `shared_certificate` it was seeded with — a mismatch no DNS check can
@@ -200,8 +210,10 @@
       asserting it would fail every healthy install, v1 and v2 alike.
       Note what `domain_valid` does and does not tell you here: it is
       `default: true` in the schema, so with `domain_valid_check` empty it
-      means unchecked, not verified. The DNS itself was checked before this
-      run started (roles/preflight, tasks/app_domain_dns.yml), which is what
-      actually proves '{{ validate_lb_domain_fields[1] }}' resolves and that
-      '*.{{ validate_lb_domain_fields[1] }}' is a CNAME to it.
+      means unchecked, not verified. The DNS itself is checked elsewhere —
+      {{ 'by `lb_domain_public` just above, after roles/powerdns wrote the records'
+         if (validate_lb_records_managed | bool)
+         else 'before this run started (roles/preflight, tasks/app_domain_dns.yml)' }}
+      — which is what actually proves '{{ validate_lb_domain_fields[1] }}'
+      resolves and that '*.{{ validate_lb_domain_fields[1] }}' is a CNAME to it.
   when: (validate_lb_domain_fields[3] | length) == 0

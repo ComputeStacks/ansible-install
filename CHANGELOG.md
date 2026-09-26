@@ -1,5 +1,29 @@
 # Changelog
 
+## September 26, 2026
+
+* **With `dns_driver: powerdns`, the provisioner writes each az's load
+  balancer records itself.** `docs/install.md` used to tell operators to put
+  the `<app_domain>` A and `*.<app_domain>` CNAME in the public parent, below
+  the delegation of `cs_app_zone` — where they are never served — while
+  preflight failed the run until they resolved. `roles/powerdns` now writes
+  the pair into `cs_app_zone` on the primary nameserver right after the zone
+  exists, with a `_cs-lb.<app_domain> TXT "owner=<node>"` ownership marker,
+  and converges it on every run. A matching hand-made pair is adopted;
+  anything else at those names fails the run before any write. `add-region.yml`
+  writes the new az's records on the existing `ns_primary` the same way.
+  Stale names are warned about, never deleted. Turn it off with
+  `powerdns_manage_lb_records: false` on the nameservers.
+* **Preflight checks the delegation instead of the records** when they are
+  managed: the parent zone's own servers must refer `cs_app_zone` to exactly
+  the bundled nameservers. `validate` checks the records on every nameserver
+  (`dns`) and through public resolution (`lb_domain_public`). With any other
+  DNS driver, preflight's public check for hand-made records is unchanged.
+* Per-az delegation stays manual: an `app_domain` that is its own zone on the
+  bundled nameservers is skipped with a warning.
+
+***
+
 ## September 9, 2026
 
 * **Every availability zone gets its own load balancer domain.** `app_domain`

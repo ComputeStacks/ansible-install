@@ -496,11 +496,47 @@
 # DNS before the registry: both are network checks, but this one fails on an
 # operator step that has to be fixed outside this repository (and outside this
 # run), so it is the more useful thing to learn first.
+#
+# Two shapes, split on `preflight_lb_records_managed` (defaults/main.yml):
+#
+#   unmanaged  the operator publishes each az's pair by hand before the run,
+#              so dig for it publicly now (tasks/app_domain_dns.yml).
+#   managed    roles/powerdns writes the pair into the bundled tenant zone
+#              early in this run, so it cannot exist yet. What CAN be wrong
+#              already, and is fixed outside this run, is the delegation of
+#              `cs_app_zone` at its parent — check that instead
+#              (tasks/app_zone_delegation.yml). roles/validate checks the
+#              records themselves once they exist.
 - name: Verify each new az's load balancer DNS records
   ansible.builtin.include_tasks: app_domain_dns.yml
   when:
     - preflight_check_app_domain_dns | bool
+    - not (preflight_lb_records_managed | bool)
     - (cs_new_nodes | default([])) | length > 0
+  run_once: true
+
+- name: Report that the load balancer record check moved
+  ansible.builtin.debug:
+    msg: >-
+      dns_driver is powerdns and powerdns_manage_lb_records is on, so each new
+      az's load balancer records are WRITTEN by this run (roles/powerdns, into
+      {{ cs_app_zone }} on {{ groups['ns_primary'][0] }}) rather than checked
+      here, and are validated at the end of the run (roles/validate: `dns` on
+      every nameserver, `lb_domain_public` through public resolution).
+  when: preflight_lb_records_managed | bool
+  run_once: true
+
+# Skipped in attach mode: add-region.yml adds names to a zone that is already
+# live and delegated, and whose delegation this run neither made nor can
+# change. `preflight_attach_mode` is the controller's `existing_env`, the one
+# attach-mode signal this role already uses. A wrong delegation there still
+# fails the run, in roles/validate's `lb_domain_public`.
+- name: Verify the delegation of the tenant zone at its parent
+  ansible.builtin.include_tasks: app_zone_delegation.yml
+  when:
+    - preflight_check_app_domain_dns | bool
+    - preflight_lb_records_managed | bool
+    - not (preflight_attach_mode | bool)
   run_once: true
 
 # Network checks last: everything above is a pure inventory/facts assertion

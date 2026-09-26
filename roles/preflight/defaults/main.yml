@@ -235,7 +235,41 @@ preflight_registry_manifest_accept: >-
 # or one whose control machine cannot see the public zone (split horizon). It
 # is the only escape hatch: the check itself has no opinion about whether the
 # address is routable, so a private-addressed test environment passes it.
+#
+# When roles/powerdns writes the records (`preflight_lb_records_managed`
+# below), there is nothing public to dig for yet, and this same switch turns
+# off the check that replaces it instead: the delegation of `cs_app_zone` at
+# its parent (tasks/app_zone_delegation.yml). A split-horizon control machine
+# cannot see that either. The public check itself then runs in roles/validate
+# under its own `validate_skip` key, `lb_domain_public`.
 preflight_check_app_domain_dns: true
 # Label used to exercise the wildcard. Any label matches a wildcard; a fixed
 # one keeps the run reproducible. It must not exist as a real record.
 preflight_app_domain_probe_label: cs-preflight-probe
+
+# --- load balancer records managed by roles/powerdns ------------------------
+# True when this run WRITES each new az's load balancer pair itself: the
+# bundled PowerDNS is the DNS driver, there is a leader to write on, and
+# nobody turned `powerdns_manage_lb_records` off. The same expression, spelled
+# the same way, gates roles/powerdns and roles/validate — keep all three in
+# step.
+#
+# `powerdns_manage_lb_records` is read from the LEADER's hostvars because that
+# is where roles/powerdns reads it: the override belongs on the nameservers
+# (group_vars/nameservers or ns_primary's host vars), and the preflight play
+# has no other way to see it. The powerdns role's own default (true) is not in
+# scope here, which is why the `default(true)` restates it.
+#
+# When true, the public dig in tasks/app_domain_dns.yml cannot pass before the
+# run — the records do not exist until roles/powerdns writes them — so it is
+# replaced by the delegation check in tasks/app_zone_delegation.yml, and the
+# public resolution check moves to roles/validate (`lb_domain_public`).
+preflight_lb_records_managed: >-
+  {{ dns_driver | default('none') == 'powerdns'
+     and groups['ns_primary'] | default([]) | length > 0
+     and (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool }}
+
+# How many of the parent zone's nameservers to ask for the referral. Every one
+# asked must return the same delegation; more than a few adds time without
+# adding much (a TLD parent has thirteen, all serving the same data).
+preflight_app_zone_delegation_servers: 3

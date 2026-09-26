@@ -156,6 +156,7 @@ Exactly this, and nothing else:
 | backup | the `cstacks` account's `~/.ssh` | On **the backup server in the new node's site**. The repository path is only `stat`ed, never chowned — v1's value is `/mnt`, and 0770 on it would clear world traverse for every unrelated process reading a filesystem mounted underneath. The existing account's shell and shadow entry are left alone. v2's borg is **not** installed over the server's existing one. |
 | backup | one `authorized_keys` entry for the new node | Added by `cs_agent`, commented with the node's hostname. |
 | backup | firewall: the same node-address appends | Latent on most v1 servers — their script's `default_allow_ssh` accepts 22 from anywhere, so borg already reaches them. On a server built with `default_allow_ssh: false` the appends are what keeps the new node's backups from failing silently. |
+| nameserver (`ns_primary`) | the new az's load balancer records in `cs_app_zone`: `<app_domain>` A, `*.<app_domain>` CNAME and the `_cs-lb.<app_domain>` TXT ownership marker | Only with `dns_driver: powerdns` and `powerdns_manage_lb_records` not turned off on the nameservers. Written with `pdnsutil` (PowerDNS 4.x and 5.x alike), for the new region's names only. Never overwrites a record it does not own: a conflict at any of those names fails the run before anything is written. The followers receive them through replication; nothing is written on them. |
 | vault (on the controller) | nothing | The new node's docker certificate is *issued* from the existing PKI; the playbook unseals the vault if it is sealed and writes nothing. |
 
 `/etc/default/computestacks` is append-only, always. No shared-host file is
@@ -198,9 +199,29 @@ being PRINTED. Neither disables the gate.
 Each new az also needs its own `app_domain` and its own pair of public DNS
 records — `<app_domain>` A to that node's public IP and `*.<app_domain>`
 **CNAME** to `<app_domain>` (docs/install.md §3). `roles/preflight` requires
-the new node's `app_domain` to be set and to differ from `cs_app_zone`;
-`roles/validate`'s `lb_domain` check reads the controller's verdict on those
-records back at the end of the run.
+the new node's `app_domain` to be set and to differ from `cs_app_zone`, so a
+new az never lands on the zone apex an existing region already answers on.
+
+**With `dns_driver: powerdns` the playbook writes that pair itself**, on the
+existing `ns_primary`, in a play that runs straight after preflight — see the
+nameserver row above. A hand-made pair that already matches is adopted; a name
+that holds anything else (records that differ, or a marker naming another
+node) stops the run before any write, and the message says how to resolve it:
+a different `app_domain`, or deleting the stale records by hand. Preflight
+does not check the zone's delegation in attach mode — it is already live — so
+it is first checked at the end of the run, by `roles/validate`'s `dns` (every
+nameserver) and `lb_domain_public` (public resolution), and then `lb_domain`
+reads the controller's verdict back.
+
+This needs the existing nameservers in the inventory in the same shape
+`site.yml` uses — a `nameservers` group with `ns_primary` and `ns_followers`
+children, each host flagged `existing_env: true`, and cs_app_zone's zone
+present on the leader (the play fails, naming the zone, if it is not). **If
+the inventory has no `ns_primary`**, that play has no hosts and writes
+nothing, and the run treats the records as yours, exactly as for `dns_driver:
+none`: create the pair by hand before the run, and preflight digs for it in
+public DNS and fails if it is missing. The same holds with
+`powerdns_manage_lb_records: false` set on the nameservers.
 
 The attach manifest carries **topology only**: the new location, region, node,
 network and load balancer, plus the user-group region link without which the

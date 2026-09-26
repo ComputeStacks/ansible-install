@@ -52,6 +52,122 @@ regardless of leader/follower role.
 6. **ns_primary only** (`tasks/zone.yml`): `pdnsutil create-zone
    {{ cs_app_zone }} {{ powerdns_name }}` (rc 0 = created, rc 1 = already
    exists -- both are success).
+7. **ns_primary only, `dns_driver: powerdns`** (`tasks/lb_records.yml`):
+   writes each az's load balancer records into `cs_app_zone` -- see
+   [Load balancer records](#load-balancer-records) below.
+
+## Load balancer records
+
+Every az's load balancer needs two public records, and with `dns_driver:
+powerdns` they have to live in the zone these nameservers serve -- the
+operator delegates `cs_app_zone` here, so anything put in the public parent
+below that cut is never served. `tasks/lb_records.yml` writes them, on
+ns_primary, right after the zone exists:
+
+    <app_domain>.         A      <public_ip>
+    *.<app_domain>.       CNAME  <app_domain>.
+    _cs-lb.<app_domain>.  TXT    "owner=<node inventory_hostname>"
+
+`<app_domain>` is the node's `cs_app_domain` (its `app_domain`, else
+`cs_app_zone`), for every node in `powerdns_lb_records_nodes`. The followers
+are postgres streaming replicas, so they serve the records as soon as the
+leader's database has them. It uses `pdnsutil` (`list-all-zones`,
+`list-zone`, `replace-rrset`, `delete-rrset`, `rectify-zone`), not the HTTP
+API -- `webserver-allow-from` admits only the controller -- and runs without
+`become` like the rest of the role.
+
+It is also a standalone entry point: `add-region.yml` runs it with
+`include_role: name=powerdns tasks_from=lb_records` against an existing
+nameserver -- possibly a v1 Debian box on PowerDNS 4.x -- where no other task
+file of this role runs, so it depends on nothing they set.
+
+### The ownership marker, and the rules
+
+Neither `site.yml`'s inventory nor an attach inventory sees the whole fleet,
+so a name an operator reuses may belong to a live az this run knows nothing
+about. The `_cs-lb` TXT record is how the provisioner tells a pair it wrote
+from one it must not touch. Per domain, decided by the pure
+`tasks/lb_records_plan.yml` **before anything is written** (a conflict on one
+domain never leaves another half-done, and every conflict is reported at
+once):
+
+| What is in the zone | Result |
+| --- | --- |
+| The domain, or a parent of it below `cs_app_zone`, is a zone of its own on this server | **Skipped**, with a warning: it is served from its own zone and its records are yours to manage. Also left out of the stale check. |
+| Marker names exactly this domain's nodes | **Converge.** The apex A rrset becomes exactly the nodes' addresses; a CNAME at the apex is deleted; every non-CNAME rrset at `*.<domain>` is deleted; the wildcard CNAME becomes exactly `<domain>.`; the marker is kept exact; all at `powerdns_lb_record_ttl`. Other types at the apex (AAAA, HTTPS, TXT, MX, NS, SOA) are never touched. |
+| No marker, and what is there already matches (no apex CNAME; apex A absent or exactly the addresses; wildcard absent or exactly `CNAME <domain>.` with nothing beside it) | **Adopt**: write the marker, fill in whatever is missing, fix TTLs. An empty zone is the plain-create case; a correct hand-made pair -- every install before this task existed -- is the other common one. |
+| Marker names anyone else, is malformed, or the marker name holds a non-TXT record | **Conflict.** |
+| No marker, and anything differs | **Conflict.** |
+
+A conflict fails the run with one message per domain naming what was found
+and how to resolve it: give the node a different `app_domain`, or -- if the
+records really are stale -- delete them by hand (`pdnsutil delete-rrset`) and
+re-run. The provisioner never overwrites a name it cannot show is its own.
+
+**Several nodes on one name.** A node that sets no `app_domain` answers on
+`cs_app_zone`, and preflight only asserts uniqueness among nodes that set
+one, so an inventory that predates per-az domains can have several nodes on
+the same name. They share one A rrset (an address each) and one marker rrset
+(an `"owner=<node>"` string each). The marker must name exactly the nodes this
+run writes for; a different set is a conflict like any other -- including an
+attach run adding a node to a name an existing region already owns.
+
+### Stale names -- warned about, never deleted
+
+When a node's `app_domain` changes, its old records stay behind. A marker
+`_cs-lb.X. TXT "owner=h"` where `h` is a node of **this** inventory whose
+`cs_app_domain` is no longer `X` is reported as stale, by name. Nothing is
+deleted and no delete command is suggested: the old name may still be in
+tenants' hands, and removing it is a human decision. A marker naming a host
+this inventory does not know is never stale -- it is somebody else's.
+
+### Check mode
+
+`list-all-zones` and `list-zone` run in check mode (they are read-only), the
+planned operations are printed, and the writes, `rectify-zone` and the
+read-back are skipped. On a nameserver where the zone does not exist yet (a
+greenfield `--check`), it says so and plans nothing.
+
+### After writing
+
+If any operation ran, the zone is rectified, re-listed and re-planned; the
+run fails unless the re-plan comes back with no operations and no conflicts,
+i.e. every rrset is present exactly as intended, TTL included.
+
+### Caveat: the controller rewrites the whole zone
+
+The controller (the pdns gem's `Pdns::Dns::Zone#update!`) writes a zone by
+loading it and then replacing or deleting every rrset to match its in-memory
+copy. A fresh load round-trips these A/CNAME/TXT rrsets unchanged, so normal
+controller writes (the admin DNS UI, LetsEncrypt DNS-01) leave them alone.
+Two windows can still delete them:
+
+* an admin's uncommitted edit held in `dns_zones.saved_state` -- a snapshot
+  taken before this role wrote -- committed afterwards;
+* an in-flight controller write that loaded the zone before this role wrote
+  and saves after it.
+
+Records the controller wrote itself have exactly the same exposure. A re-run
+of `site.yml` (or `add-region.yml` for that region) restores them.
+
+### Turning it off
+
+Set `powerdns_manage_lb_records: false` **on the nameservers**
+(`group_vars/nameservers` or ns_primary's host vars) and publish the records
+yourself. roles/preflight and roles/validate read the same variable from
+ns_primary's hostvars to decide which DNS checks apply, so setting it on the
+nodes (or anywhere ns_primary does not see it) does not do what you want.
+
+### Not yet verified on a live box
+
+The `list-zone` output format (tab-separated, absolute names with trailing
+dots, a `$ORIGIN .` header), the zone-relative name argument of
+`replace-rrset` / `delete-rrset` (`@` for the apex), and `list-all-zones`'
+output are taken from the PowerDNS source and documentation, not yet
+observed on the 26.04 package or a v1 4.x nameserver. The parser is
+deliberately lenient (any whitespace, names with or without the trailing dot,
+non-record lines dropped), and `tests/lb_records_plan.yml` pins the assumed
+format; it is the first thing to update if a real box disagrees.
 
 ## KEY DIFFERENCE from v1: credentials are inventory-sourced, not generated
 
@@ -180,6 +296,9 @@ version 17"; they are unrelated running instances on different hosts.
 | `powerdns_web_address` | `"{{ primary_ip }}"` | Leader-only. Bound to the inventory address the controller dials, not `0.0.0.0`; `webserver-allow-from` restricts callers on top of that (see above). |
 | `powerdns_replication_user` | `repuser` | Postgres replication role name. |
 | `powerdns_manage_zone` | `true` | Set `false` to skip `pdnsutil create-zone`. |
+| `powerdns_manage_lb_records` | `true` | Write each az's load balancer records into `cs_app_zone` (only with `dns_driver: powerdns`). Set it on the **nameservers** -- preflight and validate read it from ns_primary. |
+| `powerdns_lb_record_ttl` | `300` | TTL of the A, the wildcard CNAME and the marker. Part of convergence. |
+| `powerdns_lb_records_nodes` | `"{{ cs_new_nodes \| default([]) }}"` | The nodes whose records a run writes. Role-internal: `site.yml` and `add-region.yml` both get the right set from `cs_new_nodes`. |
 | `powerdns_enable_dnsupdate` | `true` | v1 parity; per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |
 | `powerdns_postgresql_data_dir` / `_main_dir` / `_conf` / `_hba_conf` | distro paths under `/var/lib/postgresql/{{ postgresql_version }}` and `/etc/postgresql/{{ postgresql_version }}/main` | |
 | `pdns_api_key` / `pdns_web_key` / `pdns_db_password` | **required, no default** | From the vaulted inventory. Asserted non-blank and not `CHANGEME`. |

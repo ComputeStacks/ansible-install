@@ -28,8 +28,9 @@ this role exists to catch at install time.
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
+| `lb_domain_public` | nodes (new azs only), **only when roles/powerdns wrote the records** | **the control machine** | Public DNS resolves this az's `cs_app_domain` to an A set including its `public_ip`, and a label under `*.<cs_app_domain>` to a CNAME to the apex. |
 | `lb_domain` | nodes (new azs only) | **the controller** | This az's `LoadBalancer` reached `domain_valid`, and its `domain` equals the CN of its `shared_certificate`. |
-| `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone`. |
+| `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone` — and, when roles/powerdns wrote the load balancer records, serves every new az's apex A (including its `public_ip`) and wildcard CNAME (to the apex). |
 | `pdns_api` | controller (once) | the controller | The PowerDNS HTTP API answers on the address `controller_seed_dns_endpoint` dials. pdns keeps serving DNS with its webserver dead, so no other check sees this. |
 | `dns_replication` | PowerDNS followers | itself | `pg_stat_wal_receiver` shows this replica actually streaming. A detached replica keeps answering queries from stale data, so `dns` above passes while the zone silently rots. |
 
@@ -148,6 +149,44 @@ The check runs only for hosts in `cs_new_nodes`. An `existing_env` region's
 load balancer was never in this run's manifest, and its DNS is not this run's
 claim to make.
 
+### Load balancer records the provisioner wrote
+
+With `dns_driver: powerdns`, roles/powerdns writes each new az's pair —
+`<cs_app_domain> A <public_ip>` and `*.<cs_app_domain> CNAME <cs_app_domain>.`
+— into the bundled tenant zone early in the run. Those records cannot exist
+when roles/preflight runs, so preflight checks only the zone's delegation at
+its parent, and the records are checked here, twice, from two directions:
+
+- **`dns`, from the controller, against every nameserver's own address.** A
+  record the leader lacks is roles/powerdns's job (a re-run converges it); a
+  record only a follower lacks is replication, and the failure message says
+  which of the two it is. Every new node is checked, including one whose
+  `cs_app_domain` is a zone of its own on these servers — roles/powerdns
+  skips writing those, but what the servers *serve* is what matters, and this
+  play cannot see which names are zones.
+- **`lb_domain_public`, from the control machine, through its ordinary
+  recursive resolver** — the same check preflight makes for hand-made
+  records. When `dns` passes and this fails, the path to the nameservers is
+  wrong: the parent's delegation of `cs_app_zone`, or a resolver still holding
+  a negative answer cached before the records existed. The message says so and
+  never tells the operator to create the records by hand. A split-horizon
+  control machine that cannot see public DNS skips it with
+  `validate_skip: [lb_domain_public]`.
+
+Both are on only when all three hold — the same expression, spelled the same
+way, as roles/powerdns and roles/preflight use:
+
+```yaml
+dns_driver | default('none') == 'powerdns'
+and groups['ns_primary'] | default([]) | length > 0
+and (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool
+```
+
+`powerdns_manage_lb_records: false` is set **on the nameservers**
+(`group_vars/nameservers` or `ns_primary`'s host vars), because that is where
+roles/powerdns reads it. The node list is `cs_new_nodes`, read locally —
+never a powerdns role variable, which this play does not load.
+
 **Every per-site value comes from the site maps, never from a global.** The
 prometheus query dials `cs_site_metrics_domains[cs_site]` with the
 `cs_site_metrics_credentials[cs_site]` pair, and the borg check SSHes to
@@ -200,6 +239,12 @@ likely to have been forgotten when a region is added years after the
 environment was built. No `existing_env` region is checked — those load
 balancers were never in this run's manifest.
 
+`lb_domain_public` and the load balancer half of `dns` run in attach mode too,
+for the new az only. They matter more there than on a greenfield run:
+roles/preflight skips its delegation check in attach mode (the zone is already
+live), so a delegation that drifted since the environment was built is first
+seen here.
+
 **That principle applies to the existing controller too, and the `services`
 check therefore asserts nothing at all on any `existing_env` host.** It used to
 drop only `cs-firewall` and go on asserting `docker`, `nginx`, `postgresql`,
@@ -246,6 +291,9 @@ is a property of the control plane rather than of how the host was built.
 | `validate_prometheus_endpoint` | `https://{{ cs_site_metrics_domains[cs_site] \| default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}` | This host's site's metrics vhost. |
 | `validate_prometheus_username` / `_password` | this host's site's entry in `cs_site_metrics_credentials`, else `cs_metrics_credentials_default` | Both halves matter — a wrong username is an indistinguishable 401. |
 | `validate_prometheus_metric` / `_job` | `node_cpu_seconds_total` / `node-exporter` | The controller's own label contract. |
+| `validate_lb_records_managed` | derived | Whether roles/powerdns wrote the load balancer records this run — the switch for `lb_domain_public` and for the record half of `dns`. See above; override `powerdns_manage_lb_records` on the nameservers, not this. |
+| `validate_app_domain_probe_label` | `cs-validate-probe` | Label queried under each `*.<cs_app_domain>` to exercise the wildcard. Must not exist as a real record. Mirrors preflight's `preflight_app_domain_probe_label`. |
+| `validate_lb_public_hint` / `validate_dns_lb_where_leader` / `_follower` | see `defaults/main.yml` | Operator-facing halves of the record-check failure messages. |
 | `validate_lb_domain_retries` / `_delay` | `12` / `10` | Ceiling on the wait for the controller's asynchronous domain verdict — two minutes. `0`, not `1`, takes whatever answer is there: ansible counts *re*-tries, so `1` is two attempts. |
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
@@ -260,6 +308,8 @@ Computed in `vars/main.yml`, not overridable: `validate_backup_host`
 
 Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
 `az`, `cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`,
+`powerdns_name` and `powerdns_manage_lb_records` (inventory vars on the
+nameservers),
 `cs_app_domain` and `cs_new_nodes`
 (`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`), `dns_driver`,
 `borg_version`, `borg_image`, `existing_env`, `tailscale_authkey` /
@@ -275,7 +325,8 @@ Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
 `requirements.yml`. `dig` comes from `dnsutils`, which `roles/common`
 installs on every host; `python3-psycopg2` comes from
 `roles/powerdns/tasks/postgres.yml`, which runs on exactly the hosts
-`dns_replication` queries.
+`dns_replication` queries. `lb_domain_public` runs `dig` on the **control
+machine**, as roles/preflight already does, so it needs `dig` there too.
 
 ## Deviations from v1 (`roles/validate`)
 

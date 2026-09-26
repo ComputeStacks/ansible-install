@@ -42,6 +42,26 @@ powerdns_manage_resolved: "{{ 'systemd-resolved.service' in (ansible_facts.servi
 # zone is managed by hand or by another tool.
 powerdns_manage_zone: true
 
+# Write each az's load balancer records into cs_app_zone on the leader
+# (tasks/lb_records.yml): `<app_domain>. A <public_ip>`,
+# `*.<app_domain>. CNAME <app_domain>.` and the ownership marker
+# `_cs-lb.<app_domain>. TXT "owner=<node>"`. Only with `dns_driver: powerdns`.
+# Set false if you publish those records yourself; roles/preflight and
+# roles/validate read this same variable from ns_primary's hostvars, so set it
+# where ns_primary sees it (group_vars/nameservers or ns_primary's host vars),
+# NOT on the nodes. README.md has the ownership rules.
+powerdns_manage_lb_records: true
+
+# TTL of all three records. Part of convergence: a record carrying another TTL
+# is rewritten.
+powerdns_lb_record_ttl: 300
+
+# The nodes whose records this run writes. site.yml: every node this repo is
+# building. add-region.yml: the new region's nodes (cs_new_nodes there too,
+# because the existing hosts carry `existing_env: true`). A node's domain is
+# `hostvars[n].cs_app_domain` and its address `hostvars[n].public_ip`.
+powerdns_lb_records_nodes: "{{ cs_new_nodes | default([]) }}"
+
 # Per-zone dynamic updates are still fenced by tsig + allow-dnsupdate-from
 # metadata (unset here) -- see https://doc.powerdns.com/authoritative/dnsupdate.html
 powerdns_enable_dnsupdate: true
