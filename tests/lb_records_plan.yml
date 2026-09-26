@@ -411,7 +411,7 @@
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
 
-    - name: "Case: an attach run adds a node to a name an existing node of this inventory owns"
+    - name: "Case: a narrowed run adds a node to a name another node of this inventory owns"
       ansible.builtin.include_role:
         name: powerdns
         tasks_from: lb_records_plan

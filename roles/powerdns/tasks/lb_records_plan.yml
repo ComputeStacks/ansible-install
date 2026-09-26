@@ -57,10 +57,12 @@
 #          owner(s) and both causes.
 #   _cs-lb.N. TXT names only hosts in groups['nodes']
 #       -> OURS, CONVERGE, even when the named set differs from O: a node of
-#          this inventory moved off N, joined it, or was added by an attach
-#          run. The wanted owner set is O plus every named owner this run
-#          does not build whose cs_app_domain is still N (so an attach run
-#          never drops an existing node's address); a named owner that now
+#          this inventory moved off N or joined it. The wanted owner set is O
+#          plus every named owner this run does not build whose
+#          cs_app_domain is still N (so a run with powerdns_lb_records_nodes
+#          narrowed never drops another node's address -- an attach run never
+#          gets here: the existing fleet's nodes are not in its inventory, so
+#          their markers are unknown owners and conflict); a named owner that now
 #          answers elsewhere is dropped. The apex A rrset becomes exactly the
 #          wanted owners' addresses, a CNAME at the apex is deleted, every
 #          non-CNAME rrset at *.N. is deleted, the *.N. CNAME becomes exactly
@@ -230,8 +232,9 @@
           {%- set m_unknown = m_owners | reject('in', inventory_nodes) | list -%}
           {#- A marker naming only nodes of this inventory is ours even when
               the set differs from this run's: keep every named owner this
-              run does not build that still answers on d (an attach run must
-              not drop an existing node's address); drop the ones that moved.
+              run does not build that still answers on d (a narrowed
+              powerdns_lb_records_nodes must not drop another node's
+              address); drop the ones that moved.
               Unmarked names want exactly this run's owners. -#}
           {%- if mark_txt | length > 0 and m_wellformed and m_unknown | length == 0 -%}
             {%- for h in m_owners -%}
