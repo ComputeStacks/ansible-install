@@ -97,7 +97,7 @@
         msg: "{{ powerdns_lb_conflicts }}"
       when: powerdns_lb_conflicts | length > 0
 
-    - name: Warn about domains served from their own zone
+    - name: Warn about domains served from their own zone or delegated elsewhere
       ansible.builtin.debug:
         msg: "{{ powerdns_lb_skipped }}"
       when: powerdns_lb_skipped | length > 0

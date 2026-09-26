@@ -94,10 +94,12 @@ once):
 | What is in the zone | Result |
 | --- | --- |
 | The domain, or a parent of it below `cs_app_zone`, is a zone of its own on this server | **Skipped**, with a warning: it is served from its own zone and its records are yours to manage. Also left out of the stale check. |
-| Marker names exactly this domain's nodes | **Converge.** The apex A rrset becomes exactly the nodes' addresses; a CNAME at the apex is deleted; every non-CNAME rrset at `*.<domain>` is deleted; the wildcard CNAME becomes exactly `<domain>.`; the marker is kept exact; all at `powerdns_lb_record_ttl`. Other types at the apex (AAAA, HTTPS, TXT, MX, NS, SOA) are never touched. |
+| `cs_app_zone` has an NS rrset at the domain, or at a name between it and `cs_app_zone` (the zone apex's own NS does not count) | **Skipped**, with a warning: the name is delegated to other nameservers, so anything written at or below that cut would never be served; its records are yours to manage there. Also left out of the stale check. |
+| Marker names only nodes of this inventory (`groups['nodes']`) | **Converge**, even when the named set differs from this run's -- a node moved off the name, joined it, or an attach run added one. The wanted owners are this run's nodes on the name plus every named node this run does not build that still answers on it (so an attach run never drops an existing node's address); a named node that now answers elsewhere is dropped. The apex A rrset becomes exactly the wanted owners' addresses; a CNAME at the apex is deleted; every non-CNAME rrset at `*.<domain>` is deleted; the wildcard CNAME becomes exactly `<domain>.`; the marker becomes exactly the wanted owner set; all at `powerdns_lb_record_ttl`. Other types at the apex (AAAA, HTTPS, TXT, MX, NS, SOA) are never touched. |
 | No marker, and what is there already matches (no apex CNAME; apex A absent or exactly the addresses; wildcard absent or exactly `CNAME <domain>.` with nothing beside it) | **Adopt**: write the marker, fill in whatever is missing, fix TTLs. An empty zone is the plain-create case; a correct hand-made pair -- every install before this task existed -- is the other common one. |
-| Marker names anyone else, is malformed, or the marker name holds a non-TXT record | **Conflict.** |
-| No marker, and anything differs | **Conflict.** |
+| Marker names any host that is not in `groups['nodes']` | **Conflict.** The message names the unknown owner(s) and the two possible causes: an az of another inventory answers on the name (give this node a different `app_domain`), or a node of this inventory was renamed and the marker still carries its old name (if the name really is this inventory's, delete its records by hand and re-run). |
+| Marker is malformed, or the marker name holds a non-TXT record | **Conflict.** |
+| No marker, and anything differs (including an A rrset whose addresses are not exactly this run's) | **Conflict.** |
 
 A conflict fails the run with one message per domain naming what was found
 and how to resolve it: give the node a different `app_domain`, or -- if the
@@ -108,18 +110,24 @@ re-run. The provisioner never overwrites a name it cannot show is its own.
 `cs_app_zone`, and preflight only asserts uniqueness among nodes that set
 one, so an inventory that predates per-az domains can have several nodes on
 the same name. They share one A rrset (an address each) and one marker rrset
-(an `"owner=<node>"` string each). The marker must name exactly the nodes this
-run writes for; a different set is a conflict like any other -- including an
-attach run adding a node to a name an existing region already owns.
+(an `"owner=<node>"` string each). A marker that names only nodes of this
+inventory is converged to the current set -- a node joining or leaving the
+name is an ordinary change. A marker naming a host this inventory does not
+know is a conflict: neither `site.yml`'s inventory nor an attach inventory
+sees the whole fleet, so that host may be a live az somewhere else.
 
 ### Stale names -- warned about, never deleted
 
 When a node's `app_domain` changes, its old records stay behind. A marker
-`_cs-lb.X. TXT "owner=h"` where `h` is a node of **this** inventory whose
-`cs_app_domain` is no longer `X` is reported as stale, by name. Nothing is
-deleted and no delete command is suggested: the old name may still be in
-tenants' hands, and removing it is a human decision. A marker naming a host
-this inventory does not know is never stale -- it is somebody else's.
+at `_cs-lb.X.` is reported as stale, by name, when no node of this run
+answers on `X`, every owner it names is a node of **this** inventory, and at
+least one of them now has a `cs_app_domain` other than `X` (one served from
+its own zone or delegated elsewhere does not count). A name that still has
+current owners in this run is converged instead -- the moved node is dropped
+from its A rrset and marker -- and never reported stale. Nothing is deleted
+and no delete command is suggested: the old name may still be in tenants'
+hands, and removing it is a human decision. A marker naming any host this
+inventory does not know is never stale -- it may be somebody else's.
 
 ### Check mode
 

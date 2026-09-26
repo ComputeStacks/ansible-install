@@ -53,6 +53,8 @@
         - {name: lbt2, app_domain: deep.lb2.usercontent.example.com, public_ip: 192.0.2.102}
         # a domain the nameserver serves as a zone of its own
         - {name: lbt3, app_domain: az3.usercontent.example.com, public_ip: 192.0.2.103}
+        # a node that used to share cs_app_zone and moved to a name of its own
+        - {name: lbt4, app_domain: moved.usercontent.example.com, public_ip: 192.0.2.104}
       loop_control:
         label: "{{ item.name }}"
 
@@ -302,6 +304,7 @@
           - powerdns_lb_ops == []
           - powerdns_lb_conflicts | length == 1
           - "'owner=node9001' in powerdns_lb_conflicts[0]"
+          - "'naming node9001, which is not a node of this inventory' in powerdns_lb_conflicts[0]"
           - "'lbt1' in powerdns_lb_conflicts[0]"
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
@@ -392,13 +395,151 @@
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
-    - name: "Assert: a shared name carries one address and one owner per node"
+    - name: "Assert: a node of this inventory joining a shared name converges it"
       ansible.builtin.assert:
         that:
-          # The marker names node1001 only, not the set this run writes for.
+          # The marker names node1001 only -- a node of this inventory -- so
+          # the name is ours: node2001's address and owner string are added.
+          - powerdns_lb_conflicts == []
+          - >-
+            powerdns_lb_ops == [
+              {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.', 'type': 'A', 'ttl': 300,
+               'contents': ['203.0.113.10', '203.0.113.20']},
+              {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT',
+               'ttl': 300, 'contents': ['"owner=node1001"', '"owner=node2001"']}]
+          - powerdns_lb_stale == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: an attach run adds a node to a name an existing node of this inventory owns"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        # node1001 is not built by this run but is in groups['nodes'] and
+        # still answers on the name, so its address must survive.
+        powerdns_lb_records_nodes: [node2001]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the existing owner is kept, not dropped"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_conflicts == []
+          - powerdns_lb_ops | length == 2
+          - powerdns_lb_ops[0].contents == ['203.0.113.10', '203.0.113.20']
+          - powerdns_lb_ops[1].contents == ['"owner=node1001"', '"owner=node2001"']
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: one owner of a shared name moved to a name of its own"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001, lbt4]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "usercontent.example.com.|300|IN|A|192.0.2.104"
+          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=lbt4\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the shared name drops the moved node, and its new name is created"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_conflicts == []
+          # Still has a current owner (node1001): rewritten, not stale.
+          - powerdns_lb_stale == []
+          - >-
+            powerdns_lb_ops == [
+              {'op': 'replace', 'name': 'moved', 'fqdn': 'moved.usercontent.example.com.', 'type': 'A',
+               'ttl': 300, 'contents': ['192.0.2.104']},
+              {'op': 'replace', 'name': '*.moved', 'fqdn': '*.moved.usercontent.example.com.', 'type': 'CNAME',
+               'ttl': 300, 'contents': ['moved.usercontent.example.com.']},
+              {'op': 'replace', 'name': '_cs-lb.moved', 'fqdn': '_cs-lb.moved.usercontent.example.com.',
+               'type': 'TXT', 'ttl': 300, 'contents': ['"owner=lbt4"']},
+              {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.', 'type': 'A', 'ttl': 300,
+               'contents': ['203.0.113.10']},
+              {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT',
+               'ttl': 300, 'contents': ['"owner=node1001"']}]
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }} {{ powerdns_lb_stale }}"
+        quiet: true
+
+    - name: "Case: a shared name's marker also names a host this inventory does not know"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001, node2001]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "usercontent.example.com.|300|IN|A|203.0.113.20"
+          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node3001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: an unknown owner is a conflict that names it and both causes"
+      ansible.builtin.assert:
+        that:
           - powerdns_lb_ops == []
           - powerdns_lb_conflicts | length == 1
-          - "'node1001, node2001' in powerdns_lb_conflicts[0]"
+          - "'naming node3001, which is not a node of this inventory' in powerdns_lb_conflicts[0]"
+          - "'another inventory' in powerdns_lb_conflicts[0]"
+          - "'renamed' in powerdns_lb_conflicts[0]"
+          - "'pdnsutil delete-rrset usercontent.example.com _cs-lb TXT' in powerdns_lb_conflicts[0]"
+          - powerdns_lb_stale == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: unmarked shared A with an extra address"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001, node2001]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "usercontent.example.com.|300|IN|A|203.0.113.20"
+          - "usercontent.example.com.|300|IN|A|192.0.2.99"
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: an unmarked multi-address A that is not exactly the set is still a conflict"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'192.0.2.99' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: unmarked shared A that is exactly the set"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001, node2001]
+        powerdns_lbt_extra:
+          - "usercontent.example.com.|300|IN|A|203.0.113.20"
+          - "usercontent.example.com.|300|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: it is adopted -- marker only"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_conflicts == []
+          - powerdns_lb_ops | map(attribute='name') | list == ['_cs-lb']
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
 
@@ -453,6 +594,9 @@
           - "_cs-lb.old.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
           - "_cs-lb.far.usercontent.example.com.|300|IN|TXT|\"owner=not-in-this-inventory\""
           - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node2001\""
+          # moved node of this inventory, but also a stranger: not ours, not stale
+          - "_cs-lb.mixed.usercontent.example.com.|300|IN|TXT|\"owner=lbt2\""
+          - "_cs-lb.mixed.usercontent.example.com.|300|IN|TXT|\"owner=stranger\""
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -513,4 +657,74 @@
           - "'_cs-lb.lb1.usercontent.example.com. holds CNAME' in powerdns_lb_conflicts | join(' ')"
           - "'deep.lb2.usercontent.example.com. is a CNAME to somewhere.example.net.' in powerdns_lb_conflicts | join(' ')"
         fail_msg: "{{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    # --- 16. a name delegated elsewhere inside cs_app_zone -------------------
+    - name: "Case: an NS record at the node's own name"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt1, lbt4]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|3600|IN|NS|ns1.elsewhere.example.net."
+          - "lb1.usercontent.example.com.|3600|IN|NS|ns2.elsewhere.example.net."
+          # lbt1's old name: its new one is delegated, so it is not stale
+          - "_cs-lb.oldlb1.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a delegated name is skipped with a note and left out of stale"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_skipped | length == 1
+          - "'lb1.usercontent.example.com (lbt1) is delegated to other nameservers' in powerdns_lb_skipped[0]"
+          - "'NS record at lb1.usercontent.example.com' in powerdns_lb_skipped[0]"
+          - "'yours to manage there' in powerdns_lb_skipped[0]"
+          - powerdns_lb_ops | map(attribute='name') | list == ['moved', '*.moved', '_cs-lb.moved']
+          - powerdns_lb_stale == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }} {{ powerdns_lb_stale }}"
+        quiet: true
+
+    - name: "Case: an NS record at a name between the node's name and the zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt2]
+        powerdns_lbt_extra:
+          - "lb2.usercontent.example.com.|3600|IN|NS|ns1.elsewhere.example.net."
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a delegation above the name skips it too"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_skipped | length == 1
+          - "'deep.lb2.usercontent.example.com (lbt2)' in powerdns_lb_skipped[0]"
+          - "'NS record at lb2.usercontent.example.com ' in powerdns_lb_skipped[0]"
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }}"
+        quiet: true
+
+    - name: "Case: only the zone apex has NS records"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001, lbt1]
+        # lbt_base carries the apex's own two NS records.
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the zone apex's own NS does not count as a delegation"
+      ansible.builtin.assert:
+        that:
+          - lbt_base | select('search', '[|]NS[|]') | list | length == 2
+          - powerdns_lb_skipped == []
+          - powerdns_lb_ops | length == 6
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }}"
         quiet: true

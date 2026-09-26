@@ -19,6 +19,9 @@
   the bundled nameservers. `validate` checks the records on every nameserver
   (`dns`) and through public resolution (`lb_domain_public`). With any other
   DNS driver, preflight's public check for hand-made records is unchanged.
+  An environment that sets `preflight_check_app_domain_dns: false` (split
+  horizon, private test estates) now also needs `lb_domain_public` in
+  `validate_skip`, or the run fails at the end.
 * Per-az delegation stays manual: an `app_domain` that is its own zone on the
   bundled nameservers is skipped with a warning.
 

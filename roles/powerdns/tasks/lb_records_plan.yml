@@ -18,9 +18,11 @@
 #                          absolute name with its trailing dot. For one name,
 #                          deletes always come before replaces.
 #   powerdns_lb_conflicts  human-readable reasons not to write anything
-#   powerdns_lb_skipped    human-readable notes on domains left alone
-#   powerdns_lb_stale      domains whose marker names a node of this inventory
-#                          that now answers on another domain
+#   powerdns_lb_skipped    human-readable notes on domains left alone (served
+#                          from their own zone, or delegated by an NS record)
+#   powerdns_lb_stale      names no node of this run answers on, whose marker
+#                          names only nodes of this inventory, one of which
+#                          now answers on another domain
 #
 # WHY THE PLAN IS PER DOMAIN, NOT PER NODE. A node that sets no `app_domain`
 # answers on cs_app_zone (playbooks/group_vars/all/app_domains.yml), and
@@ -40,17 +42,31 @@
 #       -> SKIPPED. Records written into cs_app_zone below that zone cut would
 #          never be served. Its records are the operator's to manage, and it
 #          is left out of the stale check too.
+#   cs_app_zone holds an NS rrset at N, or at a name between N and
+#   cs_app_zone (the zone apex's own NS does not count)
+#       -> SKIPPED, likewise: N is delegated to other nameservers, and
+#          anything written at or below that cut is occluded -- never served.
 #   _cs-lb.N. holds anything but TXT
 #       -> CONFLICT.
-#   _cs-lb.N. TXT names exactly O
-#       -> OURS, CONVERGE: the apex A rrset becomes exactly O's addresses, a
-#          CNAME at the apex is deleted, every non-CNAME rrset at *.N. is
-#          deleted, the *.N. CNAME becomes exactly `N.`, the marker is kept
-#          exact, all at powerdns_lb_record_ttl. Other types at the apex
-#          (AAAA, HTTPS, TXT, MX, NS, SOA) are never touched.
-#   _cs-lb.N. TXT names anyone else (or is malformed)
-#       -> CONFLICT. It may be a live az of another inventory: neither
-#          site.yml nor an attach inventory sees the whole fleet.
+#   _cs-lb.N. TXT is malformed (a string that is not `"owner=<host>"`)
+#       -> CONFLICT.
+#   _cs-lb.N. TXT names a host that is not in groups['nodes']
+#       -> CONFLICT. It may be a live az of another inventory -- neither
+#          site.yml nor an attach inventory sees the whole fleet -- or a node
+#          of this inventory that was renamed. The message names the unknown
+#          owner(s) and both causes.
+#   _cs-lb.N. TXT names only hosts in groups['nodes']
+#       -> OURS, CONVERGE, even when the named set differs from O: a node of
+#          this inventory moved off N, joined it, or was added by an attach
+#          run. The wanted owner set is O plus every named owner this run
+#          does not build whose cs_app_domain is still N (so an attach run
+#          never drops an existing node's address); a named owner that now
+#          answers elsewhere is dropped. The apex A rrset becomes exactly the
+#          wanted owners' addresses, a CNAME at the apex is deleted, every
+#          non-CNAME rrset at *.N. is deleted, the *.N. CNAME becomes exactly
+#          `N.`, the marker becomes exactly the wanted owner set, all at
+#          powerdns_lb_record_ttl. Other types at the apex (AAAA, HTTPS, TXT,
+#          MX, NS, SOA) are never touched.
 #   no marker, and what IS there already matches (no apex CNAME, apex A
 #   absent or exactly O's addresses, *.N. absent or exactly `CNAME N.` with
 #   nothing else beside it)
@@ -61,10 +77,13 @@
 #   no marker, and anything differs
 #       -> CONFLICT. Unmarked content that is not ours to overwrite.
 #
-# Stale: a marker `_cs-lb.X. TXT "owner=h"` where h is a node of THIS
-# inventory whose cs_app_domain is no longer X. A marker naming a host this
-# inventory does not know is never stale -- it is somebody else's. Stale names
-# are reported, never deleted.
+# Stale: a marker at `_cs-lb.X.` where X is no domain this run writes for,
+# every owner it names is a node of THIS inventory, and at least one of them
+# now has a cs_app_domain other than X (and not one that is skipped as its own
+# zone or delegated). A name this run does write for is converged instead,
+# never reported stale. A marker naming any host this inventory does not know
+# is never stale -- it may be somebody else's. Stale names are reported, never
+# deleted.
 #
 # Names: list-zone prints absolute names (trailing dot); pdnsutil's
 # replace-rrset/delete-rrset take names RELATIVE to the zone. Comparison is on
@@ -143,8 +162,29 @@
           {%- set cut.map = cut.map | combine({d: inner.z}) -%}
         {%- endif -%}
       {%- endfor -%}
+      {#- Delegations inside cs_app_zone: an NS rrset at any name but the
+          zone apex. For every domain any node here uses, the delegation
+          point closest to the zone apex that covers it (the name itself or
+          an ancestor below the apex) -- everything at or below that point is
+          occluded. Stored without the trailing dot. -#}
+      {%- set ns_cuts = recs | selectattr('type', 'equalto', 'NS') | map(attribute='name')
+                        | reject('equalto', zfq) | unique | list -%}
+      {%- set deleg = namespace(map={}) -%}
+      {%- for h in (inventory_nodes + nodes) | unique -%}
+        {%- set dfq = (hostvars[h].cs_app_domain | string | lower) ~ '.' -%}
+        {%- set outer = namespace(r='') -%}
+        {%- for r in ns_cuts -%}
+          {%- if (dfq == r or dfq.endswith('.' ~ r)) and (not outer.r or (r | length) < (outer.r | length)) -%}
+            {%- set outer.r = r -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if outer.r -%}
+          {%- set deleg.map = deleg.map | combine({dfq[:-1]: outer.r[:-1]}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set run_domains = nodes | map('extract', hostvars, 'cs_app_domain') | map('string') | map('lower') | unique | sort -%}
       {%- set out = namespace(ops=[], conflicts=[], skipped=[], stale=[]) -%}
-      {%- for d in nodes | map('extract', hostvars, 'cs_app_domain') | map('string') | map('lower') | unique | sort -%}
+      {%- for d in run_domains -%}
         {%- set g = namespace(owners=[], ips=[], mark=[]) -%}
         {%- for n in nodes -%}
           {%- if (hostvars[n].cs_app_domain | string | lower) == d -%}
@@ -154,13 +194,16 @@
           {%- endif -%}
         {%- endfor -%}
         {%- set owners = g.owners | sort -%}
-        {%- set ips = g.ips | unique | sort -%}
-        {%- set want_mark = g.mark | sort -%}
         {%- set apex = d ~ '.' -%}
         {%- if d in cut.map -%}
           {%- set out.skipped = out.skipped + [d ~ ' (' ~ (owners | join(', ')) ~ ') is served from its own zone '
               ~ cut.map[d] ~ ' on this server, not from ' ~ zone ~ '; its records are yours to manage.'
               ~ ' Nothing was written for it.'] -%}
+        {%- elif d in deleg.map -%}
+          {%- set out.skipped = out.skipped + [d ~ ' (' ~ (owners | join(', ')) ~ ') is delegated to other'
+              ~ ' nameservers by an NS record at ' ~ deleg.map[d] ~ ' in ' ~ zone ~ ', so records written'
+              ~ ' here would never be served; its records are yours to manage there. Nothing was written'
+              ~ ' for it.'] -%}
         {%- elif apex != zfq and not apex.endswith('.' ~ zfq) -%}
           {%- set out.conflicts = out.conflicts + [d ~ ' (' ~ (owners | join(', ')) ~ ') is not in the zone '
               ~ zone ~ ', so its records cannot be written there. roles/preflight should have caught'
@@ -180,27 +223,56 @@
           {%- set mark_all = recs | selectattr('name', 'equalto', mark) | list -%}
           {%- set mark_txt = mark_all | selectattr('type', 'equalto', 'TXT') | list -%}
           {%- set mark_other = mark_all | rejectattr('type', 'equalto', 'TXT') | list -%}
+          {%- set m_have = mark_txt | map(attribute='content') | sort -%}
+          {%- set m_wellformed = (m_have | reject('match', '^"owner=[^"]+"$') | list | length) == 0 -%}
+          {%- set m_owners = (m_have | map('regex_replace', '^"owner=(.*)"$', '\\1') | unique | sort | list)
+                             if m_wellformed else [] -%}
+          {%- set m_unknown = m_owners | reject('in', inventory_nodes) | list -%}
+          {#- A marker naming only nodes of this inventory is ours even when
+              the set differs from this run's: keep every named owner this
+              run does not build that still answers on d (an attach run must
+              not drop an existing node's address); drop the ones that moved.
+              Unmarked names want exactly this run's owners. -#}
+          {%- if mark_txt | length > 0 and m_wellformed and m_unknown | length == 0 -%}
+            {%- for h in m_owners -%}
+              {%- if h not in nodes and (hostvars[h].cs_app_domain | string | lower) == d -%}
+                {%- set g.owners = g.owners + [h] -%}
+                {%- set g.ips = g.ips + [hostvars[h].public_ip | string] -%}
+                {%- set g.mark = g.mark + ['"owner=' ~ h ~ '"'] -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {%- set ips = g.ips | unique | sort -%}
+          {%- set want_mark = g.mark | sort -%}
           {%- set a_have = apex_a | map(attribute='content') | sort -%}
           {%- set a_ok = a_have == ips and (apex_a | map(attribute='ttl') | unique | list) == [ttl] -%}
           {%- set wc_have = wild_cname | map(attribute='content') | sort -%}
           {%- set wc_ok = wc_have == [apex] and (wild_cname | map(attribute='ttl') | unique | list) == [ttl] -%}
-          {%- set m_have = mark_txt | map(attribute='content') | sort -%}
           {%- set m_ok = m_have == want_mark and (mark_txt | map(attribute='ttl') | unique | list) == [ttl] -%}
-          {%- set m_wellformed = (m_have | reject('match', '^"owner=[^"]+"$') | list | length) == 0 -%}
           {%- set why = namespace(l=[]) -%}
           {%- if mark_other | length > 0 -%}
             {%- set out.conflicts = out.conflicts + [mark ~ ' holds ' ~ (mark_other | map(attribute='type') | unique | join(', '))
                 ~ ', where this provisioner keeps only its TXT ownership marker for ' ~ d ~ ' ('
                 ~ (owners | join(', ')) ~ '). Remove it by hand (pdnsutil delete-rrset ' ~ zone ~ ' '
                 ~ rel_mark ~ ' TYPE) and re-run.'] -%}
-          {%- elif mark_txt | length > 0 and not (m_wellformed and m_have == want_mark) -%}
+          {%- elif mark_txt | length > 0 and not m_wellformed -%}
             {%- set out.conflicts = out.conflicts + [d ~ ': the ownership marker ' ~ mark ~ ' holds '
-                ~ (m_have | join(' ')) ~ ', but this run would write it for ' ~ (owners | join(', '))
-                ~ '. Another load balancer -- possibly an az of a different inventory -- owns this name,'
-                ~ ' and nothing was written. Give ' ~ (owners | join(', ')) ~ ' a different app_domain;'
-                ~ ' or, if that owner is gone for good, delete its records by hand'
-                ~ ' (pdnsutil delete-rrset ' ~ zone ~ ' ' ~ rel_mark ~ ' TXT, and the A at ' ~ rel_apex
-                ~ ' and the CNAME at ' ~ rel_wild ~ ' if they are not what you want) and re-run.'] -%}
+                ~ (m_have | join(' ')) ~ ', which is not the `"owner=<host>"` form this provisioner'
+                ~ ' writes, so it cannot tell who owns this name, and nothing was written. If the name'
+                ~ ' is really this inventory' ~ "'" ~ 's, delete its records by hand (pdnsutil delete-rrset '
+                ~ zone ~ ' ' ~ rel_mark ~ ' TXT, and the A at ' ~ rel_apex ~ ' and the CNAME at ' ~ rel_wild
+                ~ ' if they are not what you want) and re-run; otherwise give ' ~ (owners | join(', '))
+                ~ ' a different app_domain.'] -%}
+          {%- elif mark_txt | length > 0 and m_unknown | length > 0 -%}
+            {%- set out.conflicts = out.conflicts + [d ~ ': the ownership marker ' ~ mark ~ ' holds '
+                ~ (m_have | join(' ')) ~ ', naming ' ~ (m_unknown | join(', ')) ~ ', which '
+                ~ ('is not a node' if (m_unknown | length) == 1 else 'are not nodes')
+                ~ ' of this inventory, and nothing was written for ' ~ (owners | join(', ')) ~ '. Either'
+                ~ ' an az of another inventory answers on ' ~ d ~ ' -- then give ' ~ (owners | join(', '))
+                ~ ' a different app_domain -- or a node of this inventory was renamed and the marker still'
+                ~ ' carries its old name. If the name is really this inventory' ~ "'" ~ 's, delete its records'
+                ~ ' by hand (pdnsutil delete-rrset ' ~ zone ~ ' ' ~ rel_mark ~ ' TXT, and the A at '
+                ~ rel_apex ~ ' and the CNAME at ' ~ rel_wild ~ ' if they are not what you want) and re-run.'] -%}
           {%- else -%}
             {%- if mark_txt | length == 0 -%}
               {%- if apex_cname | length > 0 -%}
@@ -226,7 +298,7 @@
                   ~ rel_wild ~ ') and re-run; if another load balancer still answers on ' ~ d
                   ~ ', give ' ~ (owners | join(', ')) ~ ' a different app_domain.'] -%}
             {%- else -%}
-              {#- Ours (marker names exactly these nodes) or safe to adopt.
+              {#- Ours (marker names only nodes of this inventory) or safe to adopt.
                   Deletes precede replaces for the same name. The apex CNAME
                   and non-CNAME wildcard deletes can only be non-empty in
                   the owned case; the unmarked case conflicted above. -#}
@@ -254,16 +326,29 @@
           {%- endif -%}
         {%- endif -%}
       {%- endfor -%}
-      {#- Stale: a well-formed marker naming a node of THIS inventory whose
-          domain is now something else. Owners served from their own zone
-          are left out, as are hosts this inventory does not know. -#}
-      {%- for r in recs | selectattr('type', 'equalto', 'TXT') -%}
-        {%- if r.name.startswith('_cs-lb.') and r.content is match('^"owner=[^"]+"$') -%}
-          {%- set x = r.name[7:-1] -%}
-          {%- set h = r.content[7:-1] -%}
-          {%- if h in inventory_nodes -%}
-            {%- set hd = hostvars[h].cs_app_domain | string | lower -%}
-            {%- if hd not in cut.map and hd != x -%}
+      {#- Stale: a marker at a name no node of this run answers on, naming
+          only nodes of THIS inventory, at least one of which now answers on
+          another domain. A name this run writes for was converged (or
+          conflicted) above instead. Owners now served from their own zone
+          or from a delegation are left out; a marker naming any host this
+          inventory does not know, or holding anything malformed, is never
+          stale. -#}
+      {%- set skip_domains = (cut.map | list) + (deleg.map | list) -%}
+      {%- set marks = recs | selectattr('type', 'equalto', 'TXT') | selectattr('name', 'match', '^_cs-lb[.]') | list -%}
+      {%- for mname in marks | map(attribute='name') | unique | sort -%}
+        {%- set x = mname[7:-1] -%}
+        {%- set strs = marks | selectattr('name', 'equalto', mname) | map(attribute='content') | list -%}
+        {%- if x not in run_domains and (strs | reject('match', '^"owner=[^"]+"$') | list | length) == 0 -%}
+          {%- set hs = strs | map('regex_replace', '^"owner=(.*)"$', '\\1') | unique | list -%}
+          {%- if (hs | reject('in', inventory_nodes) | list | length) == 0 -%}
+            {%- set moved = namespace(any=false) -%}
+            {%- for h in hs -%}
+              {%- set hd = hostvars[h].cs_app_domain | string | lower -%}
+              {%- if hd != x and hd not in skip_domains -%}
+                {%- set moved.any = true -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- if moved.any -%}
               {%- set out.stale = out.stale + [x] -%}
             {%- endif -%}
           {%- endif -%}

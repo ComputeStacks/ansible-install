@@ -24,10 +24,14 @@
 #      bundled nameservers talking about themselves — and they do not exist
 #      yet on a greenfield run.
 #   3. the set of NS names in that referral must equal the set of
-#      `powerdns_name` across `groups['nameservers']` — those names ARE the
-#      zone's NS records (roles/powerdns/tasks/zone.yml), and a delegation
-#      naming any other server sends part of the world's queries to a server
-#      that has never heard of these records.
+#      `powerdns_name` across `groups['nameservers']` — those are the servers
+#      that answer for the zone (the leader, and every follower replicating
+#      it). A delegation naming any other server sends part of the world's
+#      queries to a server that has never heard of these records, and one that
+#      leaves a follower out wastes it. (The zone's own apex NS rrset is NOT
+#      this set: roles/powerdns/tasks/zone.yml creates it naming ns_primary
+#      only. Resolvers use the parent's referral to pick a server, so the
+#      referral is what has to be complete.)
 #
 # Names are compared normalized — lowercase, trailing dot stripped — because
 # DNS names are case-insensitive and dig prints them absolute.
