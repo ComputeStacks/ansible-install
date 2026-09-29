@@ -48,6 +48,15 @@
   ansible.builtin.include_tasks: zone.yml
   when: powerdns_is_leader and powerdns_manage_zone
 
+# Apply any pending pdns/postgres restart NOW, before the record writes. A
+# failure in lb_records.yml (a conflict, say) drops this host from the run, and
+# a dropped host's pending handlers never run: on a first converge the server
+# then keeps serving the package's default bind-backend config, the next run
+# finds pdns.conf unchanged and notifies nothing, and the leader answers
+# REFUSED for the tenant zone with its API down. Seen on the 2026-09-29 smoke.
+- name: Restart pdns/postgres now if their configuration changed
+  ansible.builtin.meta: flush_handlers
+
 # Right after the zone exists and before any later play builds a node, so the
 # records are already being served (and replicated to the followers) while the
 # rest of the run happens. Not gated on powerdns_manage_zone: a zone created by
