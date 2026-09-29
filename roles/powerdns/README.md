@@ -131,9 +131,9 @@ inventory does not know is never stale -- it may be somebody else's.
 
 ### Check mode
 
-`list-all-zones` and `list-zone` run in check mode (they are read-only), the
-planned operations are printed, and the writes, `rectify-zone` and the
-read-back are skipped. On a nameserver where the zone does not exist yet (a
+`list-all-zones`, `list-zone` and the version read run in check mode (they
+are read-only), the planned operations are printed, and the writes,
+`rectify-zone` and the read-back are skipped. On a nameserver where the zone does not exist yet (a
 greenfield `--check`), it says so and plans nothing.
 
 ### After writing
@@ -166,16 +166,39 @@ yourself. roles/preflight and roles/validate read the same variable from
 ns_primary's hostvars to decide which DNS checks apply, so setting it on the
 nodes (or anywhere ns_primary does not see it) does not do what you want.
 
-### Not yet verified on a live box
+### pdnsutil's NAME argument differs by major version
 
-The `list-zone` output format (tab-separated, absolute names with trailing
-dots, a `$ORIGIN .` header), the zone-relative name argument of
-`replace-rrset` / `delete-rrset` (`@` for the apex), and `list-all-zones`'
-output are taken from the PowerDNS source and documentation, not yet
-observed on the 26.04 package or a v1 4.x nameserver. The parser is
-deliberately lenient (any whitespace, names with or without the trailing dot,
-non-record lines dropped), and `tests/lb_records_plan.yml` pins the assumed
-format; it is the first thing to update if a real box disagrees.
+The NAME argument of `pdnsutil replace-rrset ZONE NAME ...` and `pdnsutil
+delete-rrset ZONE NAME TYPE` is read differently by major version, and no
+single form works on both (checked on real binaries: 4.4.3, 4.7, 4.9.17 and
+5.0.2):
+
+* **4.x** -- always relative: the zone is appended even to a name with a
+  trailing dot (`lb1.ex.test.` in zone `ex.test` lands at
+  `lb1.ex.test.ex.test`); `@` is the apex. The role passes `lb1`, `*.lb1`,
+  `_cs-lb.lb1`, `@`.
+* **5.x** (Ubuntu 26.04 ships 5.0.2, so every `site.yml` nameserver) --
+  absolute: a relative name or `@` fails with `Name "x." to add is not part of
+  zone`. The role passes the full name with its trailing dot, which works for
+  the apex, the wildcard and the marker alike.
+
+So before planning, `tasks/lb_records.yml` reads the major version from
+`pdnsutil --version` (it prints `pdnsutil <x.y.z>` on 4.4, 4.9 and 5.0),
+falling back to `dpkg-query -W pdns-server`, and fails if neither gives one
+rather than guess. Major 5 or later means `powerdns_lb_name_style:
+absolute`, anything earlier `relative`; the pure plan step takes that as an
+input and defaults it to `absolute` when unset. The same style is used in the
+hand-run `pdnsutil delete-rrset` commands the conflict messages suggest.
+
+The `list-zone` output (tab-separated, absolute names -- printed there
+without the trailing dot) and the `list-all-zones` output were confirmed on a
+live 5.0.2 nameserver; the parser accepts names with or without the trailing
+dot and drops non-record lines. Not yet
+exercised: a full run of this task file against a v1 4.x nameserver (the
+`add-region.yml` case) -- the 4.x name behavior above was checked with
+pdnsutil directly, not through this role -- and the `dpkg-query` fallback,
+which only runs when `pdnsutil --version` fails or prints something
+unexpected. Versions after 5.0.2 are assumed to keep the absolute form.
 
 ## KEY DIFFERENCE from v1: credentials are inventory-sourced, not generated
 

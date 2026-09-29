@@ -21,7 +21,10 @@
 # pdnsutil, not the HTTP API: `webserver-allow-from` admits only the
 # controller, and this host is reached over SSH anyway. Every subcommand used
 # (list-all-zones, list-zone, replace-rrset, delete-rrset, rectify-zone)
-# exists in 4.x and 5.x. Writes land in the leader's database; the followers
+# exists in 4.x and 5.x, but the NAME argument of replace-rrset/delete-rrset
+# is zone-relative on 4.x and absolute on 5.x (lb_records_plan.yml, "Names"),
+# so the installed major version is read first and never guessed. Writes
+# land in the leader's database; the followers
 # are postgres streaming replicas, so there is no NOTIFY or serial bump to do.
 #
 # No `become`, like the rest of this role: the playbooks connect as root.
@@ -84,11 +87,80 @@
       changed_when: false
       check_mode: false
 
+    # `pdnsutil <x.y.z>` on 4.4, 4.9 and 5.0. Read-only, so in check mode too:
+    # the planned names depend on it.
+    - name: Read the pdnsutil version
+      ansible.builtin.command:
+        argv:
+          - pdnsutil
+          - --version
+      register: powerdns_lb_version_cmd
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Parse the pdnsutil version
+      ansible.builtin.set_fact:
+        powerdns_lb_pdns_major: >-
+          {{ (((powerdns_lb_version_cmd.stdout | default(''))
+               if (powerdns_lb_version_cmd.rc | default(1)) == 0 else '')
+              | regex_findall('(?m)^pdnsutil +(?:version +)?([0-9]+)[.]') + ['']) | first }}
+
+    - name: Read the pdns-server package version when pdnsutil does not say
+      when: powerdns_lb_pdns_major | string | length == 0
+      block:
+        - name: Query the pdns-server package
+          ansible.builtin.command:
+            argv:
+              - dpkg-query
+              - -W
+              - --showformat=${Version}
+              - pdns-server
+          register: powerdns_lb_pkg_cmd
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        # e.g. `5.0.2-1`, `4.4.1-4+deb11u1`, possibly with an epoch.
+        - name: Parse the pdns-server package version
+          ansible.builtin.set_fact:
+            powerdns_lb_pdns_major: >-
+              {{ (((powerdns_lb_pkg_cmd.stdout | default(''))
+                   if (powerdns_lb_pkg_cmd.rc | default(1)) == 0 else '')
+                  | trim | regex_findall('^(?:[0-9]+:)?([0-9]+)[.]') + ['']) | first }}
+
+    # 4.x reads the rrset NAME as zone-relative, 5.x as absolute, and each
+    # form writes the wrong name (or fails) on the other -- so no guessing.
+    - name: Fail when the PowerDNS version cannot be read
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_pdns_major | string is match('^[0-9]+$')
+        fail_msg: >-
+          Could not tell which PowerDNS major version {{ inventory_hostname }}
+          runs: `pdnsutil --version` printed
+          {{ powerdns_lb_version_out | to_json }} (rc
+          {{ powerdns_lb_version_cmd.rc | default('none') }}) and
+          `dpkg-query -W pdns-server` printed {{ powerdns_lb_pkg_out | to_json }}.
+          pdnsutil reads the NAME of replace-rrset/delete-rrset relative to
+          the zone on 4.x and as an absolute name on 5.x, so nothing is
+          written without knowing which. Check the install, or set
+          `powerdns_manage_lb_records: false` on the nameservers and publish
+          the records yourself.
+        quiet: true
+      vars:
+        powerdns_lb_version_out: >-
+          {{ (powerdns_lb_version_cmd.stdout | default('') ~ ' '
+              ~ powerdns_lb_version_cmd.stderr | default('')) | trim }}
+        powerdns_lb_pkg_out: >-
+          {{ (powerdns_lb_pkg_cmd.stdout | default('') ~ ' '
+              ~ powerdns_lb_pkg_cmd.stderr | default('')) | trim }}
+
     - name: Decide what to write
       ansible.builtin.include_tasks: lb_records_plan.yml
       vars:
         powerdns_lb_zone_listing: "{{ powerdns_lb_zone_cmd.stdout_lines }}"
         powerdns_lb_all_zones: "{{ powerdns_lb_all_zones_cmd.stdout_lines }}"
+        powerdns_lb_name_style: "{{ 'absolute' if powerdns_lb_pdns_major | int >= 5 else 'relative' }}"
 
     # Before any write: a conflict on one domain must not leave another
     # half-done, and every conflict is reported at once, not one per run.
@@ -170,6 +242,7 @@
           vars:
             powerdns_lb_zone_listing: "{{ powerdns_lb_zone_after.stdout_lines }}"
             powerdns_lb_all_zones: "{{ powerdns_lb_all_zones_cmd.stdout_lines }}"
+            powerdns_lb_name_style: "{{ 'absolute' if powerdns_lb_pdns_major | int >= 5 else 'relative' }}"
 
         - name: Assert the load balancer records are now exactly as planned
           ansible.builtin.assert:

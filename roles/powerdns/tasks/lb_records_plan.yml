@@ -1,22 +1,30 @@
 ---
 # PURE. Decides what tasks/lb_records.yml writes, and runs no command at all:
-# every task here is a set_fact over its inputs, so it runs on any host --
-# localhost included -- and tests/lb_records_plan.yml feeds it canned zone
-# listings to prove every ownership rule without a nameserver.
+# every task here is a set_fact (or an assert) over its inputs, so it runs on
+# any host -- localhost included -- and tests/lb_records_plan.yml feeds it
+# canned zone listings to prove every ownership rule without a nameserver.
 #
 # Inputs:
 #   powerdns_lb_zone_listing   stdout lines of `pdnsutil list-zone <cs_app_zone>`
 #   powerdns_lb_all_zones      stdout lines of `pdnsutil list-all-zones`
 #   powerdns_lb_records_nodes  the nodes to write for (role default)
 #   powerdns_lb_record_ttl     role default
+#   powerdns_lb_name_style     'absolute' (PowerDNS 5.x) or 'relative' (4.x):
+#                              how pdnsutil reads the NAME argument of
+#                              replace-rrset/delete-rrset. lb_records.yml sets
+#                              it from the installed version; unset means
+#                              'absolute', what every site.yml nameserver
+#                              (Ubuntu 26.04, 5.0.x) runs.
 #   cs_app_zone, groups['nodes'], hostvars[n].cs_app_domain / .public_ip
 #
 # Outputs (facts):
 #   powerdns_lb_ops        ordered list of {op, name, fqdn, type, ttl, contents};
-#                          op is delete|replace, `name` is what pdnsutil takes
-#                          (zone-relative, `@` for the apex), `fqdn` is the
-#                          absolute name with its trailing dot. For one name,
-#                          deletes always come before replaces.
+#                          op is delete|replace, `name` is the NAME argument
+#                          pdnsutil takes, in powerdns_lb_name_style (the
+#                          fqdn itself when absolute; zone-relative, `@` for
+#                          the apex, when relative), `fqdn` is the absolute
+#                          name with its trailing dot. For one name, deletes
+#                          always come before replaces.
 #   powerdns_lb_conflicts  human-readable reasons not to write anything
 #   powerdns_lb_skipped    human-readable notes on domains left alone (served
 #                          from their own zone, or delegated by an NS record)
@@ -87,9 +95,27 @@
 # is never stale -- it may be somebody else's. Stale names are reported, never
 # deleted.
 #
-# Names: list-zone prints absolute names (trailing dot); pdnsutil's
-# replace-rrset/delete-rrset take names RELATIVE to the zone. Comparison is on
-# lowercased absolute names; the relative form is only ever produced here.
+# Names: list-zone prints absolute names. The NAME argument of pdnsutil's
+# replace-rrset/delete-rrset is read differently by major version, and no one
+# form works on both (verified on 4.4.3, 4.7, 4.9.17 and 5.0.2):
+#   4.x  always RELATIVE -- the zone is appended even to a name with a
+#        trailing dot (`lb1.ex.test.` in ex.test lands at lb1.ex.test.ex.test);
+#        `@` is the apex.
+#   5.x  ABSOLUTE -- a relative name or `@` fails with `Name "x." to add is
+#        not part of zone`; the FQDN with its trailing dot works for the
+#        apex, the wildcard and the marker alike.
+# Comparison is always on lowercased absolute names; the pdnsutil argument,
+# in whichever style, is only ever produced here -- in `name` and in the
+# hand-run commands the conflict messages suggest.
+
+- name: Check the pdnsutil name style
+  ansible.builtin.assert:
+    that:
+      - (powerdns_lb_name_style | default('absolute')) in ['absolute', 'relative']
+    fail_msg: >-
+      powerdns_lb_name_style is {{ powerdns_lb_name_style | default('') | to_json }}; it must be
+      'absolute' (PowerDNS 5.x) or 'relative' (PowerDNS 4.x).
+    quiet: true
 
 - name: Parse the zone listing and the server's zone list
   ansible.builtin.set_fact:
@@ -145,6 +171,7 @@
       {%- set zone = zone[:-1] if zone.endswith('.') else zone -%}
       {%- set zfq = zone ~ '.' -%}
       {%- set ttl = powerdns_lb_record_ttl | int -%}
+      {%- set absolute = (powerdns_lb_name_style | default('absolute')) == 'absolute' -%}
       {%- set recs = powerdns_lb_zone_records -%}
       {%- set nodes = powerdns_lb_records_nodes | list | unique | sort -%}
       {%- set inventory_nodes = groups['nodes'] | default([]) | list -%}
@@ -212,11 +239,18 @@
               ~ ' this: every app_domain must be at or under cs_app_zone.'] -%}
         {%- else -%}
           {%- set base = '' if apex == zfq else apex[0:(apex | length) - (zfq | length) - 1] -%}
-          {%- set rel_apex = '@' if apex == zfq else base -%}
-          {%- set rel_wild = '*' if apex == zfq else '*.' ~ base -%}
-          {%- set rel_mark = '_cs-lb' if apex == zfq else '_cs-lb.' ~ base -%}
           {%- set wild = '*.' ~ apex -%}
           {%- set mark = '_cs-lb.' ~ apex -%}
+          {#- The NAME argument pdnsutil takes; see "Names" above. -#}
+          {%- if absolute -%}
+            {%- set arg_apex = apex -%}
+            {%- set arg_wild = wild -%}
+            {%- set arg_mark = mark -%}
+          {%- else -%}
+            {%- set arg_apex = '@' if apex == zfq else base -%}
+            {%- set arg_wild = '*' if apex == zfq else '*.' ~ base -%}
+            {%- set arg_mark = '_cs-lb' if apex == zfq else '_cs-lb.' ~ base -%}
+          {%- endif -%}
           {%- set apex_a = recs | selectattr('name', 'equalto', apex) | selectattr('type', 'equalto', 'A') | list -%}
           {%- set apex_cname = recs | selectattr('name', 'equalto', apex) | selectattr('type', 'equalto', 'CNAME') | list -%}
           {%- set wild_all = recs | selectattr('name', 'equalto', wild) | list -%}
@@ -257,13 +291,13 @@
             {%- set out.conflicts = out.conflicts + [mark ~ ' holds ' ~ (mark_other | map(attribute='type') | unique | join(', '))
                 ~ ', where this provisioner keeps only its TXT ownership marker for ' ~ d ~ ' ('
                 ~ (owners | join(', ')) ~ '). Remove it by hand (pdnsutil delete-rrset ' ~ zone ~ ' '
-                ~ rel_mark ~ ' TYPE) and re-run.'] -%}
+                ~ arg_mark ~ ' TYPE) and re-run.'] -%}
           {%- elif mark_txt | length > 0 and not m_wellformed -%}
             {%- set out.conflicts = out.conflicts + [d ~ ': the ownership marker ' ~ mark ~ ' holds '
                 ~ (m_have | join(' ')) ~ ', which is not the `"owner=<host>"` form this provisioner'
                 ~ ' writes, so it cannot tell who owns this name, and nothing was written. If the name'
                 ~ ' is really this inventory' ~ "'" ~ 's, delete its records by hand (pdnsutil delete-rrset '
-                ~ zone ~ ' ' ~ rel_mark ~ ' TXT, and the A at ' ~ rel_apex ~ ' and the CNAME at ' ~ rel_wild
+                ~ zone ~ ' ' ~ arg_mark ~ ' TXT, and the A at ' ~ arg_apex ~ ' and the CNAME at ' ~ arg_wild
                 ~ ' if they are not what you want) and re-run; otherwise give ' ~ (owners | join(', '))
                 ~ ' a different app_domain.'] -%}
           {%- elif mark_txt | length > 0 and m_unknown | length > 0 -%}
@@ -274,8 +308,8 @@
                 ~ ' an az of another inventory answers on ' ~ d ~ ' -- then give ' ~ (owners | join(', '))
                 ~ ' a different app_domain -- or a node of this inventory was renamed and the marker still'
                 ~ ' carries its old name. If the name is really this inventory' ~ "'" ~ 's, delete its records'
-                ~ ' by hand (pdnsutil delete-rrset ' ~ zone ~ ' ' ~ rel_mark ~ ' TXT, and the A at '
-                ~ rel_apex ~ ' and the CNAME at ' ~ rel_wild ~ ' if they are not what you want) and re-run.'] -%}
+                ~ ' by hand (pdnsutil delete-rrset ' ~ zone ~ ' ' ~ arg_mark ~ ' TXT, and the A at '
+                ~ arg_apex ~ ' and the CNAME at ' ~ arg_wild ~ ' if they are not what you want) and re-run.'] -%}
           {%- else -%}
             {%- if mark_txt | length == 0 -%}
               {%- if apex_cname | length > 0 -%}
@@ -297,8 +331,8 @@
                   ~ ' that differ from what this run would write (' ~ (why.l | join('; ')) ~ '). Wanted: `'
                   ~ apex ~ ' A ' ~ (ips | join(', ')) ~ '` and `' ~ wild ~ ' CNAME ' ~ apex
                   ~ '`. Nothing was written. If those records are stale, delete them by hand'
-                  ~ ' (pdnsutil delete-rrset ' ~ zone ~ ' NAME TYPE, with NAME ' ~ rel_apex ~ ' or '
-                  ~ rel_wild ~ ') and re-run; if another load balancer still answers on ' ~ d
+                  ~ ' (pdnsutil delete-rrset ' ~ zone ~ ' NAME TYPE, with NAME ' ~ arg_apex ~ ' or '
+                  ~ arg_wild ~ ') and re-run; if another load balancer still answers on ' ~ d
                   ~ ', give ' ~ (owners | join(', ')) ~ ' a different app_domain.'] -%}
             {%- else -%}
               {#- Ours (marker names only nodes of this inventory) or safe to adopt.
@@ -306,23 +340,23 @@
                   and non-CNAME wildcard deletes can only be non-empty in
                   the owned case; the unmarked case conflicted above. -#}
               {%- if apex_cname | length > 0 -%}
-                {%- set out.ops = out.ops + [{'op': 'delete', 'name': rel_apex, 'fqdn': apex, 'type': 'CNAME',
+                {%- set out.ops = out.ops + [{'op': 'delete', 'name': arg_apex, 'fqdn': apex, 'type': 'CNAME',
                                               'ttl': none, 'contents': []}] -%}
               {%- endif -%}
               {%- if not a_ok -%}
-                {%- set out.ops = out.ops + [{'op': 'replace', 'name': rel_apex, 'fqdn': apex, 'type': 'A',
+                {%- set out.ops = out.ops + [{'op': 'replace', 'name': arg_apex, 'fqdn': apex, 'type': 'A',
                                               'ttl': ttl, 'contents': ips}] -%}
               {%- endif -%}
               {%- for t in wild_other | map(attribute='type') | unique | sort -%}
-                {%- set out.ops = out.ops + [{'op': 'delete', 'name': rel_wild, 'fqdn': wild, 'type': t,
+                {%- set out.ops = out.ops + [{'op': 'delete', 'name': arg_wild, 'fqdn': wild, 'type': t,
                                               'ttl': none, 'contents': []}] -%}
               {%- endfor -%}
               {%- if not wc_ok -%}
-                {%- set out.ops = out.ops + [{'op': 'replace', 'name': rel_wild, 'fqdn': wild, 'type': 'CNAME',
+                {%- set out.ops = out.ops + [{'op': 'replace', 'name': arg_wild, 'fqdn': wild, 'type': 'CNAME',
                                               'ttl': ttl, 'contents': [apex]}] -%}
               {%- endif -%}
               {%- if not m_ok -%}
-                {%- set out.ops = out.ops + [{'op': 'replace', 'name': rel_mark, 'fqdn': mark, 'type': 'TXT',
+                {%- set out.ops = out.ops + [{'op': 'replace', 'name': arg_mark, 'fqdn': mark, 'type': 'TXT',
                                               'ttl': ttl, 'contents': want_mark}] -%}
               {%- endif -%}
             {%- endif -%}

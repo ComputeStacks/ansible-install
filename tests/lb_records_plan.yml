@@ -32,9 +32,15 @@
 # pass for nothing (case 2 asserts every fixture line parsed, for that reason).
 #
 # What the listings look like is what list-zone prints: a `$ORIGIN .` header,
-# then `name<TAB>ttl<TAB>IN<TAB>type<TAB>content` with absolute names. The real
-# format on a live box (4.x and 5.x) is still to be confirmed by hand; if it
-# ever differs, this file's listings are what to update first.
+# then `name<TAB>ttl<TAB>IN<TAB>type<TAB>content` with absolute names. A live
+# run on 5.0.2 confirmed tab-separated absolute names (printed there without
+# the trailing dot, which the parser accepts either way). If it ever differs,
+# this file's listings are what to update first.
+#
+# NAME STYLE. The ops' `name` is pdnsutil's NAME argument, absolute (the fqdn)
+# on PowerDNS 5.x and zone-relative on 4.x (lb_records_plan.yml, "Names").
+# Every case runs under the plan's default, 'absolute'; the "Name style" cases
+# near the end set 'relative' explicitly and cover each name shape in both.
 
 - name: Add the test nodes to the inventory
   hosts: localhost
@@ -83,14 +89,24 @@
       - "lb1.usercontent.example.com.|300|IN|TXT|\"v=spf1 -all\""
       - "lb1.usercontent.example.com.|300|IN|MX|10 mail.example.com."
     lbt1_create:
-      - {op: replace, name: lb1, fqdn: lb1.usercontent.example.com., type: A, ttl: 300, contents: [192.0.2.101]}
+      - {op: replace, name: lb1.usercontent.example.com., fqdn: lb1.usercontent.example.com., type: A, ttl: 300, contents: [192.0.2.101]}
       - op: replace
-        name: "*.lb1"
+        name: "*.lb1.usercontent.example.com."
         fqdn: "*.lb1.usercontent.example.com."
         type: CNAME
         ttl: 300
         contents: [lb1.usercontent.example.com.]
-      - {op: replace, name: _cs-lb.lb1, fqdn: _cs-lb.lb1.usercontent.example.com., type: TXT, ttl: 300, contents: ['"owner=lbt1"']}
+      - op: replace
+        name: _cs-lb.lb1.usercontent.example.com.
+        fqdn: _cs-lb.lb1.usercontent.example.com.
+        type: TXT
+        ttl: 300
+        contents: ['"owner=lbt1"']
+    # The same three in the relative style (PowerDNS 4.x).
+    lbt1_create_relative:
+      - "{{ lbt1_create[0] | combine({'name': 'lb1'}) }}"
+      - "{{ lbt1_create[1] | combine({'name': '*.lb1'}) }}"
+      - "{{ lbt1_create[2] | combine({'name': '_cs-lb.lb1'}) }}"
   tasks:
     # --- 1. empty zone: create all three ---------------------------------
     - name: "Case: empty zone"
@@ -234,11 +250,11 @@
         that:
           - powerdns_lb_ops | length == 3
           - >-
-            powerdns_lb_ops[0] == {'op': 'delete', 'name': '*.lb1', 'fqdn': '*.lb1.usercontent.example.com.',
-              'type': 'A', 'ttl': none, 'contents': []}
+            powerdns_lb_ops[0] == {'op': 'delete', 'name': '*.lb1.usercontent.example.com.',
+              'fqdn': '*.lb1.usercontent.example.com.', 'type': 'A', 'ttl': none, 'contents': []}
           - >-
-            powerdns_lb_ops[1] == {'op': 'delete', 'name': '*.lb1', 'fqdn': '*.lb1.usercontent.example.com.',
-              'type': 'AAAA', 'ttl': none, 'contents': []}
+            powerdns_lb_ops[1] == {'op': 'delete', 'name': '*.lb1.usercontent.example.com.',
+              'fqdn': '*.lb1.usercontent.example.com.', 'type': 'AAAA', 'ttl': none, 'contents': []}
           - powerdns_lb_ops[2] == lbt1_create[1]
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
@@ -347,19 +363,20 @@
         that:
           - powerdns_lb_ops | length == 2
           - >-
-            powerdns_lb_ops[0] == {'op': 'delete', 'name': 'lb1', 'fqdn': 'lb1.usercontent.example.com.',
-              'type': 'CNAME', 'ttl': none, 'contents': []}
+            powerdns_lb_ops[0] == {'op': 'delete', 'name': 'lb1.usercontent.example.com.',
+              'fqdn': 'lb1.usercontent.example.com.', 'type': 'CNAME', 'ttl': none, 'contents': []}
           - powerdns_lb_ops[1] == lbt1_create[0]
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
 
-    # --- 11. the domain IS the zone: @, *, _cs-lb ----------------------------
-    - name: "Case: app_domain equals cs_app_zone"
+    # --- 11. the domain IS the zone: @, *, _cs-lb (relative) ----------------
+    - name: "Case: app_domain equals cs_app_zone, relative names"
       ansible.builtin.include_role:
         name: powerdns
         tasks_from: lb_records_plan
       vars:
+        powerdns_lb_name_style: relative
         powerdns_lb_records_nodes: [node1001]
         powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
@@ -377,6 +394,26 @@
           - >-
             powerdns_lb_ops[2] == {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.',
               'type': 'TXT', 'ttl': 300, 'contents': ['"owner=node1001"']}
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: app_domain equals cs_app_zone, default (absolute) names"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [node1001]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: absolute names at the zone apex are the fqdns -- never @"
+      ansible.builtin.assert:
+        that:
+          - >-
+            powerdns_lb_ops | map(attribute='name') | list
+            == ['usercontent.example.com.', '*.usercontent.example.com.', '_cs-lb.usercontent.example.com.']
+          - powerdns_lb_ops | map(attribute='name') | list == powerdns_lb_ops | map(attribute='fqdn') | list
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
@@ -403,10 +440,11 @@
           - powerdns_lb_conflicts == []
           - >-
             powerdns_lb_ops == [
-              {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.', 'type': 'A', 'ttl': 300,
-               'contents': ['203.0.113.10', '203.0.113.20']},
-              {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT',
-               'ttl': 300, 'contents': ['"owner=node1001"', '"owner=node2001"']}]
+              {'op': 'replace', 'name': 'usercontent.example.com.', 'fqdn': 'usercontent.example.com.',
+               'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10', '203.0.113.20']},
+              {'op': 'replace', 'name': '_cs-lb.usercontent.example.com.',
+               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'contents': ['"owner=node1001"', '"owner=node2001"']}]
           - powerdns_lb_stale == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
@@ -459,16 +497,19 @@
           - powerdns_lb_stale == []
           - >-
             powerdns_lb_ops == [
-              {'op': 'replace', 'name': 'moved', 'fqdn': 'moved.usercontent.example.com.', 'type': 'A',
-               'ttl': 300, 'contents': ['192.0.2.104']},
-              {'op': 'replace', 'name': '*.moved', 'fqdn': '*.moved.usercontent.example.com.', 'type': 'CNAME',
-               'ttl': 300, 'contents': ['moved.usercontent.example.com.']},
-              {'op': 'replace', 'name': '_cs-lb.moved', 'fqdn': '_cs-lb.moved.usercontent.example.com.',
-               'type': 'TXT', 'ttl': 300, 'contents': ['"owner=lbt4"']},
-              {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.', 'type': 'A', 'ttl': 300,
-               'contents': ['203.0.113.10']},
-              {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT',
-               'ttl': 300, 'contents': ['"owner=node1001"']}]
+              {'op': 'replace', 'name': 'moved.usercontent.example.com.',
+               'fqdn': 'moved.usercontent.example.com.', 'type': 'A', 'ttl': 300, 'contents': ['192.0.2.104']},
+              {'op': 'replace', 'name': '*.moved.usercontent.example.com.',
+               'fqdn': '*.moved.usercontent.example.com.', 'type': 'CNAME', 'ttl': 300,
+               'contents': ['moved.usercontent.example.com.']},
+              {'op': 'replace', 'name': '_cs-lb.moved.usercontent.example.com.',
+               'fqdn': '_cs-lb.moved.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'contents': ['"owner=lbt4"']},
+              {'op': 'replace', 'name': 'usercontent.example.com.', 'fqdn': 'usercontent.example.com.',
+               'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10']},
+              {'op': 'replace', 'name': '_cs-lb.usercontent.example.com.',
+               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'contents': ['"owner=node1001"']}]
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }} {{ powerdns_lb_stale }}"
         quiet: true
 
@@ -495,7 +536,7 @@
           - "'naming node3001, which is not a node of this inventory' in powerdns_lb_conflicts[0]"
           - "'another inventory' in powerdns_lb_conflicts[0]"
           - "'renamed' in powerdns_lb_conflicts[0]"
-          - "'pdnsutil delete-rrset usercontent.example.com _cs-lb TXT' in powerdns_lb_conflicts[0]"
+          - "'pdnsutil delete-rrset usercontent.example.com _cs-lb.usercontent.example.com. TXT' in powerdns_lb_conflicts[0]"
           - powerdns_lb_stale == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
@@ -539,7 +580,7 @@
       ansible.builtin.assert:
         that:
           - powerdns_lb_conflicts == []
-          - powerdns_lb_ops | map(attribute='name') | list == ['_cs-lb']
+          - powerdns_lb_ops | map(attribute='name') | list == ['_cs-lb.usercontent.example.com.']
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
 
@@ -572,10 +613,13 @@
         powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
-    - name: "Assert: relative names keep both labels"
+    - name: "Assert: absolute names keep both labels"
       ansible.builtin.assert:
         that:
-          - powerdns_lb_ops | map(attribute='name') | list == ['deep.lb2', '*.deep.lb2', '_cs-lb.deep.lb2']
+          - >-
+            powerdns_lb_ops | map(attribute='name') | list
+            == ['deep.lb2.usercontent.example.com.', '*.deep.lb2.usercontent.example.com.',
+                '_cs-lb.deep.lb2.usercontent.example.com.']
           - powerdns_lb_ops[1].contents == ['deep.lb2.usercontent.example.com.']
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
@@ -681,7 +725,10 @@
           - "'lb1.usercontent.example.com (lbt1) is delegated to other nameservers' in powerdns_lb_skipped[0]"
           - "'NS record at lb1.usercontent.example.com' in powerdns_lb_skipped[0]"
           - "'yours to manage there' in powerdns_lb_skipped[0]"
-          - powerdns_lb_ops | map(attribute='name') | list == ['moved', '*.moved', '_cs-lb.moved']
+          - >-
+            powerdns_lb_ops | map(attribute='name') | list
+            == ['moved.usercontent.example.com.', '*.moved.usercontent.example.com.',
+                '_cs-lb.moved.usercontent.example.com.']
           - powerdns_lb_stale == []
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }} {{ powerdns_lb_stale }}"
@@ -727,4 +774,138 @@
           - powerdns_lb_ops | length == 6
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_skipped }} {{ powerdns_lb_ops }}"
+        quiet: true
+
+    # --- 17. name style: relative (4.x) vs absolute (5.x) --------------------
+    # Case 11 covers the zone apex in both styles; these cover one and two
+    # labels below it, the wildcard, the marker, a delete op, and the
+    # hand-run command a conflict message suggests.
+    - name: "Case: name style, relative, one label below the zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_name_style: relative
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: relative names drop the zone, fqdns do not"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == lbt1_create_relative
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: name style, explicit absolute, one label below the zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_name_style: absolute
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: explicit absolute is the default"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == lbt1_create
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: name style, relative, two labels below the zone"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_name_style: relative
+        powerdns_lb_records_nodes: [lbt2]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: relative names keep both labels"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | map(attribute='name') | list == ['deep.lb2', '*.deep.lb2', '_cs-lb.deep.lb2']
+          - >-
+            powerdns_lb_ops | map(attribute='fqdn') | list
+            == ['deep.lb2.usercontent.example.com.', '*.deep.lb2.usercontent.example.com.',
+                '_cs-lb.deep.lb2.usercontent.example.com.']
+          - powerdns_lb_ops[1].contents == ['deep.lb2.usercontent.example.com.']
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: name style, relative, delete ops"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_name_style: relative
+        powerdns_lb_records_nodes: [lbt1]
+        powerdns_lbt_extra:
+          - "lb1.usercontent.example.com.|300|IN|CNAME|elsewhere.example.net."
+          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+        powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: delete ops take the relative name too"
+      ansible.builtin.assert:
+        that:
+          - >-
+            powerdns_lb_ops == [
+              {'op': 'delete', 'name': 'lb1', 'fqdn': 'lb1.usercontent.example.com.', 'type': 'CNAME',
+               'ttl': none, 'contents': []},
+              lbt1_create_relative[0],
+              {'op': 'delete', 'name': '*.lb1', 'fqdn': '*.lb1.usercontent.example.com.', 'type': 'A',
+               'ttl': none, 'contents': []},
+              lbt1_create_relative[1]]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: name style, relative, a conflict's suggested command"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_name_style: relative
+        powerdns_lb_records_nodes: [node1001]
+        powerdns_lbt_extra:
+          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node3001\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the hand-run delete-rrset uses the same style"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'pdnsutil delete-rrset usercontent.example.com _cs-lb TXT' in powerdns_lb_conflicts[0]"
+          - "'the A at @ and the CNAME at * ' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: an unknown name style is refused"
+      block:
+        - name: "Case: name style 'fqdn'"
+          ansible.builtin.include_role:
+            name: powerdns
+            tasks_from: lb_records_plan
+          vars:
+            powerdns_lb_name_style: fqdn
+            powerdns_lb_records_nodes: [lbt1]
+            powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+            powerdns_lb_all_zones: "{{ lbt_zones }}"
+      rescue:
+        - name: Note which task refused it
+          ansible.builtin.set_fact:
+            lbt_bad_style_failed_task: "{{ ansible_failed_task.name }}"
+
+    - name: "Assert: the style check refused it"
+      ansible.builtin.assert:
+        that:
+          - lbt_bad_style_failed_task | default('') == 'Check the pdnsutil name style'
+        fail_msg: "{{ lbt_bad_style_failed_task | default('the plan accepted an unknown style') }}"
         quiet: true
