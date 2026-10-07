@@ -26,7 +26,9 @@ the node to the same inventory and re-run `site.yml`, optionally
 ## Prerequisites
 
 **The existing controller must already be upgraded** to a release that carries
-`rake bootstrap:apply` — the manifest apply this playbook seeds through. Do
+`rake bootstrap:apply` — the manifest apply this playbook seeds through — and
+accepts `link_regions: new`, i.e. **9.7.10 or later**. An older apply rejects
+`new` up front, before anything is written. Do
 that first, the normal way:
 
 ```bash
@@ -225,7 +227,9 @@ public DNS and fails if it is missing. The same holds with
 
 The attach manifest carries **topology only**: the new location, region, node,
 network and load balancer, plus the user-group region link without which the
-new region is invisible to every existing user. It carries no settings, no DNS
+new region is invisible to every existing user. That link is `link_regions:
+new`: the default group is linked to the regions this run creates and to no
+existing one, so a region deliberately kept off the default group stays off. It carries no settings, no DNS
 driver, no products and no admin user, so nothing global is touched.
 `controller_seed_full_manifest: true` renders the whole greenfield document
 against the live controller instead. Almost nothing in it is an overwrite

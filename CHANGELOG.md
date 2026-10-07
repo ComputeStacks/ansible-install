@@ -1,5 +1,15 @@
 # Changelog
 
+## October 7, 2026
+
+* **Attach mode links the default user group to the new regions only.** The
+  attach manifest sent `user_group: {link_regions: all}`, which linked the
+  default group to every region on the controller — including any an operator
+  had deliberately kept off it — and links are never removed. It now sends
+  `link_regions: new` (`controller_seed_attach_link_regions`), which needs
+  controller 9.7.10 or later; the controller prep play checks the running
+  image before the database backup and stops if it is older.
+
 ## September 26, 2026
 
 * **With `dns_driver: powerdns`, the provisioner writes each az's load

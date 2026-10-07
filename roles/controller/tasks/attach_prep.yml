@@ -161,6 +161,43 @@
       Nothing has been changed on this controller yet.
     success_msg: "the running controller defines bootstrap:apply"
 
+# Same reasoning, one release later. The attach manifest sends
+# `user_group: {link_regions: new}` (roles/controller_seed), which the apply
+# accepts from controller 9.7.10. An older one rejects it -- safely, nothing is
+# linked -- but only in controller_seed's DRY_RUN, after the dump, the
+# restart and the new node build. Probed by source rather than by VERSION
+# because the commercial image is built FROM the controller and may not carry
+# the same version string. Fails closed: a false negative stops the run here,
+# before anything is written.
+- name: Probe the running controller for link_regions new
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ controller_attach_container }}"
+      - grep
+      - -qF
+      - when "new"
+      - app/services/bootstrap/apply_service.rb
+  register: controller_attach_link_new
+  changed_when: false
+  failed_when: false
+  when: (controller_seed_attach_link_regions | default('new')) == 'new'
+
+- name: Assert the running controller accepts link_regions new
+  ansible.builtin.assert:
+    that:
+      - controller_attach_link_new.rc == 0
+    fail_msg: >-
+      The controller image running on {{ inventory_hostname }} predates
+      `link_regions: new` (controller 9.7.10), which the attach manifest uses
+      so that only the new regions are linked to the default user group.
+      Run `cstacks upgrade` to 9.7.10 or later on {{ inventory_hostname }},
+      confirm the portal comes back, then run this playbook again. Nothing
+      has been changed on this controller yet.
+    success_msg: "the running controller accepts link_regions new"
+  when: (controller_seed_attach_link_regions | default('new')) == 'new'
+
 # The v2 cstacks script sources the environment file and then applies
 # `: "${VAR:=default}"` fallbacks (roles/controller/files/cstacks.sh). A key
 # the file omits therefore silently takes V2's default, and `docker run`

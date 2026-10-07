@@ -31,6 +31,11 @@
 {% set controller_ts = hostvars[controller_host].tailscale_ip | default(hostvars[controller_host].ansible_local.computestacks.tailscale_ip | default('')) %}
 {% set controller_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
 {% set include_globals = (not (existing_env | default(false) | bool)) or (controller_seed_full_manifest | bool) %}
+{# Attach mode links the default user group to the regions THIS apply creates
+   and no others, full manifest or not: `all` would also link every existing
+   region the group was deliberately kept off. `new` needs controller >= 9.7.10;
+   an older apply rejects it up front, before anything is linked. #}
+{% set link_regions = controller_seed_attach_link_regions if (existing_env | default(false) | bool) else controller_seed_link_regions %}
 {% set node_regions = cs_new_nodes | map('extract', hostvars, 'region') | list | unique | sort %}
 # Rendered by ansible (roles/controller_seed) -- do not hand-edit.
 # Carries secrets: root 0600, deleted after a successful apply.
@@ -252,7 +257,7 @@ catalog:
 
 user_group:
   name: {{ controller_seed_user_group_name | to_json }}
-  link_regions: {{ controller_seed_link_regions | to_json }}
+  link_regions: {{ link_regions | to_json }}
 
 features:
   defaults: {{ controller_seed_features_defaults | bool | to_json }}
@@ -269,7 +274,7 @@ admin_user:
 {% else %}
 
 # Attach mode: topology only. The default user group is linked to the new
-# region so its users can order there -- links are added, never removed.
+# regions only, so its users can order there -- links are added, never removed.
 user_group:
-  link_regions: {{ controller_seed_link_regions | to_json }}
+  link_regions: {{ link_regions | to_json }}
 {% endif %}

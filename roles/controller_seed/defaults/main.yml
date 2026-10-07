@@ -225,6 +225,11 @@ controller_seed_catalog_system_content: true
 controller_seed_catalog_container_images: true
 controller_seed_user_group_name: default
 controller_seed_link_regions: all
+# Attach mode (existing_env), with or without controller_seed_full_manifest.
+# `new` links the default group only to the regions the apply creates; `all`
+# would also link every existing region, including ones deliberately kept off
+# the default group. Requires controller >= 9.7.10.
+controller_seed_attach_link_regions: new
 controller_seed_features_defaults: true
 controller_seed_admin_email: "{{ cs_admin_email | default('') }}"
 controller_seed_admin_password: "{{ cs_admin_password | default('') }}"

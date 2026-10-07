@@ -306,8 +306,11 @@ created by v1 with their correct per-region domains already.
 ## Attach mode (`existing_env: true`)
 
 The manifest carries the **topology only** — `locations` with their regions,
-nodes, networks and load balancers — plus `user_group: {link_regions: all}`,
+nodes, networks and load balancers — plus `user_group: {link_regions: new}`,
 without which the new region is invisible to every user in the default group.
+`new` links the default group to the regions this apply creates and to no
+existing one (`controller_seed_attach_link_regions`, also used when
+`controller_seed_full_manifest` is on); it needs controller 9.7.10 or later.
 No `settings`, no `dns`, no `metric_clients`/`log_clients`, no `products`,
 `catalog`, `features` or `admin_user`. Set
 `controller_seed_full_manifest: true` to render the whole greenfield document
