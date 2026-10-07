@@ -119,6 +119,7 @@ validate_prometheus_endpoint: >-
 validate_borg_ssh_user: "{{ cs_agent_backup_ssh_user | default('cstacks') }}"
 validate_borg_keyfile: "{{ cs_agent_backup_keyfile | default('/etc/computestacks/backup/.ssh/id_ed25519') }}"
 validate_borg_remote_path: "{{ backup_borg_remote_path | default(borg_binary_path) }}"
+validate_borg_ssh_port: "{{ backup_ssh_port | default(cs_ports.ssh) }}"
 # The client half of every backup is the cs-docker-borg image, whose borg is
 # `borg_version` (versions.yml pins the two together). A server on a different
 # version breaks repositories in ways that only show up at restore time, so

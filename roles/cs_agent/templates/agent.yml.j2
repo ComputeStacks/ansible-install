@@ -42,7 +42,7 @@ backups:
       enabled: true
       user: "{{ cs_agent_backup_ssh_user }}"
       host: "{{ cs_agent_backup_ssh_host }}"
-      port: "{{ cs_ports.ssh }}"
+      port: "{{ cs_agent_backup_ssh_port }}"
       host_path: "{{ cs_agent_backup_host_path }}"
       # Must stay under /etc/computestacks — the only host directory bind
       # mounted into the borg container.

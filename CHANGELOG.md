@@ -9,6 +9,10 @@
   `link_regions: new` (`controller_seed_attach_link_regions`), which needs
   controller 9.7.10 or later; the controller prep play checks the running
   image before the database backup and stops if it is older.
+* **`backup_ssh_port` describes a backup server whose sshd is not on port 22.**
+  The node's borg SSH backend and `validate`'s borg check both used
+  `cs_ports.ssh`, which the inventory cannot override; an existing backup
+  server listening elsewhere was unreachable.
 
 ## September 26, 2026
 

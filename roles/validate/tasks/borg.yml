@@ -23,7 +23,7 @@
       - -o
       - "ConnectTimeout={{ validate_ssh_timeout }}"
       - -p
-      - "{{ cs_ports.ssh }}"
+      - "{{ validate_borg_ssh_port }}"
       - "{{ validate_borg_ssh_user }}@{{ hostvars[validate_backup_host].primary_ip }}"
       - "{{ validate_borg_remote_path }} --version"
   register: validate_borg_ssh

@@ -152,6 +152,7 @@ containers.
 | `cs_agent_backup_ssh_user` | `cstacks` | Account on the backup server. |
 | `cs_agent_backup_host_path` | `backup_host_path` or `/var/lib/computestacks/backups` | Repository path **on the backup server**. |
 | `cs_agent_borg_remote_path` | `backup_borg_remote_path` or `borg_binary_path` | borg **on the backup server**. |
+| `cs_agent_backup_ssh_port` | `backup_ssh_port` or `cs_ports.ssh` | sshd port **on the backup server**. |
 | `cs_agent_borg_compression` | `zstd,3` | `backups.borg.compression`. |
 | `cs_agent_queue_numworkers` | `3` | Agent job workers. |
 | `cs_agent_s3_export_*` | empty | Backup export to S3; inert until a bucket **and** `s3_export_access_key`/`s3_export_secret_key` are set. |
@@ -169,7 +170,8 @@ token hash, and a `--diff` run would otherwise print both.
 
 **Attach mode:** `backup_host_path` and `backup_borg_remote_path` are
 *required* inventory inputs describing the existing environment (v1 servers:
-`/mnt` and `/usr/bin/borg`), and `backups_key` must be the existing
+`/mnt` and `/usr/bin/borg`), `backup_ssh_port` is required when that server's
+sshd is not on `cs_ports.ssh`, and `backups_key` must be the existing
 environment's value.
 
 ## Deviations from v1 (`roles/cs_agent`)

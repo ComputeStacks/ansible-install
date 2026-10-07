@@ -55,7 +55,7 @@ total credential loss that a `pg_dump` does not protect you from, because the
 damage happens after the dump. The controller prep play asserts the match and
 aborts if it fails.
 
-**Three inputs describe the existing backup server** and have no safe default,
+**These inputs describe the existing backup server** and have no safe default,
 because v2's defaults are not what a v1 server has (the server itself is the
 one in the new node's `site` — see below):
 
@@ -63,6 +63,7 @@ one in the new node's `site` — see below):
 | --- | --- | --- |
 | `backup_host_path` | `/mnt` | Where repositories live on that server. |
 | `backup_borg_remote_path` | `/usr/bin/borg` | v2's default is `/opt/computestacks/bin/borg`, which does not exist there — every backup on the new node would fail with "command not found". |
+| `backup_ssh_port` | that server's sshd port | Defaults to `cs_ports.ssh` (22). A server whose sshd listens elsewhere needs it, or every backup on the new node fails to connect. |
 | `backups_key` (secrets) | the environment's existing value | The borg passphrase. A new one makes the node's repositories unreadable alongside everyone else's. |
 
 **Everything else in the inventory must describe the environment that
