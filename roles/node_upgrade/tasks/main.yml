@@ -1,0 +1,65 @@
+---
+# Rolling docker upgrade of ONE node, inside a maintenance window. Run by
+# playbooks/upgrade-docker.yml with `serial: 1`; README.md has the full
+# account. In order:
+#
+#   preflight   read-only checks (tasks/preflight.yml)
+#   decide      skip the node when there is nothing to do
+#   download    apt-get update + --download-only, containers still running
+#   hold        `cs-agent maintenance on --wait` (fresh run only)     -> held
+#   record      the running non-system containers -> state.json       -> recorded
+#   stop        stop exactly those, in batches                        -> stopped
+#   packages    OS upgrade with docker HELD, then the docker pins     -> packages
+#   reboot      if /var/run/reboot-required                           -> rebooted
+#   start       start exactly the recorded set, with retries          -> started
+#   release     `cs-agent maintenance off` + controller confirmation  -> released
+#   archive     state.json -> state.done.<timestamp>.json
+#   settle      let the controller's HealthCheck see the node
+#
+# Every step after `hold` is phase-aware: state.json lists the phases already
+# done, a re-run skips them, and once `packages` (or `started`) is done the
+# role never stops a container again. See tasks/cycle.yml.
+
+- name: Preflight
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Check whether a reboot is pending
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: node_upgrade_reboot_pending
+  check_mode: false
+
+# Pending OS updates are deliberately NOT a reason to run: they ride along
+# with a cycle that is happening anyway (node_upgrade_apply_os_updates), and
+# unattended-upgrades already applies the security ones without a window.
+- name: Decide whether this node needs the cycle
+  ansible.builtin.set_fact:
+    node_upgrade_needs_docker: "{{ node_upgrade_drift_list | length > 0 }}"
+    node_upgrade_needs_reboot: "{{ node_upgrade_reboot_pending.stat.exists }}"
+    node_upgrade_run: >-
+      {{ node_upgrade_drift_list | length > 0
+         or node_upgrade_reboot_pending.stat.exists
+         or node_upgrade_resume
+         or (node_upgrade_force | bool) }}
+
+- name: Report the decision
+  ansible.builtin.debug:
+    msg: >-
+      {% if node_upgrade_resume %}RESUMING an unfinished upgrade (phases done:
+      {{ node_upgrade_phases_done | join(', ') if node_upgrade_phases_done else 'none' }}).
+      {% elif not node_upgrade_run %}Nothing to do: docker matches its pins and no reboot
+      is pending. No hold taken; the node was not touched.
+      {% else %}Upgrading:
+      {% for d in node_upgrade_drift_list %}{{ d.name }} {{ d.installed | default('absent', true) }} -> {{ d.pin }};
+      {% endfor %}{{ 'reboot pending; ' if node_upgrade_needs_reboot else '' }}{{
+        'forced; ' if node_upgrade_force | bool else '' }}OS updates
+      {{ 'applied' if node_upgrade_apply_os_updates | bool else 'not applied' }}.{% endif %}
+      {{ ' CHECK MODE: stopping here, nothing changed.' if ansible_check_mode and node_upgrade_run else '' }}
+
+# There is no meaningful dry run of the cycle itself -- every step depends on
+# the one before having really happened -- so --check ends after the decision.
+- name: Run the upgrade cycle
+  ansible.builtin.include_tasks: cycle.yml
+  when:
+    - node_upgrade_run | bool
+    - not ansible_check_mode

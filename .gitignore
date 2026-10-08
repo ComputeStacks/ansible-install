@@ -15,3 +15,7 @@ collections/
 .ansible/
 galaxy_roles/
 .ansible_facts_cache/
+
+# Python bytecode (filter plugins)
+__pycache__/
+*.pyc

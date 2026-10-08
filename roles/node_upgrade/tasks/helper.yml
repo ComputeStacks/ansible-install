@@ -1,0 +1,21 @@
+---
+# Install the stop/start batching helper (files/node-upgrade-containers) and
+# list the node's containers in the shape filter node_upgrade_parse_ps reads.
+#
+# Output: node_upgrade_ps  [{id, name, running}] for every container
+
+- name: Create the helper directory
+  ansible.builtin.file:
+    path: "{{ node_upgrade_helper | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the container stop/start helper
+  ansible.builtin.copy:
+    src: node-upgrade-containers
+    dest: "{{ node_upgrade_helper }}"
+    owner: root
+    group: root
+    mode: "0755"

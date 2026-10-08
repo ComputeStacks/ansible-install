@@ -14,6 +14,13 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
   false or the host is flagged `existing_env: true` — attach mode must never
   reboot a live v1 controller/metrics/backup host. Runs right after package
   install (see "Deviations from v1" for why).
+- Never reboots a **live node** either: a host in `nodes` that already carries
+  tenant containers, per `roles/node_upgrade`'s `tasks_from: detect_live`
+  (probed only when a reboot is pending). It prints a warning instead —
+  "reboot pending on live node" — and the reboot is taken in a maintenance
+  window by `make upgrade-docker ENV=<env>`, which reboots when one is
+  required. A node with no tenants yet (a first build) and every non-node
+  host reboot as before.
 - Hardens sshd: `PasswordAuthentication no` (restarts `ssh` on change).
 - Ensures `chrony` is installed, enabled, and running.
 - Installs and enables `unattended-upgrades` (periodic + unattended apt
@@ -40,7 +47,7 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
 |---|---|---|
 | `common_packages` | see `defaults/main.yml` | Base package set installed on every host. |
 | `common_conflicting_packages` | `[ufw, ntp]` | Packages removed before install. |
-| `common_allow_reboot` | `true` | Reboot when `/var/run/reboot-required` exists. Never fires on `existing_env` hosts regardless of this setting. |
+| `common_allow_reboot` | `true` | Reboot when `/var/run/reboot-required` exists. Never fires on `existing_env` hosts or on live nodes regardless of this setting. |
 
 Consumed, not owned: `hostname`, `primary_ip`, `region`, `az` (node inventory
 vars, asserted present by `preflight`).

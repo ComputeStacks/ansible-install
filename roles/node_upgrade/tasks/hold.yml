@@ -1,0 +1,170 @@
+---
+# Put the node in maintenance -- or, on a resumed run, prove it still is.
+#
+# ONE action on the node: `cs-agent maintenance on`. The agent reports the
+# hold to the controller, which then stops placing, health-checking and
+# recovering on this node; the playbook never touches controller maintenance.
+#
+# The status is read FIRST, and what happens next depends on whether this is
+# a fresh run (no state.json) or a resumed one:
+#
+#   fresh, no local hold      -> `on --wait`; phase `held` on success.
+#   fresh, a local hold       -> FAIL. Somebody else holds this node (an
+#                                operator, or a run that died before writing
+#                                state.json). The role never adopts a hold
+#                                it did not place.
+#   resumed, local hold set   -> carry on; no `on` (a repeated `on --wait`
+#                                would write a fresh changelog entry and wait
+#                                up to the full timeout for its ack, for
+#                                nothing).
+#   resumed, no local hold    -> FAIL (R8): it was removed externally.
+#   resumed, `off` already run (state.releasing) -> carry on to the release
+#                                confirmation; no hold is expected.
+
+- name: Read the maintenance status
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, status, --json]
+  register: node_upgrade_hold_status
+  changed_when: false
+  failed_when: false
+
+- name: Parse the maintenance status
+  ansible.builtin.set_fact:
+    node_upgrade_hold_status_doc: "{{ node_upgrade_hold_status.stdout | node_upgrade_cli_json }}"
+
+- name: Gate - the maintenance status must be readable
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_hold_status.rc == 0
+      - node_upgrade_hold_status_doc.shape == 'status'
+    fail_msg: >-
+      `cs-agent maintenance status --json` on {{ inventory_hostname }} failed
+      (rc {{ node_upgrade_hold_status.rc }}):
+      {{ node_upgrade_hold_status_doc.doc.error | default(node_upgrade_hold_status.stderr | default('') | trim) }}.
+      {% if node_upgrade_resume %}The node is mid-upgrade (state {{ node_upgrade_state_file }},
+      phases done: {{ node_upgrade_phases_done | join(', ') }}). Fix the agent, then
+      re-run this playbook for the node to resume. Do NOT run `cs-agent maintenance
+      off`.{% else %}Nothing on the node was changed. Fix the agent and re-run.{% endif %}
+    quiet: true
+
+# --- resumed run --------------------------------------------------------------
+- name: Gate - a resumed run needs its hold still in place
+  ansible.builtin.assert:
+    that:
+      - >-
+        node_upgrade_hold_status_doc.doc.local is not none
+        or 'released' in node_upgrade_phases_done
+        or (node_upgrade_state.releasing | default(false))
+    fail_msg: >-
+      THE MAINTENANCE HOLD ON {{ inventory_hostname }} WAS REMOVED EXTERNALLY while an
+      upgrade was in progress (state {{ node_upgrade_state_file }}, phases done:
+      {{ node_upgrade_phases_done | join(', ') | default('none', true) }}).
+      Somebody ran `cs-agent maintenance off`, or an admin override cleared it. The
+      controller may now be recovering this node's containers on its own. Do not
+      re-run blindly: check the node in the admin UI and `docker ps -a` on the node,
+      compare with the `recorded` list in the state file, and only then decide
+      whether to re-hold it (`cs-agent maintenance on`) and re-run this playbook, or
+      to finish by hand and move the state file aside.
+    quiet: true
+  when: node_upgrade_resume
+
+# --- fresh run ---------------------------------------------------------------
+- name: Take the maintenance hold
+  when: not node_upgrade_resume
+  block:
+    - name: Gate - nobody else may already hold the node
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_hold_status_doc.doc.local is none
+        fail_msg: >-
+          {{ inventory_hostname }} already has a local maintenance hold
+          ({{ node_upgrade_hold_status_doc.doc.local.reason | default('?') }}, by
+          {{ node_upgrade_hold_status_doc.doc.local.by | default('?') }}, since
+          {{ '%Y-%m-%dT%H:%M:%SZ' | strftime(node_upgrade_hold_status_doc.doc.local.since | default(0), utc=true) }}),
+          and no upgrade state file. This playbook never adopts a hold it did not
+          place. If it belongs to someone working on the node, wait for them. If it
+          is left from an upgrade-docker run that failed before recording anything
+          (reason `{{ node_upgrade_reason }}`), nothing was stopped -- clear it with
+          `cs-agent maintenance off` on the node and re-run.
+        quiet: true
+
+    # A controller-side hold (admin UI / API) cannot be released from here, so
+    # the release step would wait for `paused` to clear forever -- after a full
+    # stop/upgrade/reboot/start of this node. Refuse before anything happens.
+    - name: Gate - the controller must not already hold the node
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_hold_status_doc.doc.controller is none
+        fail_msg: >-
+          {{ inventory_hostname }} is already in maintenance on the controller
+          ({{ node_upgrade_hold_status_doc.doc.controller.reason | default('no reason given', true) }}).
+          This playbook takes and releases its own hold on the node; it cannot
+          release a controller-side one, so the run would stop after upgrading
+          this node with it still paused. Take the node out of maintenance in the
+          admin UI, then re-run. Nothing has been changed on the node.
+        quiet: true
+
+    - name: Ask docker whether it answers
+      ansible.builtin.command:
+        argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
+      register: node_upgrade_hold_docker_info
+      changed_when: false
+      failed_when: false
+
+    # The containers are listed right after the hold is taken; a dockerd that
+    # does not answer would fail that step with the node held for nothing.
+    - name: Gate - docker must answer before the node is held
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_hold_docker_info.rc == 0
+        fail_msg: >-
+          dockerd on {{ inventory_hostname }} does not answer (`docker info`:
+          {{ node_upgrade_hold_docker_info.stderr | default('') | trim }}). The upgrade
+          lists the running containers right after holding the node, so it does not
+          start. Nothing on the node was changed.
+        quiet: true
+
+    # async + poll: the wait can last the whole timeout (backups are waited
+    # out), and a dropped ssh connection must not kill the CLI half-way. The
+    # job keeps running on the node either way; poll only collects it.
+    - name: Hold the node and wait until it is quiet
+      ansible.builtin.command:
+        argv:
+          - "{{ node_upgrade_cs_agent_bin }}"
+          - maintenance
+          - "on"
+          - --reason
+          - "{{ node_upgrade_reason }}"
+          - --wait
+          - --timeout
+          - "{{ node_upgrade_maintenance_timeout }}s"
+          - --settle
+          - "{{ node_upgrade_maintenance_settle }}s"
+          - --json
+      register: node_upgrade_on
+      async: "{{ (node_upgrade_maintenance_timeout | int) + (node_upgrade_maintenance_settle | int) + 300 }}"
+      poll: 15
+      changed_when: true
+      failed_when: false
+
+    - name: Classify the hold result
+      ansible.builtin.include_tasks: classify_on.yml
+
+    - name: Gate - the node must be held and quiet
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.ok
+        fail_msg: "{{ node_upgrade_on_message }}"
+        quiet: true
+
+    - name: Record that the node is held
+      ansible.builtin.include_tasks: state_phase.yml
+      vars:
+        node_upgrade_phase: held
+        node_upgrade_state_update:
+          version: 1
+          host: "{{ inventory_hostname }}"
+          reason: "{{ node_upgrade_reason }}"
+          started_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+          recorded: []
+          accept_down: []

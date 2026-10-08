@@ -58,13 +58,51 @@
 # The engine packages are HELD around the install, as v1 did: an unattended
 # apt upgrade that moves dockerd restarts every container on the node. The
 # hold is released first, so editing `docker_apt_packages` in versions.yml
-# still rolls through on a rerun (contracts rule 3).
+# rolls through on a rerun (contracts rule 3) -- EXCEPT on a live node.
+#
+# A LIVE NODE (one with tenant containers; roles/node_upgrade detect_live) is
+# never upgraded here: a docker upgrade restarts dockerd, and tenant
+# containers have no restart policy, so they would stay down. When a live
+# node's docker drifts from its pin, this play skips the hold release,
+# geerlingguy.docker and the re-hold for that node and warns; the pin rolls
+# out through `make upgrade-docker ENV=<env>` in a maintenance window
+# (playbooks/upgrade-docker.yml). Skip, not fail: a pin bump must not block
+# every unrelated site.yml run until the whole fleet is upgraded. A node that
+# is not live (first build, no tenants yet) and every non-node host behave as
+# before. docker_config still runs on a skipped node: it only reloads dockerd.
 - name: Docker hosts
   hosts: controller:metrics:registry:nodes
   pre_tasks:
     - name: Gather installed package facts
       ansible.builtin.package_facts:
         manager: apt
+
+    - name: Probe whether this node is live
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: detect_live
+      when: "'nodes' in group_names"
+
+    - name: Decide whether docker's packages are left alone on this host
+      ansible.builtin.set_fact:
+        docker_packages_deferred: >-
+          {{ 'nodes' in group_names
+             and (node_upgrade_live | default(false) | bool)
+             and (node_upgrade_docker_drift | default(false) | bool) }}
+
+    - name: Warn that docker on this live node is not upgraded by this run
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} is a LIVE node and its docker does
+          not match the pins in versions.yml
+          ({% for p in node_upgrade_drift_list %}{{ p.name }} installed
+          {{ p.installed | default('nothing', true) }}, pinned
+          {{ p.pin | default('any', true) }}{{ '; ' if not loop.last else '' }}{% endfor %}).
+          site.yml does not upgrade docker on a live node -- doing so restarts
+          dockerd under its tenants -- so docker's packages were left alone
+          on this host. Run `make upgrade-docker ENV={{ inventory_dir | basename }}`
+          in a maintenance window.
+      when: docker_packages_deferred | bool
 
     # roles/docker_tls writes its ExecStart drop-in in a LATER play (it needs
     # Vault). A drop-in left from a previous converge pins the address this
@@ -85,9 +123,15 @@
         name: "{{ item | regex_replace('=.*$', '') }}"
         selection: install
       loop: "{{ docker_apt_packages }}"
-      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      when:
+        - not (docker_packages_deferred | bool)
+        - (item | regex_replace('=.*$', '')) in ansible_facts.packages
   roles:
+    # The role has no switch for "everything but the packages", so the whole
+    # role is skipped on a deferred node: docker is already installed,
+    # configured from its repo and running there.
     - role: geerlingguy.docker
+      when: not (docker_packages_deferred | bool)
       vars:
         docker_packages: "{{ docker_apt_packages }}"
         docker_packages_state: present
@@ -105,7 +149,9 @@
         name: "{{ item | regex_replace('=.*$', '') }}"
         selection: hold
       loop: "{{ docker_apt_packages }}"
-      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      when:
+        - not (docker_packages_deferred | bool)
+        - (item | regex_replace('=.*$', '')) in ansible_facts.packages
 
 # geerlingguy.postgresql's platform values come from playbooks/vars/
 # Ubuntu-26.yml (it ships no Ubuntu-26 vars file of its own — see the header

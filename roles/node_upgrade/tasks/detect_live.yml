@@ -1,0 +1,99 @@
+---
+# THE "is this node live" probe -- the one definition, shared by this role and
+# by the guards that keep site.yml from doing this role's disruptive work
+# (upgrading docker, rebooting) outside a maintenance window:
+#
+#   - ansible.builtin.include_role:
+#       name: node_upgrade
+#       tasks_from: detect_live
+#
+# READ-ONLY and check-mode safe: every probe runs with `check_mode: false` and
+# `changed_when: false`, so a `--check` run sees the same answer a real one
+# does. Safe on a host with no docker at all (both facts are then false), and
+# self-contained: it reads nothing but `docker_apt_packages` (versions.yml)
+# and sets nothing another task file must have set first, so it can be
+# included from any play without running the rest of the role.
+#
+# Sets:
+#   node_upgrade_live          true when the docker CLI is present AND at least
+#                              one container, in ANY state, is not a `system`
+#                              one (label com.computestacks.role=system).
+#                              Also true -- conservatively -- when the CLI is
+#                              present but dockerd does not answer: a node
+#                              whose containers cannot be listed cannot be
+#                              shown to be empty, and the guards' failure mode
+#                              in that direction is a skipped step with a
+#                              warning, not a reboot under live tenants.
+#   node_upgrade_live_unknown  true in exactly that last case.
+#   node_upgrade_docker_drift  true when docker-ce is installed AND any package
+#                              in docker_apt_packages is installed at a version
+#                              other than its pin (or is not installed). False
+#                              when docker-ce is not installed: a node without
+#                              docker is not one this probe protects, it is
+#                              one site.yml has not finished building.
+#   node_upgrade_docker_installed  docker-ce is installed.
+#   node_upgrade_drift_list    [{name, pin, installed}] behind the drift flag.
+#   node_upgrade_installed     {package: version} of the installed docker
+#                              packages.
+
+- name: Check for the docker CLI
+  ansible.builtin.stat:
+    path: /usr/bin/docker
+  register: node_upgrade_detect_cli
+  check_mode: false
+
+# One dpkg-query for every pinned name. A package that is not installed
+# makes dpkg-query exit 1 and say so on stderr while still printing the
+# others, hence `failed_when: false`; the parse keeps only `installed` rows.
+- name: Read the installed docker package versions
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dpkg-query', '-W', '-f', '${Package} ${db:Status-Status} ${Version}\n']
+         + (docker_apt_packages | default([]) | map('regex_replace', '=.*$', '') | list) }}
+  register: node_upgrade_detect_dpkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# `docker container inspect` of every container, any state: the label and
+# the running flag both come from the same document the recording step
+# (tasks/record.yml) selects on. `pipefail` so a dockerd that does not answer
+# is a non-zero rc, not an empty -- and therefore "not live" -- list. A
+# container removed between `ps` and `inspect` also fails the pipeline;
+# the retries cover that race.
+- name: Inspect every container on the node
+  ansible.builtin.shell:
+    cmd: set -o pipefail; docker ps -aq --no-trunc | xargs -r docker container inspect
+    executable: /bin/bash
+  register: node_upgrade_detect_inspect
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: 2
+  delay: 3
+  until: node_upgrade_detect_inspect.rc == 0
+  when: node_upgrade_detect_cli.stat.exists
+
+- name: Decide whether the node is live and whether docker drifts from its pin
+  vars:
+    node_upgrade_detect_answered: >-
+      {{ node_upgrade_detect_cli.stat.exists and node_upgrade_detect_inspect.rc | default(1) == 0 }}
+    node_upgrade_detect_have: "{{ node_upgrade_detect_dpkg.stdout_lines | default([]) | node_upgrade_parse_dpkg }}"
+    node_upgrade_detect_drift: "{{ node_upgrade_detect_have | node_upgrade_drift(docker_apt_packages | default([])) }}"
+  ansible.builtin.set_fact:
+    node_upgrade_installed: "{{ node_upgrade_detect_have }}"
+    node_upgrade_docker_installed: "{{ 'docker-ce' in node_upgrade_detect_have }}"
+    node_upgrade_drift_list: "{{ node_upgrade_detect_drift }}"
+    node_upgrade_docker_drift: "{{ 'docker-ce' in node_upgrade_detect_have and node_upgrade_detect_drift | length > 0 }}"
+    node_upgrade_live_unknown: "{{ node_upgrade_detect_cli.stat.exists and not node_upgrade_detect_answered }}"
+    node_upgrade_live: >-
+      {{ node_upgrade_detect_cli.stat.exists
+         and (not node_upgrade_detect_answered
+              or (node_upgrade_detect_inspect.stdout | node_upgrade_parse_inspect | node_upgrade_has_tenants)) }}
+
+- name: Report the live-node probe
+  ansible.builtin.debug:
+    msg: >-
+      live={{ node_upgrade_live }}{{ ' (dockerd did not answer; assumed live)' if node_upgrade_live_unknown else '' }}
+      docker_drift={{ node_upgrade_docker_drift }}{{
+        (' (' ~ (node_upgrade_drift_list | map(attribute='name') | join(', ')) ~ ')') if node_upgrade_docker_drift else '' }}

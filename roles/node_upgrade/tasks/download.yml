@@ -1,0 +1,53 @@
+---
+# Fetch every package the package phase will install while the containers are
+# still RUNNING (R1): a mirror outage, a proxy problem or a full disk then
+# fails the run before anything is held or stopped, instead of in the middle
+# of the window with every tenant down. apt's cache dedupes, so a resumed run
+# pays only for what changed on the mirror since.
+#
+# apt-get takes the dpkg lock for the downloads too; the apt module's
+# `lock_timeout` wait comes first so unattended-upgrades holding it is a wait
+# rather than a failure, and `DPkg::Lock::Timeout` covers it re-taking the
+# lock between the two.
+
+- name: Update the apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
+
+# `--with-new-pkgs` is what `apt upgrade` does and `apt-get upgrade` does not:
+# a new kernel is a NEW package (linux-image-<version>), and without it the
+# kernel update would be kept back -- and no reboot would ever be needed.
+# The docker packages are held, so this does not touch them.
+- name: Download the pending OS updates
+  ansible.builtin.command:
+    argv:
+      - apt-get
+      - --yes
+      - --download-only
+      - -o
+      - "DPkg::Lock::Timeout={{ node_upgrade_apt_lock_timeout }}"
+      - upgrade
+      - --with-new-pkgs
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: node_upgrade_download_os
+  changed_when: "'Download complete' in node_upgrade_download_os.stdout or 'Fetched' in node_upgrade_download_os.stdout"
+  when: node_upgrade_apply_os_updates | bool
+
+# The pins are held, so naming one explicitly needs
+# --allow-change-held-packages even to download it. Only the drifting ones: a
+# package already at its pin has nothing to fetch.
+- name: Download the pinned docker packages
+  ansible.builtin.command:
+    argv: >-
+      {{ ['apt-get', '--yes', '--download-only', '--allow-change-held-packages',
+          '-o', 'DPkg::Lock::Timeout=' ~ node_upgrade_apt_lock_timeout, 'install']
+         + (node_upgrade_drift_list | selectattr('pin') | map(attribute='name')
+            | zip(node_upgrade_drift_list | selectattr('pin') | map(attribute='pin'))
+            | map('join', '=') | list) }}
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: node_upgrade_download_docker
+  changed_when: "'Fetched' in node_upgrade_download_docker.stdout"
+  when: node_upgrade_drift_list | selectattr('pin') | list | length > 0

@@ -1,0 +1,88 @@
+---
+# The package phase, with every recorded container already stopped (R1).
+#
+#   1. the OS upgrade (`apt-get upgrade --with-new-pkgs`) runs with docker's
+#      packages STILL HELD, so it can never move them;
+#   2. then, in one block: release the holds, install docker_apt_packages
+#      exactly as pinned, and re-hold them -- in `always:`, so a failed
+#      install never leaves the engine unheld for the next unattended upgrade.
+#
+# Everything was downloaded before the hold (tasks/download.yml), so this
+# phase does not depend on the mirror being reachable.
+
+- name: Check the node is still held
+  ansible.builtin.include_tasks: hold_check.yml
+  vars:
+    node_upgrade_hold_check_at: before upgrading packages
+
+- name: Apply the pending OS updates, docker held
+  ansible.builtin.apt:
+    upgrade: safe
+    force_apt_get: true
+    lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: node_upgrade_apply_os_updates | bool
+
+- name: Install the pinned docker packages
+  block:
+    - name: Release the docker apt holds
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: install
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in node_upgrade_installed
+      # dpkg --set-selections takes the dpkg lock without waiting, and
+      # unattended-upgrades may hold it; retry rather than fail mid-window.
+      register: node_upgrade_unhold
+      until: node_upgrade_unhold is succeeded
+      retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+      delay: 10
+
+    # Exactly the pins. No downgrade: preflight already refused a pin below
+    # what is installed, so apt refusing one here means the node changed
+    # under the run.
+    - name: Install docker_apt_packages as pinned
+      ansible.builtin.apt:
+        name: "{{ docker_apt_packages }}"
+        state: present
+        allow_downgrade: false
+        lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+  always:
+    - name: Re-read the installed packages
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Hold the docker packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item | regex_replace('=.*$', '') }}"
+        selection: hold
+      loop: "{{ docker_apt_packages }}"
+      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      register: node_upgrade_rehold
+      until: node_upgrade_rehold is succeeded
+      retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+      delay: 10
+
+- name: Re-read the installed docker versions
+  ansible.builtin.include_tasks: detect_live.yml
+
+- name: Gate - docker must now match its pins
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_drift_list | length == 0
+    fail_msg: >-
+      After the install, {{ inventory_hostname }} still differs from docker_apt_packages:
+      {% for d in node_upgrade_drift_list %}{{ d.name }} {{ d.installed | default('absent', true) }}
+      (pin {{ d.pin }}); {% endfor %}
+      The node IS HELD with its recorded containers stopped. Fix the package state
+      by hand (`apt-cache policy <package>`), then re-run this playbook for the node
+      to resume. Do NOT run `cs-agent maintenance off`.
+    quiet: true
+
+- name: Mark the packages done
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: packages

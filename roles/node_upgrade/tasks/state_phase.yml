@@ -1,0 +1,23 @@
+---
+# Mark `node_upgrade_phase` done and persist the state file.
+#
+# Input: node_upgrade_phase (one of held, recorded, stopped, packages,
+# rebooted, started, released) and, optionally, node_upgrade_state_update (a
+# dict merged into the state first).
+#
+# The file is rewritten whole each time. It is small, and a phase is only
+# marked once its work is verified, so the worst an interruption between the
+# work and this write costs is redoing an idempotent step.
+
+- name: Mark the phase done - {{ node_upgrade_phase }}
+  ansible.builtin.set_fact:
+    node_upgrade_state: >-
+      {{ node_upgrade_state
+         | combine(node_upgrade_state_update | default({}))
+         | combine({'phase': node_upgrade_phase,
+                    'phases_done': ((node_upgrade_state.phases_done | default([])) + [node_upgrade_phase]) | unique,
+                    'updated_at': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}) }}
+    node_upgrade_phases_done: "{{ ((node_upgrade_state.phases_done | default([])) + [node_upgrade_phase]) | unique }}"
+
+- name: Write the upgrade state
+  ansible.builtin.include_tasks: state_save.yml

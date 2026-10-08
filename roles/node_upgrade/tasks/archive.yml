@@ -1,0 +1,33 @@
+---
+# Close the run: state.json becomes state.done.<UTC timestamp>.json (so the
+# next run on this node starts fresh), and only the newest
+# node_upgrade_state_keep of those are kept. The timestamp sorts
+# lexicographically in time order, so "newest" is simply the last by name.
+
+- name: Archive the upgrade state
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --
+      - "{{ node_upgrade_state_file }}"
+      - "{{ node_upgrade_state_dir }}/state.done.{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}.json"
+    removes: "{{ node_upgrade_state_file }}"
+
+- name: Find the archived upgrade states
+  ansible.builtin.find:
+    paths: "{{ node_upgrade_state_dir }}"
+    patterns: "state.done.*.json"
+  register: node_upgrade_done_files
+
+- name: Remove all but the newest archived states
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (node_upgrade_done_files.files | map(attribute='path') | sort | reverse | list)[node_upgrade_state_keep | int :] }}
+
+- name: Remove the stop/start request files
+  ansible.builtin.file:
+    path: "{{ node_upgrade_state_dir }}/{{ item }}"
+    state: absent
+  loop: [stop.json, start.json]

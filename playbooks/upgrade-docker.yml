@@ -1,0 +1,75 @@
+---
+# Rolling docker upgrade of the NODES, one at a time, inside a scheduled
+# customer maintenance window. Never unattended.
+#
+#   make upgrade-docker ENV=<env>        (after bumping docker_apt_packages)
+#   ansible-playbook -i inventories/<env> playbooks/upgrade-docker.yml --ask-vault-pass
+#
+# Per node (roles/node_upgrade/README.md has the full account): hold the node
+# through `cs-agent maintenance on --wait`, record the running tenant
+# containers, stop them, upgrade the OS with docker held and then docker to
+# its pins, reboot if required, start exactly what was running, release the
+# hold, wait for the controller to confirm -- then run roles/validate against
+# that node before the next one starts.
+#
+# The FIRST FAILURE STOPS THE WHOLE RUN (`any_errors_fatal`,
+# `max_fail_percentage: 0`) and leaves that node as the failure message
+# describes. A node part-way through keeps its state in
+# /var/lib/computestacks/upgrade/state.json, and re-running resumes it.
+#
+# Scope: `nodes` only, and never an `existing_env` (v1-built) host -- those
+# are left out of the targets, not failed on. The controller, metrics and
+# registry docker hosts are not upgraded by this playbook.
+#
+# Unlike add-region.yml, `--limit` is meaningful and safe here: every play
+# targets nodes alone, and each node's upgrade is self-contained. `--limit
+# <node>` is how a single failed node is resumed. `--check` runs the
+# preflight and reports what each node would get, changing nothing.
+#
+# Requires cs-agent >= 3.4.0 on every node (checked, never installed) and a
+# controller >= 9.8.0 (one that confirms agent holds).
+
+- name: Select the nodes this playbook upgrades
+  hosts: nodes
+  gather_facts: false
+  tasks:
+    # group_by rather than an assert: an existing_env node is simply not this
+    # playbook's business. A host that says `existing_env: false` explicitly
+    # is a new one, as everywhere else in the repo.
+    - name: Group the provisioner-built nodes
+      ansible.builtin.group_by:
+        key: node_upgrade_targets
+      when: not (existing_env | default(false) | bool)
+      changed_when: false
+
+# Every targeted node, in parallel, before any of them is touched: an agent
+# too old across the fleet, a pin missing from the mirror or a downgrade in
+# versions.yml fails here rather than after the first node has been taken
+# down and brought back.
+- name: Preflight every targeted node
+  hosts: node_upgrade_targets
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  tasks:
+    - name: Preflight checks
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: preflight
+
+# One node at a time, upgrade then validate, before the next node starts. The
+# validate checks for a node run on (or are delegated from the controller to)
+# that node alone -- the same scoping add-region.yml relies on for its new
+# node -- so nothing fleet-wide is re-asserted per node.
+- name: Upgrade docker, one node at a time
+  hosts: node_upgrade_targets
+  serial: 1
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  tasks:
+    - name: Upgrade the node
+      ansible.builtin.include_role:
+        name: node_upgrade
+
+    - name: Validate the node
+      ansible.builtin.include_role:
+        name: validate

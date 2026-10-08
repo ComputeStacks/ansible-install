@@ -7,11 +7,51 @@
 #
 # NEVER fires on existing_env hosts: attach mode must never reboot a live
 # v1 controller/metrics/backup host.
+#
+# NEVER fires on a LIVE node either (one carrying tenant containers, per
+# roles/node_upgrade's detect_live -- the one probe definition). Tenant
+# containers have no restart policy, so a reboot leaves them down until the
+# controller notices. A live node's pending reboot is taken in a maintenance
+# window by `make upgrade-docker ENV=<env>` (playbooks/upgrade-docker.yml),
+# which reboots when /var/run/reboot-required exists. A node that is not live
+# yet (a first build) and every non-node host reboot exactly as before.
 
 - name: Check whether a reboot is required
   ansible.builtin.stat:
     path: /var/run/reboot-required
   register: common_reboot_required_stat
+
+# Probed only when a reboot would otherwise happen, so a host with nothing
+# pending pays nothing.
+- name: Probe whether this node is live
+  ansible.builtin.include_role:
+    name: node_upgrade
+    tasks_from: detect_live
+  when:
+    - common_reboot_required_stat.stat.exists
+    - common_allow_reboot | default(true) | bool
+    - not (existing_env | default(false))
+    - "'nodes' in group_names"
+
+- name: Decide whether this host may be rebooted
+  ansible.builtin.set_fact:
+    common_reboot_deferred: >-
+      {{ common_reboot_required_stat.stat.exists
+         and (common_allow_reboot | default(true) | bool)
+         and not (existing_env | default(false))
+         and 'nodes' in group_names
+         and (node_upgrade_live | default(false) | bool) }}
+
+- name: Warn that a reboot is pending on this live node
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: reboot pending on live node {{ inventory_hostname }}
+      (/var/run/reboot-required exists{{ ', dockerd did not answer'
+      if node_upgrade_live_unknown | default(false) else '' }}). It was NOT
+      rebooted: a reboot stops its tenant containers. Run
+      `make upgrade-docker ENV={{ inventory_dir | basename }}` in a
+      maintenance window; it takes the reboot.
+  when: common_reboot_deferred | bool
 
 - name: Reboot when required
   ansible.builtin.reboot:
@@ -20,3 +60,4 @@
     - common_reboot_required_stat.stat.exists
     - common_allow_reboot | default(true) | bool
     - not (existing_env | default(false))
+    - not (common_reboot_deferred | bool)

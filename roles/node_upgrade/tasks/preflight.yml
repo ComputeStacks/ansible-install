@@ -1,0 +1,185 @@
+---
+# Everything that can be found wrong with a node BEFORE it is touched. Nothing
+# here stops, holds or installs anything; the only write is `apt-get update`.
+#
+# playbooks/upgrade-docker.yml runs this file once for EVERY targeted node,
+# in parallel, before the serial play starts, so a fleet-wide problem (an
+# agent too old everywhere, a pin that does not exist on the mirror) fails the
+# run before the first node is held. tasks/main.yml runs it again per node,
+# immediately before acting, because hours may separate the two.
+#
+# Sets (besides what detect_live.yml and state_load.yml set):
+#   node_upgrade_cs_agent_version  the installed cs-agent version
+
+- name: Gate - never touch an attach-mode (v1) host
+  ansible.builtin.assert:
+    that:
+      - not (existing_env | default(false) | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} is flagged existing_env: it was built by v1 and this
+      role only upgrades provisioner-built nodes. playbooks/upgrade-docker.yml
+      leaves existing_env hosts out of its targets; do not include this role
+      for one by other means.
+    quiet: true
+
+# Seconds, not a duration: the async budget for the hold is computed from
+# them, so `2h` would silently become 0 there.
+- name: Gate - the maintenance timeout and settle are whole seconds
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_maintenance_timeout | string is match('^[0-9]+$')
+      - node_upgrade_maintenance_settle | string is match('^[0-9]+$')
+      - node_upgrade_maintenance_timeout | int >= 300
+    fail_msg: >-
+      node_upgrade_maintenance_timeout ({{ node_upgrade_maintenance_timeout }}) and
+      node_upgrade_maintenance_settle ({{ node_upgrade_maintenance_settle }}) must
+      be whole seconds (e.g. 7200, not 2h), and the timeout at least 300: the
+      controller acknowledges the hold on a 15s poll.
+    quiet: true
+
+- name: Probe the node
+  ansible.builtin.include_tasks: detect_live.yml
+
+- name: Load any unfinished upgrade
+  ansible.builtin.include_tasks: state_load.yml
+
+- name: Gate - docker must be installed
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_docker_installed | bool
+    fail_msg: >-
+      docker-ce is not installed on {{ inventory_hostname }}. This playbook upgrades
+      docker on nodes site.yml has already built; it does not install it. Finish
+      building the node with site.yml first. Nothing on the node was changed.
+    quiet: true
+
+# --- cs-agent ---------------------------------------------------------------
+# `cs-agent maintenance` is the only way this role holds a node, and it first
+# shipped in 3.4.0. dpkg's own comparison, not ansible's `version` test:
+# Debian versions carry epochs and `~` pre-release markers that a loose
+# comparison orders wrongly (3.4.0~rc1 must sort BEFORE 3.4.0).
+- name: Read the installed cs-agent version
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, -f, "${db:Status-Status} ${Version}", cs-agent]
+  register: node_upgrade_cs_agent_dpkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Note the cs-agent version
+  ansible.builtin.set_fact:
+    node_upgrade_cs_agent_version: >-
+      {{ (node_upgrade_cs_agent_dpkg.stdout.split() | last)
+         if (node_upgrade_cs_agent_dpkg.rc == 0 and node_upgrade_cs_agent_dpkg.stdout.startswith('installed '))
+         else '' }}
+
+- name: Compare the cs-agent version with the minimum
+  ansible.builtin.command:
+    argv: [dpkg, --compare-versions, "{{ node_upgrade_cs_agent_version }}", ge, "{{ node_upgrade_cs_agent_min_version }}"]
+  register: node_upgrade_cs_agent_cmp
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: node_upgrade_cs_agent_version | length > 0
+
+- name: Gate - cs-agent must support maintenance holds
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_cs_agent_version | length > 0
+      - node_upgrade_cs_agent_cmp.rc | default(1) == 0
+    fail_msg: >-
+      cs-agent on {{ inventory_hostname }} is
+      {{ node_upgrade_cs_agent_version if node_upgrade_cs_agent_version | length > 0 else 'not installed' }};
+      this playbook needs >= {{ node_upgrade_cs_agent_min_version }} (`cs-agent maintenance`).
+      Upgrade the agent BEFORE the maintenance window -- installing it restarts
+      the agent, and this playbook never does that. Nothing on the node was changed.
+    quiet: true
+
+# Proves the CLI runs and control.db is readable before anything depends on
+# it. Read-only: `status` never blocks and never writes.
+- name: Read the maintenance status
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, status, --json]
+  register: node_upgrade_preflight_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Gate - the maintenance status must be readable
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_preflight_status.rc == 0
+      - (node_upgrade_preflight_status.stdout | node_upgrade_cli_json).shape == 'status'
+    fail_msg: >-
+      `cs-agent maintenance status --json` on {{ inventory_hostname }} did not return a
+      status (rc {{ node_upgrade_preflight_status.rc }}):
+      {{ (node_upgrade_preflight_status.stdout | node_upgrade_cli_json).doc.error
+         | default(node_upgrade_preflight_status.stderr | default('') | trim) }}.
+      The upgrade cannot hold this node without it. Fix the agent first; nothing
+      on the node was changed.
+    quiet: true
+
+# --- packages ---------------------------------------------------------------
+# Only while the package phase is still ahead: once it is done, the pins are
+# installed, and a resumed run must not fail on a mirror it no longer needs.
+- name: Check the docker pins against the mirror and the installed versions
+  when:
+    - "'packages' not in node_upgrade_phases_done"
+    - node_upgrade_drift_list | length > 0
+  block:
+    # The apt module waits for the dpkg lock (`lock_timeout`): unattended-
+    # upgrades runs on every node and can hold it for minutes.
+    - name: Update the apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
+
+    - name: Check every drifting pin exists on the mirror
+      ansible.builtin.command:
+        argv: [apt-cache, show, "{{ item.name }}={{ item.pin }}"]
+      loop: "{{ node_upgrade_drift_list | selectattr('pin') | list }}"
+      loop_control:
+        label: "{{ item.name }}={{ item.pin }}"
+      register: node_upgrade_pin_show
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Gate - every pin must be installable
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_pin_show.results | rejectattr('rc', 'equalto', 0) | list | length == 0
+        fail_msg: >-
+          These docker pins (versions.yml `docker_apt_packages`) are not available to apt
+          on {{ inventory_hostname }}:
+          {{ node_upgrade_pin_show.results | rejectattr('rc', 'equalto', 0) | map(attribute='item')
+             | map(attribute='name') | join(', ') }}.
+          Check the version strings against the docker apt repository. Nothing on the
+          node was changed.
+        quiet: true
+
+    # A pin LOWER than what is installed is a downgrade, and this role never
+    # downgrades: apt would refuse halfway through the package phase, with
+    # every container already stopped.
+    - name: Compare every drifting pin with its installed version
+      ansible.builtin.command:
+        argv: [dpkg, --compare-versions, "{{ item.installed }}", le, "{{ item.pin }}"]
+      loop: "{{ node_upgrade_drift_list | selectattr('pin') | selectattr('installed') | list }}"
+      loop_control:
+        label: "{{ item.name }}: {{ item.installed }} -> {{ item.pin }}"
+      register: node_upgrade_pin_cmp
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Gate - no pin may be a downgrade
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_pin_cmp.results | rejectattr('rc', 'equalto', 0) | list | length == 0
+        fail_msg: >-
+          These docker pins are LOWER than what {{ inventory_hostname }} has installed:
+          {% for r in node_upgrade_pin_cmp.results | rejectattr('rc', 'equalto', 0) %}{{ r.item.name }}
+          {{ r.item.installed }} > pin {{ r.item.pin }}; {% endfor %}
+          This playbook never downgrades docker. Correct `docker_apt_packages` in
+          versions.yml. Nothing on the node was changed.
+        quiet: true

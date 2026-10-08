@@ -1,0 +1,33 @@
+---
+# Record which containers are running, BEFORE anything is stopped: this list,
+# in state.json, is what the start phase brings back -- exactly these, and
+# nothing that was already stopped on purpose. Written once; a resumed run
+# reads it back and never re-records (by then some of them are stopped).
+
+- name: Inspect every container
+  ansible.builtin.shell:
+    cmd: set -o pipefail; docker ps -aq --no-trunc | xargs -r docker container inspect
+    executable: /bin/bash
+  register: node_upgrade_record_inspect
+  changed_when: false
+  retries: 2
+  delay: 3
+  until: node_upgrade_record_inspect.rc == 0
+
+- name: Apply the selection rule
+  ansible.builtin.include_tasks: select.yml
+  vars:
+    node_upgrade_inspect_stdout: "{{ node_upgrade_record_inspect.stdout }}"
+
+- name: Record the running containers in the upgrade state
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: recorded
+    node_upgrade_state_update:
+      recorded: "{{ node_upgrade_selected }}"
+
+- name: Report what was recorded
+  ansible.builtin.debug:
+    msg: >-
+      Recorded {{ node_upgrade_selected | length }} running container(s) to stop and bring back:
+      {{ node_upgrade_selected | map(attribute='name') | join(', ') | default('none', true) }}
