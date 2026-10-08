@@ -7,6 +7,7 @@
 #   make deps
 #   make site ENV=prod
 #   make add-region ENV=prod
+#   make upgrade-docker ENV=prod
 #   make validate ENV=prod
 #   make lint check
 #
@@ -63,19 +64,22 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region validate add-region-validate lint check
+.PHONY: help deps site add-region upgrade-docker validate add-region-validate lint check
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
 	@echo "site ENV=<name>                   greenfield converge (playbooks/site.yml)"
 	@echo "add-region ENV=<name>             attach a region to an existing environment"
+	@echo "upgrade-docker ENV=<name>         roll docker to its pins on the nodes, one at a"
+	@echo "                                  time, in a maintenance window (LIMIT=<node> resumes one)"
 	@echo "validate ENV=<name>               re-run the post-install checks only"
 	@echo "add-region-validate ENV=<name>    the same, for an attached region (add-region.yml)"
 	@echo "lint                              ansible-lint, production profile"
 	@echo "check                             syntax-check the playbooks and the role harness, then"
 	@echo "                                  parse both inventories and render the site contract"
 	@echo "                                  and the bootstrap manifest against each, and prove"
-	@echo "                                  the powerdns load balancer record plan"
+	@echo "                                  the powerdns load balancer record plan and the"
+	@echo "                                  node upgrade selection rules"
 	@echo ""
 	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honoured."
 	@echo ""
@@ -100,6 +104,15 @@ add-region:
 	$(require_env)
 	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/add-region.yml
 
+# The rolling docker upgrade of the NODES (playbooks/upgrade-docker.yml,
+# roles/node_upgrade/README.md): one node at a time, inside a scheduled
+# maintenance window, never unattended. Unlike add-region, LIMIT is safe and
+# meaningful here -- every play targets nodes alone -- and `LIMIT=<node>` is
+# how a node whose run failed part-way is resumed.
+upgrade-docker:
+	$(require_env)
+	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/upgrade-docker.yml
+
 # Every check in roles/validate carries the `validate` tag (plus its own
 # name), so this runs the assertions without re-running the converge.
 # `make validate ENV=prod ARGS='--skip-tags borg'` narrows it further.
@@ -118,7 +131,7 @@ add-region-validate:
 lint:
 	$(ANSIBLE_LINT)
 
-# Parses both playbooks and the per-role harness against the example
+# Parses the playbooks and the per-role harness against the example
 # inventory, then both shipped inventories -- no ENV, no connection, and no
 # secrets beyond the unencrypted CHANGEME samples those two inventories ship
 # (docs/contracts.md rule 6). tests/manifest_render.yml PRINTS the manifest it
@@ -134,6 +147,7 @@ lint:
 check:
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/site.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/add-region.yml
+	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/upgrade-docker.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example tests/roles.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i tests/fixtures/single-site playbooks/site.yml
 	@$(ANSIBLE_INVENTORY) -i inventories/example --graph | grep -q '@region_' || { \
@@ -147,6 +161,8 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
-	@echo "       load balancer record plan follows the ownership rules"
+	@echo "       load balancer record plan follows the ownership rules,"
+	@echo "       node upgrade container selection and cs-agent result classification hold"

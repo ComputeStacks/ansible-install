@@ -44,6 +44,16 @@ hosts and backup hosts; unset everywhere means the single site called
 3. **Convergent roles.** No `when: service is not defined` install guards.
    A version bump in versions.yml must roll the change on rerun. Handlers
    restart services on config change.
+   *Amended (upgrade-docker.yml):* one exception, on **live nodes** only
+   (a node with tenant containers, per `roles/node_upgrade`
+   `tasks_from: detect_live`). A `docker_apt_packages` bump does NOT roll
+   there on a re-run of site.yml/add-region.yml — those skip docker's
+   packages on that node and warn — and a pending reboot is not taken there
+   either. Both roll through `make upgrade-docker ENV=<env>`
+   (`playbooks/upgrade-docker.yml`) in a maintenance window, because
+   restarting dockerd or rebooting stops tenant containers that have no
+   restart policy. A node that is not live, and every other host, still
+   converges on re-run.
 4. **Every version pinned** in `playbooks/group_vars/all/versions.yml`. No
    `latest`, `stable`, `main` tags. Items marked VERIFY are the owning wave's
    DoD.

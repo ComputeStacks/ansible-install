@@ -45,5 +45,7 @@ common_conflicting_packages:
 # pulled in by package install removed the running kernel's /lib/modules,
 # which then breaks dockerd's modprobe of br_netfilter/nf_nat/etc — see
 # README.md "Deviations from v1"). Set false to disable entirely; either way
-# this NEVER fires on existing_env hosts.
+# this NEVER fires on existing_env hosts, nor on a LIVE node (one with tenant
+# containers -- roles/node_upgrade detect_live), which only warns: its reboot
+# is taken by `make upgrade-docker` in a maintenance window.
 common_allow_reboot: true

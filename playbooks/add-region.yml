@@ -148,12 +148,45 @@
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
 
+# The same docker play as site.yml's, and the same live-node rule: a node that
+# already carries tenant containers (roles/node_upgrade detect_live) -- a
+# re-run after the region went into service -- never has docker upgraded
+# here. When its docker drifts from the pins, the hold release,
+# geerlingguy.docker and the re-hold are skipped for that node with a warning,
+# and the pin rolls out through `make upgrade-docker ENV=<env>` in a
+# maintenance window (contracts rule 3). A new, empty node installs exactly
+# as before.
 - name: New node docker
   hosts: nodes
   pre_tasks:
     - name: Gather installed package facts
       ansible.builtin.package_facts:
         manager: apt
+
+    - name: Probe whether this node is live
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: detect_live
+
+    - name: Decide whether docker's packages are left alone on this node
+      ansible.builtin.set_fact:
+        docker_packages_deferred: >-
+          {{ (node_upgrade_live | default(false) | bool)
+             and (node_upgrade_docker_drift | default(false) | bool) }}
+
+    - name: Warn that docker on this live node is not upgraded by this run
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} is a LIVE node and its docker does
+          not match the pins in versions.yml
+          ({% for p in node_upgrade_drift_list %}{{ p.name }} installed
+          {{ p.installed | default('nothing', true) }}, pinned
+          {{ p.pin | default('any', true) }}{{ '; ' if not loop.last else '' }}{% endfor %}).
+          add-region.yml does not upgrade docker on a live node -- doing so
+          restarts dockerd under its tenants -- so docker's packages were left
+          alone on this host. Run `make upgrade-docker ENV={{ inventory_dir | basename }}`
+          in a maintenance window.
+      when: docker_packages_deferred | bool
 
     # roles/docker_tls writes its ExecStart drop-in in a LATER play (it needs
     # Vault). A drop-in left from a previous converge pins the address this
@@ -169,9 +202,12 @@
         name: "{{ item | regex_replace('=.*$', '') }}"
         selection: install
       loop: "{{ docker_apt_packages }}"
-      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      when:
+        - not (docker_packages_deferred | bool)
+        - (item | regex_replace('=.*$', '')) in ansible_facts.packages
   roles:
     - role: geerlingguy.docker
+      when: not (docker_packages_deferred | bool)
       vars:
         docker_packages: "{{ docker_apt_packages }}"
         docker_packages_state: present
@@ -189,7 +225,9 @@
         name: "{{ item | regex_replace('=.*$', '') }}"
         selection: hold
       loop: "{{ docker_apt_packages }}"
-      when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      when:
+        - not (docker_packages_deferred | bool)
+        - (item | regex_replace('=.*$', '')) in ansible_facts.packages
 
 # The whole role, not `tasks_from: issue`. Its main.yml routes through
 # issue.yml, which is the piece that reaches the EXISTING controller: it

@@ -1,5 +1,23 @@
 # Changelog
 
+## October 7, 2026
+
+* **`make upgrade-docker ENV=<env>` upgrades docker on the nodes** —
+  `playbooks/upgrade-docker.yml`, run in a scheduled maintenance window after
+  bumping `docker_apt_packages`. One node at a time: hold it with
+  `cs-agent maintenance on`, stop the running tenant containers, upgrade
+  docker and the pending OS updates, reboot when one is required, start
+  exactly what was running, release the hold. The first failure stops the
+  run; re-running resumes (`LIMIT=<node>` for one node). Requires cs-agent
+  >= 3.4.0 and controller >= 9.8.0. See `roles/node_upgrade/README.md`.
+* **`site.yml` and `add-region.yml` no longer upgrade docker or reboot a live
+  node** (one with tenant containers). A drifting docker pin or a pending
+  reboot there is skipped with a warning pointing at `make upgrade-docker`.
+  Nodes without tenants and every other host behave as before.
+  `docs/contracts.md` rule 3 is amended accordingly.
+
+***
+
 ## September 26, 2026
 
 * **With `dns_driver: powerdns`, the provisioner writes each az's load

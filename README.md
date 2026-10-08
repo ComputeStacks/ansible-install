@@ -255,6 +255,28 @@ and re-running the playbook. The roles are convergent: a changed pin
 re-renders the unit or re-installs the package and the handler restarts the
 service. Nothing floats, so nothing moves on its own.
 
+**Docker on the nodes** is the exception. Upgrading it restarts dockerd, and
+tenant containers have no restart policy, so it is done deliberately, in a
+scheduled customer maintenance window, after bumping `docker_apt_packages`:
+
+```bash
+make upgrade-docker ENV=prod                  # every node, one at a time
+make upgrade-docker ENV=prod LIMIT=node1001   # one node, or resume a failed one
+```
+
+Per node it holds the node with `cs-agent maintenance on`, stops the running
+tenant containers, upgrades docker and the pending OS updates, reboots when
+`/var/run/reboot-required` exists, starts exactly what was running and
+releases the hold. The first failure stops the run, and re-running resumes.
+It needs cs-agent >= 3.4.0 on every node and controller >= 9.8.0.
+`roles/node_upgrade/README.md` has the flow and every failure's fix.
+
+`site.yml` and `add-region.yml` no longer do either on a **live** node (one
+with tenant containers): a docker pin that differs from what is installed
+there, or a pending reboot, is left alone with a warning that points at
+`make upgrade-docker`. A node that is not live yet installs and reboots as
+before.
+
 Two pins move together and are marked as such in `versions.yml`:
 `borg_version` (the server binary) with `borg_image` (the client container),
 and `loki_image` with `fluentd_loki_image`.

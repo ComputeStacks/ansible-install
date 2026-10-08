@@ -68,6 +68,7 @@
     - haproxy
     - node_observability
     - cs_agent
+    - node_upgrade              # playbooks/upgrade-docker.yml, not site.yml
 
 - name: Metrics host — prometheus, alertmanager, loki
   hosts: metrics
@@ -160,3 +161,31 @@
       ansible.builtin.include_role:
         name: powerdns
         tasks_from: lb_records_plan
+
+# The node_upgrade entry points. `detect_live` is the live-node probe that
+# site.yml's and add-region.yml's docker plays and roles/common's reboot step
+# include; `preflight` is upgrade-docker.yml's fleet-wide first pass; `select`
+# and `classify_on` are the pure rules tests/node_upgrade_select.yml drives.
+- name: Node upgrade task-file entry points
+  hosts: nodes
+  gather_facts: false
+  tasks:
+    - name: Probe whether the node is live
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: detect_live
+
+    - name: Run the upgrade preflight
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: preflight
+
+    - name: Select the containers to record
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: select
+
+    - name: Classify a cs-agent maintenance on result
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on

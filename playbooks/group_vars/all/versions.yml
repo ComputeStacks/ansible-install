@@ -101,7 +101,11 @@ nginx_image: "nginx:1.30.4"
 # HELD by playbooks/site.yml, so an unattended apt upgrade can never restart
 # every container on a node under a live region (v1 did the same with
 # `apt-mark hold`). The hold is released before each install, so editing this
-# list still rolls through on a rerun (contracts rule 3).
+# list rolls through on a rerun of site.yml (contracts rule 3) -- EXCEPT on a
+# LIVE node (one with tenant containers), where site.yml and add-region.yml
+# leave docker alone and warn. Those roll out one node at a time with
+# `make upgrade-docker ENV=<env>` in a maintenance window
+# (playbooks/upgrade-docker.yml, roles/node_upgrade/README.md).
 #
 # Verified 2026-08-28 (wave 4J), against
 # download.docker.com/linux/ubuntu/dists/: Docker DOES publish a `resolute`
