@@ -22,6 +22,21 @@
       for one by other means.
     quiet: true
 
+# Seconds, not a duration: the async budget for the hold is computed from
+# them, so `2h` would silently become 0 there.
+- name: Gate - the maintenance timeout and settle are whole seconds
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_maintenance_timeout | string is match('^[0-9]+$')
+      - node_upgrade_maintenance_settle | string is match('^[0-9]+$')
+      - node_upgrade_maintenance_timeout | int >= 300
+    fail_msg: >-
+      node_upgrade_maintenance_timeout ({{ node_upgrade_maintenance_timeout }}) and
+      node_upgrade_maintenance_settle ({{ node_upgrade_maintenance_settle }}) must
+      be whole seconds (e.g. 7200, not 2h), and the timeout at least 300: the
+      controller acknowledges the hold on a 15s poll.
+    quiet: true
+
 - name: Probe the node
   ansible.builtin.include_tasks: detect_live.yml
 

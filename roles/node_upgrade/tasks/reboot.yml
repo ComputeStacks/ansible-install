@@ -10,6 +10,12 @@
     path: /var/run/reboot-required
   register: node_upgrade_reboot_required
 
+- name: Check the node is still held before rebooting
+  ansible.builtin.include_tasks: hold_check.yml
+  vars:
+    node_upgrade_hold_check_at: before rebooting
+  when: node_upgrade_reboot_required.stat.exists
+
 # The hold persists across the reboot (control.db). Tenant containers have no
 # docker restart policy, so they come back down; the start phase brings them
 # up.

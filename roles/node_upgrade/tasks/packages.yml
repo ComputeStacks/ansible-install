@@ -32,6 +32,12 @@
         selection: install
       loop: "{{ docker_apt_packages }}"
       when: (item | regex_replace('=.*$', '')) in node_upgrade_installed
+      # dpkg --set-selections takes the dpkg lock without waiting, and
+      # unattended-upgrades may hold it; retry rather than fail mid-window.
+      register: node_upgrade_unhold
+      until: node_upgrade_unhold is succeeded
+      retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+      delay: 10
 
     # Exactly the pins. No downgrade: preflight already refused a pin below
     # what is installed, so apt refusing one here means the node changed
@@ -55,6 +61,10 @@
         selection: hold
       loop: "{{ docker_apt_packages }}"
       when: (item | regex_replace('=.*$', '')) in ansible_facts.packages
+      register: node_upgrade_rehold
+      until: node_upgrade_rehold is succeeded
+      retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+      delay: 10
 
 - name: Re-read the installed docker versions
   ansible.builtin.include_tasks: detect_live.yml

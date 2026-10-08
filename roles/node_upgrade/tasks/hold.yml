@@ -88,6 +88,22 @@
           `cs-agent maintenance off` on the node and re-run.
         quiet: true
 
+    # A controller-side hold (admin UI / API) cannot be released from here, so
+    # the release step would wait for `paused` to clear forever -- after a full
+    # stop/upgrade/reboot/start of this node. Refuse before anything happens.
+    - name: Gate - the controller must not already hold the node
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_hold_status_doc.doc.controller is none
+        fail_msg: >-
+          {{ inventory_hostname }} is already in maintenance on the controller
+          ({{ node_upgrade_hold_status_doc.doc.controller.reason | default('no reason given', true) }}).
+          This playbook takes and releases its own hold on the node; it cannot
+          release a controller-side one, so the run would stop after upgrading
+          this node with it still paused. Take the node out of maintenance in the
+          admin UI, then re-run. Nothing has been changed on the node.
+        quiet: true
+
     - name: Ask docker whether it answers
       ansible.builtin.command:
         argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
