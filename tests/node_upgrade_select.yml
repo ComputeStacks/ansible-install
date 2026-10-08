@@ -1,0 +1,487 @@
+---
+# Does roles/node_upgrade pick the right containers, and read every
+# `cs-agent maintenance on` exit the right way? -- the two rules the rolling
+# docker upgrade's safety rests on, proven without a node.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
+#
+# Both rules are pure: tasks/select.yml and tasks/classify_on.yml run no
+# command, they apply the role's filter plugin (filter_plugins/node_upgrade.py)
+# to what a node printed. This feeds them canned copies of that output from
+# tests/fixtures/node_upgrade/ and asserts the answers. The role files are
+# included for real (`include_role ... tasks_from`), so the filter plugin and
+# the role's templates are loaded exactly as a converge loads them.
+#
+# THE SELECTION RULE. Recorded = State.Running is true AND label
+# com.computestacks.role is not exactly `system`. inspect.json carries one
+# container per edge: a running tenant, a running system one (cadvisor), a
+# bastion, one stopped on purpose, one with NO labels at all (`"Labels":
+# null`, which a registry container started by hand looks like), a stopped
+# system one, a `System` look-alike (the match is exact, case and all), and
+# one docker reports as restarting (Running is true while it restarts).
+#
+# THE CLASSIFICATION RULE is JSON shape first, rc second, verified against
+# cs-agent's maintenance_cli.go: the same rc comes from paths that leave the
+# node in different states. The fixtures are the documents the CLI's
+# `emit`/`writeJSONError` print -- the status shape (cliOutput: the
+# maintenance Status plus controller_acked and agent_active) and the error
+# shape {"error", "exit_code"} -- with the trailing newline json.Encoder
+# writes. Covered: rc 0; rc 2 in both shapes; rc 4 with `local` null (the
+# up-front controller check placed nothing), with `local` set (placed,
+# unconfirmed) and in the error shape; rc 1 with `local` null (cleared while
+# waiting), with `local` set (interrupted, hold kept) and in the error shape
+# (usage); rc 3; no output at all; and the two contradictions (rc 0 with an
+# error document, rc 0 without a hold), neither of which may read as success.
+
+- name: Container selection, live detection and the cs-agent result classification
+  hosts: localhost
+  gather_facts: false
+  vars:
+    nut_fixtures: "{{ playbook_dir }}/fixtures/node_upgrade"
+    nut_nl: "\n"
+    nut_unexpected: '{"unexpected": true}'
+  tasks:
+    # ======================================================================
+    # Selection: tasks/select.yml
+    # ======================================================================
+    - name: "Case: selection over every container shape"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: select
+      vars:
+        node_upgrade_inspect_stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/inspect.json') }}"
+
+    - name: "Assert: exactly the running non-system containers, by id and name, in order"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_selected | map(attribute='name') | list ==
+            ['web-app-1', 'sftp-bastion-7', 'unlabeled', 'role-system-lookalike', 'restarting-app']
+          - node_upgrade_selected[0].id == '1' * 64
+          - node_upgrade_selected | map(attribute='id') | map('length') | unique | list == [64]
+          # never a system container, never a stopped one
+          - "'cadvisor' not in node_upgrade_selected | map(attribute='name')"
+          - "'fluentd' not in node_upgrade_selected | map(attribute='name')"
+          - "'stopped-on-purpose' not in node_upgrade_selected | map(attribute='name')"
+          # docker's leading slash is gone
+          - node_upgrade_selected | map(attribute='name') | select('match', '/') | list == []
+        fail_msg: "{{ node_upgrade_selected | to_json }}"
+        quiet: true
+
+    - name: "Case: no containers at all (empty inspect output)"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: select
+      vars:
+        node_upgrade_inspect_stdout: ""
+
+    - name: "Assert: nothing to record"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_selected == []
+        fail_msg: "{{ node_upgrade_selected | to_json }}"
+        quiet: true
+
+    - name: "Case: system containers only"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: select
+      vars:
+        node_upgrade_inspect_stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/inspect_system_only.json') }}"
+
+    - name: "Assert: system containers are never recorded"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_selected == []
+        fail_msg: "{{ node_upgrade_selected | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # Live detection (the rule tasks/detect_live.yml applies): ANY container,
+    # in any state, that is not `system`.
+    # ======================================================================
+    - name: "Assert: live-node rule"
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.file', nut_fixtures ~ '/inspect.json') | node_upgrade_parse_inspect | node_upgrade_has_tenants
+          # a stopped tenant still makes the node live
+          - lookup('ansible.builtin.file', nut_fixtures ~ '/inspect_stopped_tenant.json') | node_upgrade_parse_inspect | node_upgrade_has_tenants
+          # system containers alone do not
+          - not (lookup('ansible.builtin.file', nut_fixtures ~ '/inspect_system_only.json') | node_upgrade_parse_inspect | node_upgrade_has_tenants)
+          - not ('' | node_upgrade_parse_inspect | node_upgrade_has_tenants)
+        quiet: true
+
+    # ======================================================================
+    # Matching recorded containers after a reboot (`docker ps --format json`)
+    # ======================================================================
+    - name: "Case: resolve the recorded set against the containers after a reboot"
+      ansible.builtin.set_fact:
+        nut_resolved: >-
+          {{ lookup('ansible.builtin.file', nut_fixtures ~ '/inspect.json') | node_upgrade_parse_inspect | node_upgrade_select
+             | node_upgrade_resolve(lookup('ansible.builtin.file', nut_fixtures ~ '/ps_after_reboot.jsonl').splitlines() | node_upgrade_parse_ps) }}
+
+    - name: "Assert: by id, falling back to name; a removed container is reported, not guessed"
+      vars:
+        nut_by_name: "{{ nut_resolved | items2dict(key_name='name', value_name='current_id') }}"
+      ansible.builtin.assert:
+        that:
+          - nut_resolved | length == 5
+          # recreated under its name with a new id: matched by name
+          - nut_by_name['web-app-1'] == '9' * 64
+          - (nut_resolved | selectattr('name', 'equalto', 'web-app-1') | first).running
+          # removed: neither id nor name exists
+          - nut_by_name['sftp-bastion-7'] is none
+          - not (nut_resolved | selectattr('name', 'equalto', 'sftp-bastion-7') | first).found
+          # same id, now stopped
+          - nut_by_name['unlabeled'] == '5' * 64
+          - not (nut_resolved | selectattr('name', 'equalto', 'unlabeled') | first).running
+          - nut_resolved | selectattr('found') | rejectattr('running') | map(attribute='name') | list == ['unlabeled', 'restarting-app']
+        fail_msg: "{{ nut_resolved | to_json }}"
+        quiet: true
+
+    - name: "Assert: node_upgrade_accept_down matches by name or by (short) id"
+      vars:
+        nut_split: >-
+          {{ nut_resolved | node_upgrade_partition_accepted(
+               ' restarting-app, 555555555555 ,, nothing-by-this-name ' | node_upgrade_accept_down_list) }}
+      ansible.builtin.assert:
+        that:
+          - "' a, ,b ' | node_upgrade_accept_down_list == ['a', 'b']"
+          - "['a', ' b '] | node_upgrade_accept_down_list == ['a', 'b']"
+          - none | node_upgrade_accept_down_list == []
+          - nut_split.accepted | map(attribute='name') | list == ['unlabeled', 'restarting-app']
+          - nut_split.required | map(attribute='name') | list == ['web-app-1', 'sftp-bastion-7', 'role-system-lookalike']
+          # an id shorter than docker's 12-character short form never matches
+          - (nut_resolved | node_upgrade_partition_accepted(['5555'])).accepted == []
+        fail_msg: "{{ nut_split | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # Docker drift (the rule detect_live.yml and the decision use)
+    # ======================================================================
+    - name: "Assert: drift is any pinned package installed at another version, or absent"
+      vars:
+        nut_pins:
+          - "docker-ce=5:29.7.2-1~ubuntu.26.04~resolute"
+          - "containerd.io=2.3.4-1~ubuntu.26.04~resolute"
+          - "docker-buildx-plugin=0.36.1-1~ubuntu.26.04~resolute"
+        nut_dpkg:
+          - "docker-ce installed 5:29.7.2-1~ubuntu.26.04~resolute"
+          - "containerd.io installed 2.3.1-1~ubuntu.26.04~resolute"
+          - "docker-buildx-plugin config-files 0.30.0-1~ubuntu.26.04~resolute"
+        nut_drift: "{{ nut_dpkg | node_upgrade_parse_dpkg | node_upgrade_drift(nut_pins) }}"
+      ansible.builtin.assert:
+        that:
+          - nut_drift | map(attribute='name') | list == ['containerd.io', 'docker-buildx-plugin']
+          - nut_drift[0].installed == '2.3.1-1~ubuntu.26.04~resolute'
+          - nut_drift[0].pin == '2.3.4-1~ubuntu.26.04~resolute'
+          # config-files only is NOT installed
+          - nut_drift[1].installed is none
+          - (nut_dpkg[:1] | node_upgrade_parse_dpkg | node_upgrade_drift(nut_pins[:1])) == []
+          # an unpinned name drifts only when absent
+          - (nut_dpkg | node_upgrade_parse_dpkg | node_upgrade_drift(['docker-ce'])) == []
+        fail_msg: "{{ nut_drift | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # Reading one --json document
+    # ======================================================================
+    - name: "Assert: cli_json tells the shapes apart"
+      ansible.builtin.assert:
+        that:
+          - (lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc0_ok.json') | node_upgrade_cli_json).shape == 'status'
+          - (lookup('ansible.builtin.file', nut_fixtures ~ '/status_controller_hold.json') | node_upgrade_cli_json).doc.controller.reason == 'rack move'
+          - (lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc3_error.json') | node_upgrade_cli_json).shape == 'error'
+          - ('' | node_upgrade_cli_json).shape == 'none'
+          - ('not json' | node_upgrade_cli_json).shape == 'none'
+          - ('[1, 2]' | node_upgrade_cli_json).shape == 'none'
+          - (nut_unexpected | node_upgrade_cli_json).shape == 'none'
+        quiet: true
+
+    # ======================================================================
+    # `cs-agent maintenance on --wait --json`: tasks/classify_on.yml
+    # ======================================================================
+    # --- 1. rc 0, status shape, local set: held and quiet
+    - name: "Case: rc 0, status shape, local set: held and quiet"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 0
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc0_ok.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 0, status shape, local set: held and quiet"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'ok'
+          - node_upgrade_on_result.held is true
+          - node_upgrade_on_result.ok is true
+          - node_upgrade_on_message == ''
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 2. rc 2, status shape: timed out with work in flight, still held
+    - name: "Case: rc 2, status shape: timed out with work in flight, still held"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 2
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc2_busy.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 2, status shape: timed out with work in flight, still held"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'timeout'
+          - node_upgrade_on_result.held is true
+          - node_upgrade_on_result.ok is false
+          - node_upgrade_on_result.running | length == 2
+          - node_upgrade_on_result.quiesce == 'busy'
+          - "'IS HELD' in node_upgrade_on_message"
+          - "'borg.container vol-12 [aaaaaaaaaaaa]' in node_upgrade_on_message"
+          - "'maint.prune' in node_upgrade_on_message"
+          - "'cs-agent maintenance off' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 3. rc 2, ERROR shape: timed out and the state was unreadable -- hold unknown
+    - name: "Case: rc 2, ERROR shape: timed out and the state was unreadable -- hold unknown"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 2
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc2_error.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 2, ERROR shape: timed out and the state was unreadable -- hold unknown"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'error'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+          - node_upgrade_on_result.error is search('database is locked')
+          - "'UNKNOWN' in node_upgrade_on_message"
+          - "'database is locked' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 4. rc 4, status shape, local null: the up-front controller check, NOT placed
+    - name: "Case: rc 4, status shape, local null: the up-front controller check, NOT placed"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 4
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc4_not_placed.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 4, status shape, local null: the up-front controller check, NOT placed"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'not_placed'
+          - node_upgrade_on_result.held is false
+          - node_upgrade_on_result.ok is false
+          - "'is NOT held' in node_upgrade_on_message"
+          - "'9.8.0' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 5. rc 4, status shape, local set: placed but the controller never confirmed
+    - name: "Case: rc 4, status shape, local set: placed but the controller never confirmed"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 4
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc4_unconfirmed.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 4, status shape, local set: placed but the controller never confirmed"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'unconfirmed'
+          - node_upgrade_on_result.held is true
+          - node_upgrade_on_result.ok is false
+          - "'IS HELD locally' in node_upgrade_on_message"
+          - "'cs-agent maintenance off' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 6. rc 4, ERROR shape: no status could be read -- hold unknown
+    - name: "Case: rc 4, ERROR shape: no status could be read -- hold unknown"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 4
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc4_error.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 4, ERROR shape: no status could be read -- hold unknown"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'error'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+          - "'UNKNOWN' in node_upgrade_on_message"
+          - "'cs-agent maintenance status' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 7. rc 1, status shape, local null: the hold was cleared while waiting
+    - name: "Case: rc 1, status shape, local null: the hold was cleared while waiting"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 1
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc1_cleared.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 1, status shape, local null: the hold was cleared while waiting"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'cleared'
+          - node_upgrade_on_result.held is false
+          - node_upgrade_on_result.ok is false
+          - "'is NOT held' in node_upgrade_on_message"
+          - "'cleared while cs-agent was waiting' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 8. rc 1, status shape, local set: interrupted, the hold stays
+    - name: "Case: rc 1, status shape, local set: interrupted, the hold stays"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 1
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc1_interrupted.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 1, status shape, local set: interrupted, the hold stays"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'interrupted'
+          - node_upgrade_on_result.held is true
+          - node_upgrade_on_result.ok is false
+          - "'IS HELD' in node_upgrade_on_message"
+          - "'interrupted' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 9. rc 1, ERROR shape: usage error
+    - name: "Case: rc 1, ERROR shape: usage error"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 1
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc1_usage.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 1, ERROR shape: usage error"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'error'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+          - node_upgrade_on_result.error == '--timeout is required with --wait'
+          - "'--timeout is required with --wait' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 10. rc 3, ERROR shape: control.db unavailable
+    - name: "Case: rc 3, ERROR shape: control.db unavailable"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 3
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc3_error.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 3, ERROR shape: control.db unavailable"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'error'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+          - "'control.db' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 11. rc 0 with an ERROR shape: shape wins over rc
+    - name: "Case: rc 0 with an ERROR shape: shape wins over rc"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 0
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc3_error.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 0 with an ERROR shape: shape wins over rc"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'error'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 12. rc 0, status shape WITHOUT a local hold: never success
+    - name: "Case: rc 0, status shape WITHOUT a local hold: never success"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 0
+          stdout: "{{ lookup('ansible.builtin.file', nut_fixtures ~ '/on_rc4_not_placed.json') ~ nut_nl }}"
+          stderr: "control.db: /var/lib/cs-agent/control.db"
+
+    - name: "Assert: rc 0, status shape WITHOUT a local hold: never success"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'failed'
+          - node_upgrade_on_result.held is false
+          - node_upgrade_on_result.ok is false
+          - "'is NOT held' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true
+
+    # --- 13. no JSON at all (binary missing, a CLI that does not know --json)
+    - name: "Case: no output"
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: classify_on
+      vars:
+        node_upgrade_on:
+          rc: 127
+          stdout: ""
+          stderr: "cs-agent: command not found"
+
+    - name: "Assert: no output is never success, and the hold is unknown"
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_on_result.outcome == 'no_output'
+          - node_upgrade_on_result.held is none
+          - node_upgrade_on_result.ok is false
+          - "'UNKNOWN' in node_upgrade_on_message"
+          - "'command not found' in node_upgrade_on_message"
+        fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
+        quiet: true

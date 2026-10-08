@@ -1,0 +1,14 @@
+[
+  {
+    "Id": "2222222222222222222222222222222222222222222222222222222222222222",
+    "Name": "/cadvisor",
+    "State": {"Status": "running", "Running": true},
+    "Config": {"Labels": {"com.computestacks.role": "system"}}
+  },
+  {
+    "Id": "4444444444444444444444444444444444444444444444444444444444444444",
+    "Name": "/stopped-on-purpose",
+    "State": {"Status": "exited", "Running": false},
+    "Config": {"Labels": {"com.computestacks.role": "container"}}
+  }
+]

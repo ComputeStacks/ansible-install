@@ -1,0 +1,50 @@
+[
+  {
+    "Id": "1111111111111111111111111111111111111111111111111111111111111111",
+    "Name": "/web-app-1",
+    "State": {"Status": "running", "Running": true, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "example/app:1", "Labels": {"com.computestacks.role": "container", "com.computestacks.service_id": "12"}}
+  },
+  {
+    "Id": "2222222222222222222222222222222222222222222222222222222222222222",
+    "Name": "/cadvisor",
+    "State": {"Status": "running", "Running": true, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "gcr.io/cadvisor/cadvisor:v0.52.1", "Labels": {"com.computestacks.role": "system"}}
+  },
+  {
+    "Id": "3333333333333333333333333333333333333333333333333333333333333333",
+    "Name": "/sftp-bastion-7",
+    "State": {"Status": "running", "Running": true, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "ghcr.io/computestacks/cs-docker-bastion:v2", "Labels": {"com.computestacks.role": "bastion"}}
+  },
+  {
+    "Id": "4444444444444444444444444444444444444444444444444444444444444444",
+    "Name": "/stopped-on-purpose",
+    "State": {"Status": "exited", "Running": false, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "example/app:1", "Labels": {"com.computestacks.role": "container"}}
+  },
+  {
+    "Id": "5555555555555555555555555555555555555555555555555555555555555555",
+    "Name": "/unlabeled",
+    "State": {"Status": "running", "Running": true, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "registry:2", "Labels": null}
+  },
+  {
+    "Id": "6666666666666666666666666666666666666666666666666666666666666666",
+    "Name": "/fluentd",
+    "State": {"Status": "exited", "Running": false, "Paused": false, "ExitCode": 137},
+    "Config": {"Image": "fluent/fluentd:v1.19", "Labels": {"com.computestacks.role": "system"}}
+  },
+  {
+    "Id": "7777777777777777777777777777777777777777777777777777777777777777",
+    "Name": "/role-system-lookalike",
+    "State": {"Status": "running", "Running": true, "Paused": false, "ExitCode": 0},
+    "Config": {"Image": "example/app:1", "Labels": {"com.computestacks.role": "System", "system": "com.computestacks.role"}}
+  },
+  {
+    "Id": "8888888888888888888888888888888888888888888888888888888888888888",
+    "Name": "/restarting-app",
+    "State": {"Status": "restarting", "Running": true, "Restarting": true, "Paused": false, "ExitCode": 1},
+    "Config": {"Image": "example/app:1", "Labels": {"com.computestacks.role": "container"}}
+  }
+]

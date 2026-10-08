@@ -1,0 +1,49 @@
+{#- The failure message for `cs-agent maintenance on --wait` (tasks/hold.yml),
+    one per outcome of the node_upgrade_classify_on filter. Every message says
+    whether the node is held and what to do. This runs only on a FRESH run, so
+    no state file exists and nothing has been stopped -- which is the one
+    situation where suggesting `cs-agent maintenance off` is safe. -#}
+{%- set r = node_upgrade_on_result -%}
+{%- set host = inventory_hostname -%}
+{%- set err = (node_upgrade_on.stderr | default('') | trim | regex_replace('\s+', ' '))[-600:] -%}
+{%- set nothing = 'Nothing was stopped and no upgrade state was written.' -%}
+{%- if r.outcome == 'timeout' -%}
+{{ host }} IS HELD (local maintenance hold set) but did not go quiet within {{ node_upgrade_maintenance_timeout }}s
+(quiesce: {{ r.quiesce | default('?') }}). Still in flight:
+{# described as cs-agent's describeInFlight does: kind, volume, short id unless it IS the kind #}
+{% for w in r.running %}{{ w.kind }}{{ (' ' ~ w.volume) if w.volume | default('') else '' }}{{ (' [' ~ (w.id | string)[:12] ~ ']') if w.id | default('') and w.id != w.kind else '' }}{{ '; ' if not loop.last else '' }}{% endfor %}{{ 'nothing listed (docker could not list the backup containers)' if not r.running else '' }}.
+{{ nothing }} Clear the hold with `cs-agent maintenance off` on the node, then re-run once that work
+has finished (or with a longer node_upgrade_maintenance_timeout). A re-run refuses while the hold
+is still in place: this playbook never adopts a hold it did not record placing.
+{%- elif r.outcome == 'not_placed' -%}
+{{ host }} is NOT held: cs-agent placed no hold, because the controller has not polled it with
+maintenance support in the last 120s (a controller older than 9.8.0, or one that is not reaching
+this node's agent). {{ nothing }} Check the controller's version and its connection to the node,
+then re-run.
+{%- elif r.outcome == 'unconfirmed' -%}
+{{ host }} IS HELD locally and quiet, but the controller did not confirm the hold within
+{{ node_upgrade_maintenance_timeout }}s. Without that confirmation the controller may still act on
+the node (health checks, recovery, placement). {{ nothing }} Clear the hold with
+`cs-agent maintenance off` on the node, check the controller is >= 9.8.0 and polling the node, then
+re-run.
+{%- elif r.outcome == 'cleared' -%}
+{{ host }} is NOT held: the local hold was cleared while cs-agent was waiting (somebody ran
+`cs-agent maintenance off`). {{ nothing }} Find out who is working on the node before re-running.
+{%- elif r.outcome == 'interrupted' -%}
+{{ host }} IS HELD: `cs-agent maintenance on` was interrupted (SIGINT/SIGTERM) and left its hold in
+place. {{ nothing }} Clear the hold with `cs-agent maintenance off` on the node, then re-run.
+{%- elif r.outcome == 'error' -%}
+cs-agent on {{ host }} failed: {{ r.error }} (exit {{ r.rc }}). It could not read its own state, so
+whether a hold was placed is UNKNOWN. {{ nothing }} Run `cs-agent maintenance status` on the node; if
+it shows a local hold with reason `{{ node_upgrade_reason }}`, clear it with
+`cs-agent maintenance off`. Fix the agent, then re-run.
+{%- elif r.outcome == 'no_output' -%}
+`cs-agent maintenance on` on {{ host }} exited {{ r.rc }} without a JSON result{{ (': ' ~ err) if err else '' }}.
+Whether a hold was placed is UNKNOWN. {{ nothing }} Run `cs-agent maintenance status` on the node;
+if it shows a local hold with reason `{{ node_upgrade_reason }}`, clear it with
+`cs-agent maintenance off`. Then re-run.
+{%- else -%}
+`cs-agent maintenance on` on {{ host }} exited {{ r.rc }}{{ (': ' ~ err) if err else '' }}.
+The node {{ 'IS HELD (local hold set)' if r.held else 'is NOT held' }}. {{ nothing }}
+{{ 'Clear the hold with `cs-agent maintenance off` on the node, then re-run.' if r.held else 'Re-run once the cause is fixed.' }}
+{%- endif -%}

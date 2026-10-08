@@ -1,0 +1,17 @@
+---
+# List every container (any state) on the node.
+#
+# Output: node_upgrade_ps  [{id, name, running}]
+
+- name: List the containers
+  ansible.builtin.command:
+    argv: [docker, ps, -a, --no-trunc, --format, json]
+  register: node_upgrade_ps_raw
+  changed_when: false
+  retries: 5
+  delay: 6
+  until: node_upgrade_ps_raw.rc == 0
+
+- name: Parse the container list
+  ansible.builtin.set_fact:
+    node_upgrade_ps: "{{ node_upgrade_ps_raw.stdout_lines | node_upgrade_parse_ps }}"

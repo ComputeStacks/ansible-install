@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: node_upgrade
+  author: ComputeStacks
+  description: >-
+    Rolling docker upgrade of a provisioner-built node inside a maintenance
+    window: hold the node through cs-agent, record and stop the running tenant
+    containers, upgrade the pinned docker packages (and the OS), reboot if
+    required, start exactly what was running, release the hold. Resumable
+    from a per-node state file. Also provides tasks_from: detect_live, the
+    "is this node live" probe the site.yml guards share.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

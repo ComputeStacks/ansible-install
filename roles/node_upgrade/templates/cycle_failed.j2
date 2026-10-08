@@ -1,0 +1,43 @@
+{#- The re-raised failure of tasks/cycle.yml's block. `Gate - ` tasks already
+    describe the node's state and the operator's next step, so their message
+    passes through unchanged; anything else (apt, docker, ssh, a module error)
+    gets the node's state appended. Never suggests `cs-agent maintenance off`
+    once state.json exists: from then on containers may be stopped, and only
+    this playbook knows which to bring back. -#}
+{%- set task = ansible_failed_task.name | default('') -%}
+{%- set res = ansible_failed_result | default({}) -%}
+{%- set why = res.msg | default('') | string -%}
+{%- if res.results is defined -%}
+{%- set why = why ~ ' ' ~ (res.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('defined') | unique | join('; ')) -%}
+{%- endif -%}
+{%- if res.stderr | default('') -%}
+{%- set why = why ~ ' -- ' ~ (res.stderr | string | trim)[-600:] -%}
+{%- endif -%}
+{%- if task is search('Gate - ') -%}
+{{ why }}
+{%- elif not node_upgrade_rescue_state.stat.exists -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+No upgrade state was written, so no container has been stopped. Run
+`cs-agent maintenance status` on the node: if it shows a local hold with reason
+`{{ node_upgrade_reason }}` that this run placed, clear it with `cs-agent maintenance off`.
+Fix the cause, then re-run.
+{%- elif node_upgrade_state.releasing | default(false) -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+The node had already been RELEASED (`cs-agent maintenance off` ran, its containers were
+started). Re-run this playbook for the node: it resumes at the release confirmation,
+archives {{ node_upgrade_state_file }} and moves on.
+{%- else -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+NODE STATE: {{ inventory_hostname }} IS HELD in maintenance and its upgrade is part-way
+through (phases done: {{ node_upgrade_phases_done | join(', ') | default('none', true) }};
+state {{ node_upgrade_state_file }}).
+{% if 'started' in node_upgrade_phases_done %}The containers recorded there have been started again.
+{% elif 'stopped' in node_upgrade_phases_done %}The containers recorded there ARE STOPPED, and nothing
+will start them until this playbook does.
+{% elif 'recorded' in node_upgrade_phases_done %}Some of the containers recorded there may already be stopped.
+{% endif %}
+Fix the cause, then re-run `make upgrade-docker ENV=<env> LIMIT={{ inventory_hostname }}`:
+it resumes from the last completed phase. Do NOT clear the hold with
+`cs-agent maintenance off` -- the controller would start recovering the node
+mid-upgrade, and marks a container inactive after three failed starts in an hour.
+{%- endif -%}

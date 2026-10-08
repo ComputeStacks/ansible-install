@@ -1,0 +1,15 @@
+---
+# PURE. Apply the container selection rule to `docker container inspect`
+# output. No command runs here, so tests/node_upgrade_select.yml drives this
+# file with canned inspect documents.
+#
+# Input:   node_upgrade_inspect_stdout  stdout of `docker container inspect <all>`
+# Output:  node_upgrade_selected        [{id, name}] -- running AND label
+#                                        com.computestacks.role != system
+#
+# The rule and why it is that rule: the node_upgrade_select filter's docstring
+# (filter_plugins/node_upgrade.py) and README.md.
+
+- name: Select the running non-system containers
+  ansible.builtin.set_fact:
+    node_upgrade_selected: "{{ node_upgrade_inspect_stdout | node_upgrade_parse_inspect | node_upgrade_select }}"

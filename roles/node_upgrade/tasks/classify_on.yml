@@ -1,0 +1,18 @@
+---
+# PURE. Classify a `cs-agent maintenance on --wait --json` result and build the
+# operator message for it. No command runs here, so tests/node_upgrade_select.yml
+# drives this file with canned results.
+#
+# Input:   node_upgrade_on   the registered result ({rc, stdout, stderr})
+# Output:  node_upgrade_on_result   see the node_upgrade_classify_on filter
+#          node_upgrade_on_message  the failure message ('' when ok)
+
+- name: Classify the hold result
+  ansible.builtin.set_fact:
+    node_upgrade_on_result: "{{ node_upgrade_on.stdout | default('') | node_upgrade_classify_on(node_upgrade_on.rc | default(none)) }}"
+
+- name: Build the hold failure message
+  ansible.builtin.set_fact:
+    node_upgrade_on_message: >-
+      {{ '' if node_upgrade_on_result.ok
+         else (lookup('ansible.builtin.template', 'hold_failed.j2') | regex_replace('\s+', ' ') | trim) }}

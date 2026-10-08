@@ -1,0 +1,27 @@
+---
+# Persist node_upgrade_state to state.json. Root-only: it lists every tenant
+# container that was running on the node.
+
+# `mkdir -p` first, so any missing PARENT (/var/lib/computestacks on a node
+# that has none yet) gets the ordinary umask mode: the file module would give
+# every intermediate directory it creates the leaf's 0700.
+- name: Create the upgrade state directory's parents
+  ansible.builtin.command:
+    argv: [mkdir, -p, --, "{{ node_upgrade_state_dir }}"]
+    creates: "{{ node_upgrade_state_dir }}"
+
+- name: Make the upgrade state directory root-only
+  ansible.builtin.file:
+    path: "{{ node_upgrade_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Write state.json
+  ansible.builtin.copy:
+    content: "{{ node_upgrade_state | to_nice_json }}\n"
+    dest: "{{ node_upgrade_state_file }}"
+    owner: root
+    group: root
+    mode: "0600"

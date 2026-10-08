@@ -1,0 +1,71 @@
+---
+# The disruptive part, for a node tasks/main.yml decided needs it. Each step
+# runs only while its phase is not yet in state.json's phases_done (R2), so a
+# re-run after any failure picks up where the last one stopped:
+#
+#   * `recorded` is written once -- a resumed run never re-records;
+#   * once `packages` (or `started`) is done, nothing is ever stopped again;
+#   * a hold is only ever TAKEN on a fresh run; a resumed one requires the
+#     hold it already has (tasks/hold.yml).
+#
+# A failure anywhere lands in `rescue`, which re-raises it with the node's
+# state spelled out. `Gate - ` tasks already say exactly what state the node
+# is in and what to do, and are passed through unchanged.
+
+- name: Upgrade the node
+  block:
+    - name: Download everything the package phase needs, containers still running
+      ansible.builtin.include_tasks: download.yml
+      when: "'packages' not in node_upgrade_phases_done"
+
+    - name: Hold the node
+      ansible.builtin.include_tasks: hold.yml
+
+    - name: Record the running containers
+      ansible.builtin.include_tasks: record.yml
+      when: "'recorded' not in node_upgrade_phases_done"
+
+    - name: Stop the recorded containers
+      ansible.builtin.include_tasks: stop.yml
+      when:
+        - "'stopped' not in node_upgrade_phases_done"
+        - "'packages' not in node_upgrade_phases_done"
+        - "'started' not in node_upgrade_phases_done"
+
+    - name: Upgrade the packages
+      ansible.builtin.include_tasks: packages.yml
+      when: "'packages' not in node_upgrade_phases_done"
+
+    - name: Reboot if required
+      ansible.builtin.include_tasks: reboot.yml
+      when: "'rebooted' not in node_upgrade_phases_done"
+
+    - name: Wait for the node's services
+      ansible.builtin.include_tasks: services.yml
+      when: "'started' not in node_upgrade_phases_done"
+
+    - name: Start the recorded containers
+      ansible.builtin.include_tasks: start.yml
+      when: "'started' not in node_upgrade_phases_done"
+
+    - name: Release the node
+      ansible.builtin.include_tasks: release.yml
+      when: "'released' not in node_upgrade_phases_done"
+
+    - name: Archive the upgrade state
+      ansible.builtin.include_tasks: archive.yml
+
+    - name: Let the controller see the node before the next one
+      ansible.builtin.pause:
+        seconds: "{{ node_upgrade_node_settle | int }}"
+      when: node_upgrade_node_settle | int > 0
+
+  rescue:
+    - name: Look for the upgrade state
+      ansible.builtin.stat:
+        path: "{{ node_upgrade_state_file }}"
+      register: node_upgrade_rescue_state
+
+    - name: Report the failure and the node's state
+      ansible.builtin.fail:
+        msg: "{{ lookup('ansible.builtin.template', 'cycle_failed.j2') | regex_replace('\\s+', ' ') | trim }}"

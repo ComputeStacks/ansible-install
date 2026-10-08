@@ -1,0 +1,75 @@
+---
+# Stop the recorded containers that are still running, in batches of
+# node_upgrade_parallel, and prove none of them is running afterwards. Only
+# the RECORDED set: a container that was already stopped stays exactly as it
+# was, and the `system` ones (cadvisor, fluentd) are left to docker and their
+# systemd units -- the restart takes them down and brings them back.
+
+- name: Check the node is still held
+  ansible.builtin.include_tasks: hold_check.yml
+  vars:
+    node_upgrade_hold_check_at: before stopping containers
+
+- name: Install the helper
+  ansible.builtin.include_tasks: helper.yml
+
+- name: List the containers
+  ansible.builtin.include_tasks: list.yml
+
+- name: Work out which recorded containers are still running
+  ansible.builtin.set_fact:
+    node_upgrade_stop_ids: >-
+      {{ node_upgrade_state.recorded | node_upgrade_resolve(node_upgrade_ps)
+         | selectattr('running') | map(attribute='current_id') | list }}
+
+- name: Write the stop request
+  ansible.builtin.copy:
+    content: >-
+      {{ {'ids': node_upgrade_stop_ids,
+          'parallel': node_upgrade_parallel | int,
+          'timeout': node_upgrade_stop_timeout | int} | to_json }}
+    dest: "{{ node_upgrade_state_dir }}/stop.json"
+    owner: root
+    group: root
+    mode: "0600"
+  when: node_upgrade_stop_ids | length > 0
+
+# Bounded by docker itself: every `docker stop -t N` sends SIGKILL after N
+# seconds. async so a dropped connection does not lose the result.
+- name: Stop the recorded containers
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_helper }}", stop, "{{ node_upgrade_state_dir }}/stop.json"]
+  register: node_upgrade_stop
+  changed_when: (node_upgrade_stop.stdout | from_json).stopped | length > 0
+  # batches x (stop timeout + slack), plus a margin; docker SIGKILLs at -t.
+  async: >-
+    {{ ((node_upgrade_stop_ids | length / (node_upgrade_parallel | int)) | round(0, 'ceil') | int + 1)
+       * ((node_upgrade_stop_timeout | int) + 30) + 120 }}
+  poll: 5
+  when: node_upgrade_stop_ids | length > 0
+
+- name: List the containers again
+  ansible.builtin.include_tasks: list.yml
+
+- name: Gate - every recorded container must be stopped
+  vars:
+    node_upgrade_still_running: >-
+      {{ node_upgrade_state.recorded | node_upgrade_resolve(node_upgrade_ps) | selectattr('running') | list }}
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_still_running | length == 0
+    fail_msg: >-
+      {{ node_upgrade_still_running | length }} recorded container(s) on {{ inventory_hostname }}
+      are still running after `docker stop`:
+      {{ node_upgrade_still_running | map(attribute='name') | join(', ') }}{% if node_upgrade_stop.stdout is defined %} (docker said:
+      {{ (node_upgrade_stop.stdout | from_json).errors | map(attribute='error') | unique | join('; ') }}){% endif %}.
+      The node IS HELD and some containers may already be stopped; the packages
+      have not been touched. Find out why they will not stop (`docker stop <name>`
+      on the node), then re-run this playbook for the node -- it resumes and stops
+      what is still running. Do NOT run `cs-agent maintenance off`.
+    quiet: true
+
+- name: Mark the containers stopped
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: stopped

@@ -1,0 +1,104 @@
+---
+# Start exactly the recorded containers (R9), BEFORE the hold is released.
+#
+# Why here and not by the controller: tenant containers have no docker
+# restart policy, and the controller's HealthCheck -- which would start
+# `active` containers once the node is unpaused -- marks a container inactive
+# after more than three failed starts in an hour. An app that dies because
+# its database is still starting would burn through that. So the role starts
+# the whole set in batches and keeps re-starting what is not running, every
+# node_upgrade_start_interval seconds for up to node_upgrade_start_wait
+# seconds, at most node_upgrade_start_retries attempts each; only what is
+# still down after that fails the run.
+#
+# node_upgrade_accept_down names recorded containers allowed to stay down.
+# They are still started; they just do not block. The list in effect -- this
+# run's `-e` merged with any earlier run's -- is written to state.json.
+
+- name: Install the helper
+  ansible.builtin.include_tasks: helper.yml
+
+- name: List the containers
+  ansible.builtin.include_tasks: list.yml
+
+- name: Work out what to start
+  vars:
+    node_upgrade_accepted_names: >-
+      {{ ((node_upgrade_state.accept_down | default([]))
+          + (node_upgrade_accept_down | node_upgrade_accept_down_list)) | unique }}
+    node_upgrade_resolved: "{{ node_upgrade_state.recorded | node_upgrade_resolve(node_upgrade_ps) }}"
+  ansible.builtin.set_fact:
+    node_upgrade_start_accepted_names: "{{ node_upgrade_accepted_names }}"
+    node_upgrade_start_split: "{{ node_upgrade_resolved | node_upgrade_partition_accepted(node_upgrade_accepted_names) }}"
+
+- name: Remember the accepted-down list
+  ansible.builtin.set_fact:
+    node_upgrade_start_accept_changed: "{{ node_upgrade_start_accepted_names != (node_upgrade_state.accept_down | default([])) }}"
+    node_upgrade_state: "{{ node_upgrade_state | combine({'accept_down': node_upgrade_start_accepted_names}) }}"
+
+- name: Save the accepted-down list
+  ansible.builtin.include_tasks: state_save.yml
+  when: node_upgrade_start_accept_changed | bool
+
+- name: Report the accepted-down containers
+  ansible.builtin.debug:
+    msg: >-
+      node_upgrade_accept_down: {{ node_upgrade_start_split.accepted | map(attribute='name') | join(', ') }}
+      may stay down without failing the run (they are still started).
+  when: node_upgrade_start_split.accepted | length > 0
+
+- name: Write the start request
+  ansible.builtin.copy:
+    content: >-
+      {{ {'required': node_upgrade_start_split.required | selectattr('found') | map(attribute='current_id') | list,
+          'optional': node_upgrade_start_split.accepted | selectattr('found') | map(attribute='current_id') | list,
+          'parallel': node_upgrade_parallel | int,
+          'wait': node_upgrade_start_wait | int,
+          'interval': node_upgrade_start_interval | int,
+          'retries': node_upgrade_start_retries | int} | to_json }}
+    dest: "{{ node_upgrade_state_dir }}/start.json"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Start the recorded containers
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_helper }}", start, "{{ node_upgrade_state_dir }}/start.json"]
+  register: node_upgrade_start
+  changed_when: true
+  async: "{{ (node_upgrade_start_wait | int) + 600 }}"
+  poll: 10
+
+- name: List the containers again
+  ansible.builtin.include_tasks: list.yml
+
+- name: Gate - every recorded container must be running
+  vars:
+    node_upgrade_down: >-
+      {{ (node_upgrade_state.recorded | node_upgrade_resolve(node_upgrade_ps)
+          | node_upgrade_partition_accepted(node_upgrade_start_accepted_names)).required
+         | rejectattr('running') | list }}
+    node_upgrade_helper_down: "{{ (node_upgrade_start.stdout | from_json).down | items2dict(key_name='id', value_name='error') }}"
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_down | length == 0
+    fail_msg: >-
+      {{ node_upgrade_down | length }} recorded container(s) on {{ inventory_hostname }} are not
+      running after {{ node_upgrade_start_wait }}s and up to {{ node_upgrade_start_retries }} start
+      attempts each:
+      {% for d in node_upgrade_down %}{{ d.name }}{%
+      if not d.found %} (REMOVED: neither its id nor its name exists any more){%
+      elif node_upgrade_helper_down[d.current_id] | default('') %} ({{ node_upgrade_helper_down[d.current_id] }}){%
+      endif %}{{ '; ' if not loop.last else '' }}{% endfor %}.
+      The node IS STILL HELD, so the controller is not recovering anything on it; the
+      package phase is done. Investigate with `docker logs <name>` / `docker start <name>` on the
+      node. Then re-run this playbook for the node -- it resumes at the start phase and
+      never stops anything again. If a container cannot be fixed now, re-run with
+      `-e node_upgrade_accept_down=<name>[,<name>...]` to let it stay down. Do NOT run
+      `cs-agent maintenance off` until this run has finished.
+    quiet: true
+
+- name: Mark the containers started
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: started

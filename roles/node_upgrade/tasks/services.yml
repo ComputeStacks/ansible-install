@@ -1,0 +1,35 @@
+---
+# Wait for the node's own services after the packages and any reboot: docker
+# (and its API), cs-agent (the hold is read through it) and cs-firewall (the
+# agent's firewall chains must be back before tenant traffic is). Then prove
+# the node is still held before the start phase.
+
+# The docker package's postinst restarts docker; a failed restart, or a
+# reboot that came up without it, is put right here rather than waited on.
+- name: Make sure docker is running
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+
+- name: Wait for docker, cs-agent and cs-firewall
+  ansible.builtin.command:
+    argv: [systemctl, is-active, docker, cs-agent, cs-firewall]
+  register: node_upgrade_services
+  changed_when: false
+  retries: "{{ ((node_upgrade_services_timeout | int) / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  until: node_upgrade_services.rc == 0
+
+- name: Wait for the docker API
+  ansible.builtin.command:
+    argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
+  register: node_upgrade_docker_up
+  changed_when: false
+  retries: "{{ ((node_upgrade_services_timeout | int) / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  until: node_upgrade_docker_up.rc == 0
+
+- name: Check the node is still held
+  ansible.builtin.include_tasks: hold_check.yml
+  vars:
+    node_upgrade_hold_check_at: after the packages and reboot, before starting containers

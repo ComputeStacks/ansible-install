@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+# Installed by the provisioner's roles/node_upgrade. Do not edit on the node.
+#
+# Stops or starts a set of containers with bounded parallelism, for the
+# rolling docker upgrade (playbooks/upgrade-docker.yml). The role decides
+# WHICH containers; this only does the batching and the retries, which are
+# awkward to express as ansible loops and would cost one round trip per
+# container if they were.
+#
+#   node-upgrade-containers stop  <input.json>
+#       {"ids": [...], "parallel": 8, "timeout": 30}
+#       `docker stop -t <timeout>` each id, <parallel> at a time.
+#
+#   node-upgrade-containers start <input.json>
+#       {"required": [...], "optional": [...], "parallel": 8,
+#        "wait": 600, "interval": 15, "retries": 5}
+#       Start every id that is not running, <parallel> at a time; then every
+#       <interval> seconds, until <wait> seconds have passed, start again any
+#       that is not running (an app that exits because its database is not up
+#       yet is the normal case), at most <retries> attempts per id. Ends early
+#       once every required id is running and every optional one is running
+#       or out of attempts.
+#
+# Prints ONE JSON object on stdout and exits 0 whatever happened to the
+# containers: the role re-lists them and decides. A non-zero exit means this
+# script itself failed (bad input, docker CLI missing).
+
+import json
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+
+def docker(*args):
+    p = subprocess.run(["docker"] + list(args), capture_output=True, text=True)
+    return p.returncode, (p.stdout or "").strip(), (p.stderr or "").strip()
+
+
+def running_ids():
+    rc, out, err = docker("ps", "-q", "--no-trunc")
+    if rc != 0:
+        raise RuntimeError("docker ps failed: " + err)
+    return set(out.split())
+
+
+def run_parallel(fn, ids, parallel):
+    with ThreadPoolExecutor(max_workers=max(1, int(parallel))) as pool:
+        return dict(zip(ids, pool.map(fn, ids)))
+
+
+def stop(cfg):
+    timeout = str(int(cfg.get("timeout", 30)))
+    ids = list(cfg.get("ids") or [])
+    res = run_parallel(lambda i: docker("stop", "-t", timeout, i), ids, cfg.get("parallel", 8))
+    return {
+        "stopped": [i for i, r in res.items() if r[0] == 0],
+        "errors": [{"id": i, "error": r[2]} for i, r in res.items() if r[0] != 0],
+    }
+
+
+def start(cfg):
+    required = list(cfg.get("required") or [])
+    optional = list(cfg.get("optional") or [])
+    everyone = required + [i for i in optional if i not in required]
+    retries = int(cfg.get("retries", 5))
+    interval = float(cfg.get("interval", 15))
+    deadline = time.monotonic() + float(cfg.get("wait", 600))
+    attempts = {i: 0 for i in everyone}
+    last_error = {}
+
+    while True:
+        up = running_ids()
+        down = [i for i in everyone if i not in up]
+        req_down = [i for i in required if i not in up]
+        startable = [i for i in down if attempts[i] < retries]
+        if not req_down and not [i for i in startable if i in optional]:
+            break
+        if not startable or time.monotonic() >= deadline:
+            break
+        res = run_parallel(lambda i: docker("start", i), startable, cfg.get("parallel", 8))
+        for i, (rc, _out, err) in res.items():
+            attempts[i] += 1
+            if rc != 0:
+                last_error[i] = err
+        time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
+
+    up = running_ids()
+    return {
+        "running": [i for i in everyone if i in up],
+        "down": [
+            {"id": i, "attempts": attempts[i], "error": last_error.get(i, "")}
+            for i in everyone if i not in up
+        ],
+    }
+
+
+def main():
+    if len(sys.argv) != 3 or sys.argv[1] not in ("stop", "start"):
+        sys.stderr.write("usage: node-upgrade-containers stop|start <input.json>\n")
+        return 2
+    with open(sys.argv[2]) as f:
+        cfg = json.load(f)
+    out = stop(cfg) if sys.argv[1] == "stop" else start(cfg)
+    json.dump(out, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

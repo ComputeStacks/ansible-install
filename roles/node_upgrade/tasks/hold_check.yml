@@ -1,0 +1,45 @@
+---
+# R8: at each phase boundary that is about to do something disruptive, prove
+# the node is still held. If the local hold was removed -- an operator ran
+# `cs-agent maintenance off`, or an admin override cleared it -- the
+# controller is no longer standing back: it may be health-checking and
+# recovering this node's containers right now, and stopping, upgrading or
+# starting underneath it would fight it.
+#
+# Input: node_upgrade_hold_check_at  what is about to happen (for the message)
+
+- name: Read the maintenance status ({{ node_upgrade_hold_check_at }})
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, status, --json]
+  register: node_upgrade_hold_check
+  changed_when: false
+  failed_when: false
+  retries: 5
+  delay: 6
+  until: (node_upgrade_hold_check.stdout | node_upgrade_cli_json).shape == 'status'
+
+- name: Gate - the node must still be held ({{ node_upgrade_hold_check_at }})
+  vars:
+    node_upgrade_hold_check_doc: "{{ node_upgrade_hold_check.stdout | node_upgrade_cli_json }}"
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_hold_check_doc.shape == 'status'
+      - node_upgrade_hold_check_doc.doc.local is not none
+    fail_msg: >-
+      {% if node_upgrade_hold_check_doc.shape != 'status' %}Cannot read the maintenance
+      status on {{ inventory_hostname }} {{ node_upgrade_hold_check_at }}
+      (rc {{ node_upgrade_hold_check.rc }}:
+      {{ node_upgrade_hold_check_doc.doc.error | default(node_upgrade_hold_check.stderr | default('') | trim) }}),
+      so whether it is still held is unknown. The upgrade is part-way through (phases
+      done: {{ node_upgrade_phases_done | join(', ') }}; state {{ node_upgrade_state_file }}).
+      Fix cs-agent, then re-run this playbook for the node to resume. Do NOT run
+      `cs-agent maintenance off`.{% else %}THE MAINTENANCE HOLD ON {{ inventory_hostname }}
+      WAS REMOVED EXTERNALLY ({{ node_upgrade_hold_check_at }}; phases done:
+      {{ node_upgrade_phases_done | join(', ') }}). Somebody ran `cs-agent maintenance
+      off` or an admin override cleared it, and the controller may now be recovering
+      this node's containers on its own. Do not re-run blindly: check the node in the
+      admin UI and `docker ps -a` on the node against the `recorded` list in
+      {{ node_upgrade_state_file }}, then either re-hold it (`cs-agent maintenance on
+      --reason {{ node_upgrade_reason }}`) and re-run this playbook to resume, or finish
+      by hand and move the state file aside.{% endif %}
+    quiet: true

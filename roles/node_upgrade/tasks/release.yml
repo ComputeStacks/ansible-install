@@ -1,0 +1,67 @@
+---
+# Release the node (R6): clear the local hold, then wait until the CONTROLLER
+# confirms the node is no longer paused before moving on. The controller's
+# unpause is what runs its recovery side (HealthCheck, the load balancer
+# config push, a changelog poll); moving to the next node before it has
+# happened would have two nodes in flux at once.
+#
+# `releasing: true` is written to state.json BEFORE `off`, so a run that dies
+# between `off` and the phase mark resumes here instead of reading the
+# missing hold as an external removal (tasks/hold.yml).
+
+- name: Note that the release has begun
+  ansible.builtin.set_fact:
+    node_upgrade_state: "{{ node_upgrade_state | combine({'releasing': true}) }}"
+
+- name: Write the upgrade state
+  ansible.builtin.include_tasks: state_save.yml
+
+- name: Clear the local maintenance hold
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, "off", --json]
+  register: node_upgrade_off
+  changed_when: true
+  failed_when: >-
+    node_upgrade_off.rc != 0
+    or (node_upgrade_off.stdout | node_upgrade_cli_json).shape != 'status'
+
+# `controller_acked` is judged against the node's latest changelog entry, so
+# it turns true only once the controller has read the release itself; `paused`
+# stays true while the controller holds the node on its own account.
+- name: Wait for the controller to confirm the release
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, status, --json]
+  register: node_upgrade_release_status
+  changed_when: false
+  failed_when: false
+  retries: "{{ ((node_upgrade_release_timeout | int) / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: >-
+    (node_upgrade_release_status.stdout | node_upgrade_cli_json).shape == 'status'
+    and (node_upgrade_release_status.stdout | node_upgrade_cli_json).doc.controller_acked | default(false)
+    and not (node_upgrade_release_status.stdout | node_upgrade_cli_json).doc.paused | default(true)
+
+- name: Gate - the controller must confirm the release
+  vars:
+    node_upgrade_release_doc: "{{ (node_upgrade_release_status.stdout | node_upgrade_cli_json).doc }}"
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_release_doc.controller_acked | default(false)
+      - not (node_upgrade_release_doc.paused | default(true))
+    fail_msg: >-
+      {{ inventory_hostname }} was RELEASED LOCALLY (`cs-agent maintenance off` ran; its
+      containers are running) but the controller has not confirmed it within
+      {{ node_upgrade_release_timeout }}s{% if node_upgrade_release_doc.controller | default(none) is not none %}: the CONTROLLER
+      holds this node on its own account ({{ node_upgrade_release_doc.controller.reason | default('?') }}),
+      so it stays paused until that request is cleared in the admin UI{% elif not
+      (node_upgrade_release_doc.controller_acked | default(false)) %}: it has not acknowledged
+      the release (is it polling the node?){% endif %}.
+      Check the node in the admin UI before continuing. Re-running this playbook for
+      the node resumes at this confirmation, then archives the state and moves on to
+      the next node.
+    quiet: true
+
+- name: Mark the node released
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: released

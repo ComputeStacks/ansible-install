@@ -1,0 +1,49 @@
+---
+# Load this node's upgrade state, if a previous run left one.
+#
+# Sets:
+#   node_upgrade_resume        state.json exists -- an unfinished run
+#   node_upgrade_state         its contents ({} when there is none)
+#   node_upgrade_phases_done   node_upgrade_state.phases_done, or []
+#
+# Read-only and check-mode safe.
+
+- name: Look for an unfinished upgrade on this node
+  ansible.builtin.stat:
+    path: "{{ node_upgrade_state_file }}"
+  register: node_upgrade_state_stat
+  check_mode: false
+
+- name: Read the unfinished upgrade's state
+  ansible.builtin.slurp:
+    src: "{{ node_upgrade_state_file }}"
+  register: node_upgrade_state_slurp
+  when: node_upgrade_state_stat.stat.exists
+
+- name: Parse the upgrade state
+  ansible.builtin.set_fact:
+    node_upgrade_resume: "{{ node_upgrade_state_stat.stat.exists }}"
+    node_upgrade_state: >-
+      {{ (node_upgrade_state_slurp.content | b64decode | from_json)
+         if node_upgrade_state_stat.stat.exists else {} }}
+
+# A state file this role cannot read is not something to guess around: it is
+# the only record of which containers were running before the stop.
+- name: Gate - the state file must be one this role wrote
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_state is mapping
+      - not node_upgrade_resume or (node_upgrade_state.phases_done | default(none)) is sequence
+      - not node_upgrade_resume or (node_upgrade_state.recorded | default(none)) is sequence
+    fail_msg: >-
+      {{ node_upgrade_state_file }} on {{ inventory_hostname }} exists but is not an
+      upgrade state this role wrote (it needs `phases_done` and `recorded` lists).
+      It records which containers were running before the upgrade stopped them,
+      so it is not ignored or replaced: inspect it, repair it by hand or move it
+      aside (`cs-agent maintenance status` shows whether the node is still held),
+      then re-run.
+    quiet: true
+
+- name: Note the completed phases
+  ansible.builtin.set_fact:
+    node_upgrade_phases_done: "{{ node_upgrade_state.phases_done | default([]) }}"

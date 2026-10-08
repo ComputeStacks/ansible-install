@@ -1,0 +1,27 @@
+---
+# Reboot when the package phase (or anything before it) left
+# /var/run/reboot-required. Re-checked HERE, after the packages, because the
+# OS upgrade is what usually creates it (a new kernel). The phase is marked
+# done either way: "rebooted" means the reboot step is behind us, and on a
+# resumed run after a reboot the flag file is gone.
+
+- name: Check whether a reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: node_upgrade_reboot_required
+
+# The hold persists across the reboot (control.db). Tenant containers have no
+# docker restart policy, so they come back down; the start phase brings them
+# up.
+- name: Reboot the node
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ node_upgrade_reboot_timeout }}"
+    msg: "Rebooting for the docker/OS upgrade (provisioner node_upgrade)"
+  when: node_upgrade_reboot_required.stat.exists
+
+- name: Mark the reboot step done
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: rebooted
+    node_upgrade_state_update:
+      rebooted: "{{ node_upgrade_reboot_required.stat.exists }}"

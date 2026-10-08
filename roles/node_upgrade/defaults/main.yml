@@ -1,0 +1,86 @@
+---
+# Rolling docker upgrade of a provisioner-built node, inside a scheduled
+# maintenance window. Driven by playbooks/upgrade-docker.yml (`make
+# upgrade-docker ENV=<env>`), one node at a time. README.md has the flow, the
+# state file, the resume rules and every failure's operator action.
+
+# --- state ------------------------------------------------------------------
+# Where the per-node upgrade state lives. state.json is written BEFORE the
+# first container is stopped and is what makes a re-run resume instead of
+# starting over; finished runs are kept as state.done.<UTC timestamp>.json.
+# The directory is root-only (0700): the file lists every tenant container
+# that was running on the node.
+node_upgrade_state_dir: /var/lib/computestacks/upgrade
+node_upgrade_state_file: "{{ node_upgrade_state_dir }}/state.json"
+# How many state.done.*.json files to keep, newest first.
+node_upgrade_state_keep: 5
+
+# --- cs-agent ---------------------------------------------------------------
+# `cs-agent maintenance` first shipped in v3.4.0. The playbook never installs
+# the agent (a package install restarts it, which is not something to do in
+# the middle of a window); it refuses to touch a node whose agent is older.
+node_upgrade_cs_agent_min_version: "3.4.0"
+node_upgrade_cs_agent_bin: cs-agent
+
+# `cs-agent maintenance on --wait --timeout`, in SECONDS. It waits out the
+# work already in flight on the node -- a backup can take a long time -- and
+# then for the controller to acknowledge the hold. The controller polls every
+# 15s, so anything under 300 risks failing a healthy node; the 2h default
+# waits out backups.
+node_upgrade_maintenance_timeout: 7200
+# `--settle`, in seconds: once quiesced, wait this long and look again, so
+# work that was about to start is caught.
+node_upgrade_maintenance_settle: 30
+# The hold's reason, as the controller's admin UI and EventLog show it.
+node_upgrade_reason: docker-upgrade
+
+# After `cs-agent maintenance off`, how long (seconds) to wait for the
+# controller to confirm the node is no longer paused before failing the run.
+node_upgrade_release_timeout: 600
+
+# --- containers -------------------------------------------------------------
+# `docker stop -t`, seconds, per container.
+node_upgrade_stop_timeout: 30
+# How many containers are stopped or started concurrently.
+node_upgrade_parallel: 8
+# Start phase: keep re-starting recorded containers that are not running for
+# up to this many seconds (an application that exits because its database is
+# not up yet is the normal case), every `node_upgrade_start_interval` seconds,
+# at most `node_upgrade_start_retries` attempts per container. Only then does
+# the run fail on what is still down.
+node_upgrade_start_wait: 600
+node_upgrade_start_interval: 15
+node_upgrade_start_retries: 5
+# Recorded containers that may stay down without failing the run: a comma
+# separated list (or YAML list) of names or ids (full, or the 12-character
+# short form). An escape hatch for a container that cannot start for reasons
+# unrelated to the upgrade -- pass it with `-e` on the re-run, it is written to
+# state.json and logged. They are still started; they just do not block.
+node_upgrade_accept_down: []
+
+# Where the role installs its small container stop/start helper on the node.
+node_upgrade_helper: /usr/local/libexec/computestacks/node-upgrade-containers
+
+# --- packages and reboot ----------------------------------------------------
+# Also apply every other pending OS update (`apt-get upgrade
+# --with-new-pkgs`, what `apt upgrade` does), with docker's packages still
+# held, while the node's containers are down anyway. This is what pulls in a
+# new kernel, and with it the reboot. It never TRIGGERS a cycle on its own:
+# a node with no docker drift and no pending reboot is skipped.
+node_upgrade_apply_os_updates: true
+# Seconds to wait for the dpkg/apt lock (unattended-upgrades runs on every
+# node and holds it for minutes at a time).
+node_upgrade_apt_lock_timeout: 900
+node_upgrade_reboot_timeout: 900
+
+# Seconds to wait for docker, cs-agent and cs-firewall to come up after the
+# packages or the reboot.
+node_upgrade_services_timeout: 300
+
+# --- run control ------------------------------------------------------------
+# Run the full cycle even when nothing needs doing (no docker drift, no
+# pending reboot, no unfinished run).
+node_upgrade_force: false
+# Seconds to wait after a node is released, before the next node starts, so
+# the controller's HealthCheck has run against it.
+node_upgrade_node_settle: 60
