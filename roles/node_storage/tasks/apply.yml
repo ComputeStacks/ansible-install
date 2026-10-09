@@ -1,0 +1,163 @@
+---
+# Format (blank only), mount, bind, and make docker and containerd require
+# the mounts. Assumes tasks/probe.yml and tasks/classify.yml already ran in
+# this play (tasks/main.yml does exactly that).
+#
+#   blank  -> mkfs.xfs, then every mount below
+#   ours   -> only the mounts that are missing
+#   ready  -> no mount task runs at all: the role never unmounts, never
+#             remounts, and on a finished node only asserts
+#
+# Mounts already in place are never passed to ansible.posix.mount as
+# `mounted`: that state REMOUNTS a mounted filesystem whenever its fstab line
+# changes, and a remount is exactly what this role must never do under a
+# running docker. They get `present` (fstab only) instead.
+
+- name: Require a classification this role may act on
+  ansible.builtin.assert:
+    that:
+      - node_storage_state | default('') in ['blank', 'ours', 'ready']
+    fail_msg: >-
+      node_storage apply.yml ran with node_storage_state
+      '{{ node_storage_state | default('unset') }}' -- probe.yml and
+      classify.yml must run first, and a refused disk is never touched.
+      {{ node_storage_reason | default('') }}
+    quiet: true
+
+- name: Install xfsprogs
+  ansible.builtin.apt:
+    name: xfsprogs
+    state: present
+
+# The ONLY destructive step, and only on a disk the classifier proved blank:
+# no signature, no partition table, no children, mounted nowhere, nothing
+# mounted where it is going. No `-f`: should anything have appeared on the
+# device since the probe, mkfs.xfs refuses on its own. `-n ftype=1` is what
+# overlayfs requires; it is the modern default, pinned because an overlay on
+# ftype=0 only fails at runtime.
+- name: Create the XFS filesystem on the blank data disk
+  ansible.builtin.command:
+    argv:
+      - mkfs.xfs
+      - -L
+      - "{{ node_storage_label }}"
+      - -n
+      - ftype=1
+      - "{{ node_storage_probe.device }}"
+  when: node_storage_state == 'blank'
+  changed_when: true
+
+# Re-read, not taken from the probe: on a blank disk the UUID only exists now.
+# `-p` reads the device itself, not udev's cache, which may not have caught up
+# with the mkfs yet. In --check nothing was formatted, so there is no UUID.
+- name: Read the data filesystem's UUID
+  ansible.builtin.command:
+    argv: [blkid, -p, -s, UUID, -o, value, "{{ node_storage_probe.device }}"]
+  register: node_storage_uuid_read
+  changed_when: false
+  failed_when: >-
+    not ansible_check_mode
+    and (node_storage_uuid_read.rc != 0 or node_storage_uuid_read.stdout | trim == '')
+  check_mode: false
+  when: node_storage_state != 'ready'
+
+# By UUID, not LABEL: a second disk carrying a stray `dockerdata` label must
+# never be able to win the mount. Pass 0 because fsck.xfs is a no-op (XFS
+# replays its log at mount). No `nofail`: a missing data disk must stop the
+# boot rather than let docker start on the root disk's empty directories.
+- name: Mount the data filesystem
+  ansible.posix.mount:
+    path: "{{ node_storage_mount }}"
+    src: "UUID={{ node_storage_uuid_read.stdout | trim }}"
+    fstype: xfs
+    opts: "{{ node_storage_mount_opts }}"
+    dump: "0"
+    passno: "0"
+    state: "{{ 'present' if node_storage_probe.mounts[node_storage_mount] else 'mounted' }}"
+  when: node_storage_state != 'ready'
+
+# Only now: created any earlier, they would land on the root disk underneath
+# the mount. Modes match what docker (0710) and containerd (0711) give their
+# own state directories.
+- name: Create the bind source directories on the data filesystem
+  ansible.builtin.file:
+    path: "{{ node_storage_mount }}/{{ item.src_subdir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop: "{{ node_storage_binds }}"
+  loop_control:
+    label: "{{ node_storage_mount }}/{{ item.src_subdir }}"
+  when: node_storage_state != 'ready'
+
+# systemd's fstab generator gives each bind mount a RequiresMountsFor= on its
+# source, so these always come up after the data mount.
+- name: Bind-mount the data filesystem over docker's and containerd's paths
+  ansible.posix.mount:
+    path: "{{ item.target }}"
+    src: "{{ node_storage_mount }}/{{ item.src_subdir }}"
+    fstype: none
+    opts: bind
+    dump: "0"
+    passno: "0"
+    state: "{{ 'present' if node_storage_probe.mounts[item.target] else 'mounted' }}"
+  loop: "{{ node_storage_binds }}"
+  loop_control:
+    label: "{{ item.target }}"
+  when: node_storage_state != 'ready'
+
+- name: Create the systemd drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ node_storage_units }}"
+
+# Neither daemon may ever start before the bind mounts are in place: it would
+# write its state into the root disk's empty directories and the mount would
+# then hide it. Written on every node, ready ones included -- a missing drop-in
+# on a finished node is safe to add, and a daemon-reload restarts nothing.
+- name: Make docker and containerd require the data disk mounts
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item }}.d/{{ node_storage_dropin_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by the ComputeStacks provisioner (roles/node_storage).
+      [Unit]
+      RequiresMountsFor={{ node_storage_binds | map(attribute='target') | join(' ') }}
+  loop: "{{ node_storage_units }}"
+  notify: Reload systemd for the data disk drop-ins
+
+# Now, not at the end of the play: docker is installed and started by the
+# NEXT play, and systemd must have read the drop-ins before that.
+- name: Reload systemd so the drop-ins take effect before docker is installed
+  ansible.builtin.meta: flush_handlers
+
+# --- verify ---------------------------------------------------------------
+# Probe again and require the finished state. Skipped in --check, where
+# nothing was formatted or mounted.
+- name: Re-probe the data disk
+  ansible.builtin.include_tasks: probe.yml
+  when: not ansible_check_mode
+
+- name: Re-classify the data disk
+  ansible.builtin.include_tasks: classify.yml
+  vars:
+    node_storage_classify_fail: false
+  when: not ansible_check_mode
+
+- name: Assert container storage is in place
+  ansible.builtin.assert:
+    that:
+      - node_storage_state == 'ready'
+    fail_msg: >-
+      {{ inventory_hostname }}: container storage on {{ node_storage_probe.device_input }}
+      is not complete after apply: the re-probe classifies it as
+      '{{ node_storage_state }}'. {{ node_storage_reason | replace('Nothing was changed.', '') | trim }}
+    quiet: true
+  when: not ansible_check_mode

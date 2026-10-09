@@ -1,0 +1,85 @@
+{
+  "case": "an XFS filesystem with somebody else's label",
+  "expect": {
+    "state": "refuse",
+    "reason": "label 'scratch'"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdb\nUUID=3f6c1b8e-2d4a-4c7e-9b1f-5a8d0e6c2b71\nLABEL=scratch\nBLOCK_SIZE=4096\nTYPE=xfs\nUSAGE=filesystem",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": "xfs",
+          "mountpoints": [
+            null
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}

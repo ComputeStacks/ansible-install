@@ -1,0 +1,112 @@
+{
+  "case": "docker_data_device changed on a built node: the new disk is blank, the old one still serves everything",
+  "expect": {
+    "state": "refuse",
+    "reason": "/var/lib/docker-data is mounted from /dev/xvdc"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": null,
+          "mountpoints": [
+            null
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker-data",
+            "source": "/dev/xvdc",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker",
+            "source": "/dev/xvdc[/docker]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/containerd",
+            "source": "/dev/xvdc[/containerd]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 0,
+      "stdout": "a",
+      "stderr": ""
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 0,
+      "stdout": "b",
+      "stderr": ""
+    }
+  ]
+}

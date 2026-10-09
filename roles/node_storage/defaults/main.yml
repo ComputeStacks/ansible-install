@@ -1,0 +1,47 @@
+---
+# Container storage on a node's dedicated data disk. README.md has the layout,
+# the states, every refusal and how to grow the disk.
+#
+# The device itself is NOT a default: `docker_data_device` is a required
+# inventory var on every node (preflight fails without it), an absolute path
+# under /dev/ -- /dev/vdb, /dev/xvdb, or better a /dev/disk/by-id/... link when
+# the platform offers one. The role never guesses a disk.
+
+# Where the XFS filesystem is mounted. Both bind sources live directly under
+# it; nothing else does today.
+node_storage_mount: /var/lib/docker-data
+
+# The XFS label mkfs writes. It marks the filesystem as ours: a disk with any
+# other label (or none) is never touched. fstab mounts by UUID, not by this
+# label, so a stray second `dockerdata` disk can never win the mount.
+node_storage_label: dockerdata
+
+# prjquota can ONLY be enabled at mount time -- never by a remount -- and is
+# what the planned per-volume limits (XFS project quotas) need, so it is on
+# from the first mount. No `nofail`: a missing data disk must stop the boot,
+# not let docker start writing into the root disk's empty directories.
+node_storage_mount_opts: defaults,noatime,prjquota
+
+# The canonical paths docker and containerd (and cadvisor, cs-agent,
+# node_upgrade) use, each bind-mounted from <node_storage_mount>/<src_subdir>.
+# `mode` is set on the bind SOURCE directory and matches what each daemon
+# creates for itself.
+node_storage_binds:
+  - src_subdir: docker
+    target: /var/lib/docker
+    mode: "0710"
+  - src_subdir: containerd
+    target: /var/lib/containerd
+    mode: "0711"
+
+# The systemd units that must never start before every mount above is in
+# place, and the drop-in file name written into each unit's .d directory.
+node_storage_units:
+  - docker.service
+  - containerd.service
+node_storage_dropin_file: 10-cs-data-disk.conf
+
+# classify.yml fails the play on `refuse` by default. preflight, validate and
+# upgrade-docker.yml set this false to collect node_storage_state from every
+# node and fail once, listing them all.
+node_storage_classify_fail: true

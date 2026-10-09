@@ -79,7 +79,8 @@ help:
 	@echo "                                  parse both inventories and render the site contract"
 	@echo "                                  and the bootstrap manifest against each, and prove"
 	@echo "                                  the powerdns load balancer record plan and the"
-	@echo "                                  node upgrade selection rules"
+	@echo "                                  node upgrade selection rules and the node data"
+	@echo "                                  disk classification"
 	@echo ""
 	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honoured."
 	@echo ""
@@ -162,7 +163,9 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
-	@echo "       node upgrade container selection and cs-agent result classification hold"
+	@echo "       node upgrade container selection and cs-agent result classification hold,"
+	@echo "       node data disk classification formats only a provably blank disk"

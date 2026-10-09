@@ -1,0 +1,96 @@
+{
+  "case": "a disk that is an LVM physical volume",
+  "expect": {
+    "state": "refuse",
+    "reason": "has partitions or other devices on it (/dev/mapper/vg0-data)"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdb\nUUID=Ab12Cd-34Ef\nVERSION=LVM2 001\nTYPE=LVM2_member\nUSAGE=raid",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": "LVM2_member",
+          "mountpoints": [
+            null
+          ],
+          "children": [
+            {
+              "name": "vg0-data",
+              "path": "/dev/mapper/vg0-data",
+              "type": "lvm",
+              "fstype": "ext4",
+              "mountpoints": [
+                "/srv"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "case": "a finished node",
+  "expect": {
+    "state": "ready",
+    "reason": ""
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdb\nUUID=3f6c1b8e-2d4a-4c7e-9b1f-5a8d0e6c2b71\nLABEL=dockerdata\nBLOCK_SIZE=4096\nTYPE=xfs\nUSAGE=filesystem",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": "xfs",
+          "mountpoints": [
+            "/var/lib/containerd",
+            "/var/lib/docker",
+            "/var/lib/docker-data"
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker-data",
+            "source": "/dev/xvdb",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker",
+            "source": "/dev/xvdb[/docker]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/containerd",
+            "source": "/dev/xvdb[/containerd]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 0,
+      "stdout": "/var/lib/docker/volumes",
+      "stderr": ""
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 0,
+      "stdout": "/var/lib/containerd/io.containerd.content.v1.content",
+      "stderr": ""
+    }
+  ]
+}

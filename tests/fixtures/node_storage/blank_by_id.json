@@ -1,0 +1,85 @@
+{
+  "case": "a blank disk named by its /dev/disk/by-id link",
+  "expect": {
+    "state": "blank",
+    "reason": "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1 (/dev/sdb)"
+  },
+  "device_input": "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/sdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "sdb",
+          "path": "/dev/sdb",
+          "type": "disk",
+          "fstype": null,
+          "mountpoints": [
+            null
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}

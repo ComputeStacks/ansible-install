@@ -1,0 +1,96 @@
+{
+  "case": "the old ext4-on-xvdb1 layout",
+  "expect": {
+    "state": "refuse",
+    "reason": "has partitions or other devices on it (/dev/xvdb1)"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdb\nPTUUID=5d2c1e0a\nPTTYPE=dos",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": null,
+          "mountpoints": [
+            null
+          ],
+          "children": [
+            {
+              "name": "xvdb1",
+              "path": "/dev/xvdb1",
+              "type": "part",
+              "fstype": "ext4",
+              "mountpoints": [
+                null
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}

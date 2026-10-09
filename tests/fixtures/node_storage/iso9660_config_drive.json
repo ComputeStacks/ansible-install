@@ -1,0 +1,85 @@
+{
+  "case": "a cloud-init config drive presented as a disk",
+  "expect": {
+    "state": "refuse",
+    "reason": "iso9660 signature"
+  },
+  "device_input": "/dev/xvdd",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdd",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdd\nUUID=2026-10-09-12-00-00-00\nLABEL=cidata\nTYPE=iso9660\nUSAGE=filesystem",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdd",
+          "path": "/dev/xvdd",
+          "type": "disk",
+          "fstype": "iso9660",
+          "mountpoints": [
+            null
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}

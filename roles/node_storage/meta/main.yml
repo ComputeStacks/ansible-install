@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: node_storage
+  author: ComputeStacks
+  description: >-
+    Puts a node's docker and containerd state on its dedicated data disk:
+    formats a provably blank docker_data_device as XFS, mounts it with project
+    quotas by UUID, bind-mounts it over /var/lib/docker and /var/lib/containerd
+    and makes both daemons require those mounts. Refuses, changing nothing, on
+    any device it cannot prove is blank or already its own. Also provides
+    tasks_from probe and classify, the read-only check preflight, validate and
+    upgrade-docker.yml share.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+dependencies: []

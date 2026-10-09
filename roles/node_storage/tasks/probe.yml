@@ -1,0 +1,94 @@
+---
+# READ-ONLY. Collect what the node reports about docker_data_device and the
+# three paths the role owns, into ONE fact for tasks/classify.yml. Every task
+# here only reads (`changed_when: false`), runs in --check too
+# (`check_mode: false`), and never fails on a missing or wrong device -- that
+# is the classifier's call, with a reason. preflight, validate and
+# upgrade-docker.yml include this file before anything changes on any host.
+#
+# Output:  node_storage_probe
+#   device_input   docker_data_device as configured
+#   device         its realpath ('' when it does not exist), so a
+#                  /dev/disk/by-id/... link compares as its kernel name
+#   is_block       the resolved path is a block device
+#   blkid          `blkid -p -o export` as {KEY: VALUE}; {} when blkid found
+#                  nothing (rc 2); {BLKID_RC: <rc>} on any other failure, which
+#                  the classifier refuses as an unrecognized signature
+#   lsblk          blockdevices[0] of `lsblk -J`, children included, or null
+#   mounts         {<path>: findmnt filesystem or null} for the data mount and
+#                  each bind target, by exact mountpoint
+#   dir_nonempty   {<bind target>: true} when the directory has contents AND
+#                  nothing is mounted there (docker or containerd already ran
+#                  on the root disk)
+
+- name: Resolve docker_data_device to its kernel device
+  ansible.builtin.command:
+    argv: [realpath, -e, --, "{{ docker_data_device | default('') }}"]
+  register: node_storage_realpath
+  changed_when: false
+  failed_when: node_storage_realpath.rc not in [0, 1]
+  check_mode: false
+
+- name: Check the resolved device is a block device
+  ansible.builtin.stat:
+    path: "{{ node_storage_realpath.stdout | trim }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: node_storage_device_stat
+  when: node_storage_realpath.rc == 0
+  check_mode: false
+
+# `-p` probes the device itself instead of answering from the udev cache, so
+# it is correct immediately after a mkfs. rc 2 = no signature of any kind.
+- name: Probe the device for filesystem and partition table signatures
+  ansible.builtin.command:
+    argv: [blkid, -p, -o, export, "{{ node_storage_realpath.stdout | trim }}"]
+  register: node_storage_blkid
+  changed_when: false
+  failed_when: false
+  when: node_storage_device_stat.stat.isblk | default(false)
+  check_mode: false
+
+- name: List the device, its children and every mountpoint
+  ansible.builtin.command:
+    argv: [lsblk, -J, -o, "NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS", "{{ node_storage_realpath.stdout | trim }}"]
+  register: node_storage_lsblk
+  changed_when: false
+  failed_when: false
+  when: node_storage_device_stat.stat.isblk | default(false)
+  check_mode: false
+
+# Exact mountpoint lookups (`--mountpoint`, not `-T`): `-T` would answer with
+# the root filesystem for a path that is not a mountpoint at all.
+- name: Look up what is mounted at the data mount and the bind targets
+  ansible.builtin.command:
+    argv: [findmnt, -J, -o, "TARGET,SOURCE,FSTYPE,OPTIONS", --mountpoint, "{{ item }}"]
+  loop: "{{ [node_storage_mount] + (node_storage_binds | map(attribute='target') | list) }}"
+  register: node_storage_findmnt
+  changed_when: false
+  failed_when: node_storage_findmnt.rc not in [0, 1]
+  check_mode: false
+
+- name: Check whether the bind targets already hold anything
+  ansible.builtin.command:
+    argv: [find, "{{ item.target }}", -mindepth, "1", -maxdepth, "1", -print, -quit]
+  loop: "{{ node_storage_binds }}"
+  loop_control:
+    label: "{{ item.target }}"
+  register: node_storage_find
+  changed_when: false
+  # A missing directory (rc 1) is simply empty.
+  failed_when: false
+  check_mode: false
+
+# The assembly (and every parse) is node_storage_build_probe in
+# filter_plugins/node_storage.py, so tests/node_storage_classify.yml can feed
+# it the same registered-result shapes from fixtures.
+- name: Record the probe
+  ansible.builtin.set_fact:
+    node_storage_probe: >-
+      {{ docker_data_device | default('')
+         | node_storage_build_probe(node_storage_realpath, node_storage_device_stat,
+                                    node_storage_blkid, node_storage_lsblk,
+                                    node_storage_findmnt.results, node_storage_find.results) }}

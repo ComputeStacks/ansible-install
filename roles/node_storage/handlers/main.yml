@@ -1,0 +1,8 @@
+---
+# Flushed by tasks/apply.yml straight after the drop-ins are written, never
+# left for the end of the play: docker is installed and started by the NEXT
+# play, and systemd must already know about RequiresMountsFor= by then. A
+# daemon-reload restarts nothing.
+- name: Reload systemd for the data disk drop-ins
+  ansible.builtin.systemd_service:
+    daemon_reload: true

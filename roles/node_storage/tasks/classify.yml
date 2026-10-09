@@ -1,0 +1,31 @@
+---
+# PURE. Classify docker_data_device from the probe. No command runs and no
+# host is read here -- only the node_storage_classify filter
+# (filter_plugins/node_storage.py) and the facts it sets -- so
+# tests/node_storage_classify.yml drives this file with canned probes.
+#
+# Input:   node_storage_probe          from tasks/probe.yml
+#          node_storage_classify_fail  fail the host on `refuse` (default true)
+# Output:  node_storage_state          blank | ours | ready | refuse
+#          node_storage_reason         the refusal, an operator-facing
+#                                      sentence that ends "Nothing was
+#                                      changed."; for blank/ours what apply.yml
+#                                      will do; '' when ready
+#
+# The states, and every refusal, are in README.md and in the filter's
+# docstring.
+
+- name: Classify the data disk
+  vars:
+    node_storage_verdict: >-
+      {{ node_storage_probe | node_storage_classify(node_storage_mount, node_storage_label, node_storage_binds) }}
+  ansible.builtin.set_fact:
+    node_storage_state: "{{ node_storage_verdict.state }}"
+    node_storage_reason: "{{ node_storage_verdict.reason }}"
+
+- name: Refuse a data disk that is not provably blank or already ours
+  ansible.builtin.fail:
+    msg: "{{ inventory_hostname }}: refusing to set up container storage. {{ node_storage_reason }}"
+  when:
+    - node_storage_state == 'refuse'
+    - node_storage_classify_fail | bool

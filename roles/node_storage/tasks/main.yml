@@ -1,0 +1,19 @@
+---
+# Put a node's docker and containerd state on its dedicated data disk
+# (docker_data_device). Runs on nodes, in the play immediately BEFORE the one
+# that installs docker. README.md has the layout, the states and every
+# refusal.
+#
+#   probe     read-only: realpath, blkid, lsblk, findmnt, the bind targets
+#   classify  pure: blank | ours | ready | refuse (fail, nothing changed)
+#   apply     xfsprogs, mkfs (blank only), mounts, systemd drop-ins, and a
+#             re-probe that must classify `ready`
+
+- name: Probe the data disk
+  ansible.builtin.include_tasks: probe.yml
+
+- name: Classify the data disk
+  ansible.builtin.include_tasks: classify.yml
+
+- name: Put container storage on the data disk
+  ansible.builtin.include_tasks: apply.yml

@@ -1,0 +1,172 @@
+---
+# Does roles/node_storage only ever format a provably blank disk, and refuse
+# everything else with a reason? -- the rule the role's one destructive step
+# (mkfs.xfs on docker_data_device) rests on, proven without a disk.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
+#
+# PURE: this includes ONLY tasks/classify.yml (no command, no host access) and
+# calls the role's filter plugin (filter_plugins/node_storage.py). It never
+# includes probe.yml or apply.yml and touches no device on this machine.
+#
+# Each file in tests/fixtures/node_storage/ is one node as tasks/probe.yml
+# would have registered it -- the `realpath`, `stat`, `blkid -p -o export`,
+# `lsblk -J -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS`, `findmnt -J --mountpoint`
+# and `find` results, in util-linux's documented output shapes (MOUNTPOINTS a
+# list with null for "not mounted"; a bind mount's findmnt SOURCE
+# `/dev/xvdb[/docker]`; blkid rc 2 and no output when nothing is found) --
+# plus the expected state and a substring of the expected reason. Every case
+# goes through node_storage_build_probe (the same assembly probe.yml uses)
+# and then node_storage_classify. The fixtures are synthesized; replace or
+# extend them with real captures from a smoke node.
+#
+# Covered: blank (by kernel name, by a /dev/disk/by-id link, with empty
+# docker/containerd directories); ours unmounted; ours with only the data
+# mount; ready (plain, with a volume bind beneath /var/lib/docker, by-id);
+# ours mounted without prjquota and with accounting-only pqnoenforce;
+# unlabeled XFS; XFS with another label; ext4; a config drive as a disk
+# (iso9660) and as a CD (TYPE rom); an empty GPT label; a disk with
+# partitions; an LVM physical volume; the root disk; a partition; a missing
+# device; a character device; blank but containerd state on the root disk;
+# ours but docker state on the root disk; the data mount held by another disk
+# (R2); a bind target from another disk; a bind target from the wrong
+# subdirectory; a changed docker_data_device on a built node; mounted at /mnt;
+# mounted at a prefix look-alike of the data mount; blkid rc 8 (ambivalent).
+#
+# The one `fatal: ... refusing to set up container storage` in the output is
+# expected: it is the refusal path of classify.yml, caught by `rescue:`.
+
+- name: Node storage data disk classification
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    nst_fixtures: "{{ playbook_dir }}/fixtures/node_storage"
+    nst_files: "{{ query('ansible.builtin.fileglob', nst_fixtures ~ '/*.json') | sort }}"
+    nst_ready: "{{ lookup('ansible.builtin.file', nst_fixtures ~ '/ready.json') | from_json }}"
+    nst_ext4: "{{ lookup('ansible.builtin.file', nst_fixtures ~ '/ext4.json') | from_json }}"
+  tasks:
+    # ======================================================================
+    # Through tasks/classify.yml, as the role and preflight run it
+    # ======================================================================
+    # `public: true` so the role's defaults (node_storage_mount, _label,
+    # _binds) stay visible to the filter-only cases below.
+    - name: "Case: a finished node, through classify.yml"
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: classify
+        public: true
+      vars:
+        node_storage_probe: >-
+          {{ nst_ready.device_input | node_storage_build_probe(nst_ready.realpath, nst_ready.stat,
+               nst_ready.blkid, nst_ready.lsblk, nst_ready.findmnt, nst_ready.find) }}
+
+    - name: "Assert: ready, no reason"
+      ansible.builtin.assert:
+        that:
+          - node_storage_state == 'ready'
+          - node_storage_reason == ''
+        fail_msg: "{{ node_storage_state }} -- {{ node_storage_reason }}"
+        quiet: true
+
+    - name: "Case: a refused disk fails the host (node_storage_classify_fail defaults true)"
+      block:
+        - name: Classify an ext4 disk
+          ansible.builtin.include_role:
+            name: node_storage
+            tasks_from: classify
+          vars:
+            node_storage_probe: >-
+              {{ nst_ext4.device_input | node_storage_build_probe(nst_ext4.realpath, nst_ext4.stat,
+                   nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find) }}
+
+        - name: Record that classify.yml did not fail
+          ansible.builtin.set_fact:
+            nst_not_failed: true
+      rescue:
+        - name: "Assert: it failed in the refusal task, naming the device and that nothing changed"
+          ansible.builtin.assert:
+            that:
+              - nst_not_failed is not defined
+              - ansible_failed_task.name is search('Refuse a data disk')
+              - "'refusing to set up container storage' in ansible_failed_result.msg"
+              - "'/dev/xvdb' in ansible_failed_result.msg"
+              - "'ext4' in ansible_failed_result.msg"
+              - ansible_failed_result.msg is search('Nothing was changed\\.$')
+            fail_msg: "{{ ansible_failed_result.msg | default(ansible_failed_result) }}"
+            quiet: true
+
+    - name: "Assert: the refusal path really ran"
+      ansible.builtin.assert:
+        that:
+          - nst_not_failed is not defined
+          - node_storage_state == 'refuse'
+        fail_msg: "classify.yml did not fail on an ext4 disk"
+        quiet: true
+
+    - name: "Case: a refused disk with node_storage_classify_fail false only records the state"
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: classify
+      vars:
+        node_storage_classify_fail: false
+        node_storage_probe: >-
+          {{ nst_ext4.device_input | node_storage_build_probe(nst_ext4.realpath, nst_ext4.stat,
+               nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find) }}
+
+    - name: "Assert: refuse recorded, play continues"
+      ansible.builtin.assert:
+        that:
+          - node_storage_state == 'refuse'
+          - "'ext4' in node_storage_reason"
+        fail_msg: "{{ node_storage_state }} -- {{ node_storage_reason }}"
+        quiet: true
+
+    # ======================================================================
+    # Every fixture, through the filter (loaded above by include_role)
+    # ======================================================================
+    - name: Classify every fixture
+      vars:
+        nst_case: "{{ lookup('ansible.builtin.file', item) | from_json }}"
+        nst_verdict: >-
+          {{ nst_case.device_input
+             | node_storage_build_probe(nst_case.realpath, nst_case.stat, nst_case.blkid,
+                                        nst_case.lsblk, nst_case.findmnt, nst_case.find)
+             | node_storage_classify(node_storage_mount, node_storage_label, node_storage_binds) }}
+      ansible.builtin.set_fact:
+        nst_results: >-
+          {{ nst_results | default([]) + [{'file': item | basename, 'case': nst_case.case,
+                                           'expect': nst_case.expect, 'got': nst_verdict}] }}
+      loop: "{{ nst_files }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    - name: "Assert: each fixture classifies as expected"
+      ansible.builtin.assert:
+        that:
+          - item.got.state == item.expect.state
+          - item.expect.reason in item.got.reason
+          # a refusal always says nothing changed; ready never has a reason;
+          # blank/ours say what apply will do and never claim nothing changed
+          - (item.got.state != 'refuse') or (item.got.reason is search('Nothing was changed\\.$'))
+          - (item.got.state != 'ready') or (item.got.reason == '')
+          - (item.got.state not in ['blank', 'ours']) or ('Nothing was changed' not in item.got.reason)
+        fail_msg: "{{ item.file }} ({{ item.case }}): expected {{ item.expect }}, got {{ item.got }}"
+        success_msg: "{{ item.file }}: {{ item.got.state }}"
+        quiet: true
+      loop: "{{ nst_results }}"
+      loop_control:
+        label: "{{ item.file }}"
+
+    - name: "Assert: every state is covered"
+      ansible.builtin.assert:
+        that:
+          - nst_results | map(attribute='expect.state') | unique | sort == ['blank', 'ours', 'ready', 'refuse']
+          - nst_results | length >= 20
+        quiet: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          node_storage classify: {{ nst_results | length + 3 }} ok
+          ({{ nst_results | length }} fixtures, 3 through classify.yml)

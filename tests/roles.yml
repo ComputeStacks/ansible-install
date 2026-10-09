@@ -68,6 +68,7 @@
     - haproxy
     - node_observability
     - cs_agent
+    - node_storage
     - node_upgrade              # playbooks/upgrade-docker.yml, not site.yml
 
 - name: Metrics host — prometheus, alertmanager, loki
@@ -189,3 +190,26 @@
       ansible.builtin.include_role:
         name: node_upgrade
         tasks_from: classify_on
+
+# The node_storage entry points. `probe` (read-only) and `classify` (pure) are
+# what preflight, validate and upgrade-docker.yml include to check the data
+# disk before anything changes; tests/node_storage_classify.yml drives
+# `classify` alone; `apply` is the converge step main.yml runs after them.
+- name: Node storage task-file entry points
+  hosts: nodes
+  gather_facts: false
+  tasks:
+    - name: Probe the data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: probe
+
+    - name: Classify the data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: classify
+
+    - name: Put container storage on the data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: apply

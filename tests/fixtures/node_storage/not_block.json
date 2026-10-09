@@ -1,0 +1,73 @@
+{
+  "case": "a character device",
+  "expect": {
+    "state": "refuse",
+    "reason": "is not a block device"
+  },
+  "device_input": "/dev/null",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/null",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": false,
+      "ischr": true,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "skipped": true,
+    "changed": false,
+    "skip_reason": "Conditional result was False"
+  },
+  "lsblk": {
+    "skipped": true,
+    "changed": false,
+    "skip_reason": "Conditional result was False"
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": {
+        "src_subdir": "docker",
+        "target": "/var/lib/docker",
+        "mode": "0710"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": {
+        "src_subdir": "containerd",
+        "target": "/var/lib/containerd",
+        "mode": "0711"
+      },
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ]
+}
