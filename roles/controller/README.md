@@ -319,7 +319,7 @@ restarted the portal by hand.
   schema.
 * **No consul mount, no `/root/.consul` directory, no consul token slurp.**
 * **The branding CDN downloads are gone.** v1 fetched `application.css`, its
-  map and a login image from `f.cscdn.cc` on every bootstrap — unpinned
+  map and a login image from the v1 CDN on every bootstrap — unpinned
   third-party content pulled into the portal's asset path. The same files are
   copied out of the pinned controller image instead (`controller_image_branding_source`,
   default `/usr/src/app/public/custom`), once the portal is up and only for

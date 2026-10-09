@@ -5,7 +5,7 @@ Binding for every implementer. The full plan lives outside the repo
 Change requests go to the engineering manager, not into the code.
 
 ## Vocabulary
-`region` == controller `Location` (e.g. ams005). `az` == controller `Region`
+`region` == controller `Location` (e.g. exm001). `az` == controller `Region`
 (e.g. exm-005). Exactly ONE node per az — enforced by preflight, relied on
 everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
 

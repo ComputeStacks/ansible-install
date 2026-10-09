@@ -29,7 +29,7 @@ controller_branding_dir: "{{ controller_data_dir }}/branding"
 # mounted, and the image ships nothing there. Seeding is what connects the two.
 controller_image_branding_source: /usr/src/app/public/custom
 # Copy any of those assets that the branding directory does not already have,
-# once the portal container is up. v1 downloaded them from f.cscdn.cc on every
+# once the portal container is up. v1 downloaded them from its CDN on every
 # bootstrap; v2 dropped that (unpinned third-party content in the portal's
 # asset path) but nothing replaced it, so a fresh install mounted an EMPTY
 # directory over public/assets/custom and every page 404'd on
