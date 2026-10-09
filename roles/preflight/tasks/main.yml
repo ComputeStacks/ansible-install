@@ -558,7 +558,7 @@
       {{ preflight_storage_refused_nodes | length }} node(s), and nothing was
       changed on any host:
       {% for n in preflight_storage_refused_nodes %}{{ n }} ({{ hostvars[n].docker_data_device }}):
-      {{ hostvars[n].node_storage_reason }}{{ '; ' if not loop.last else '' }}{% endfor %}.
+      {{ hostvars[n].node_storage_reason }}{{ ' ' if not loop.last else '' }}{% endfor %}
       Every node needs a second, blank disk named by `docker_data_device`
       (docs/install.md); a node built before that requirement has none and
       must be rebuilt.
