@@ -5,9 +5,9 @@
 #
 #   validate_skip: [borg, dns]
 #
-# Check names: services, containers, agent, backfill, prometheus, borg, ssh,
-# portal, acme_backend, lb_domain_public, lb_domain, dns, dns_replication,
-# pdns_api.
+# Check names: services, storage, containers, agent, backfill, prometheus,
+# borg, ssh, portal, acme_backend, lb_domain_public, lb_domain, dns,
+# dns_replication, pdns_api.
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name

@@ -17,6 +17,20 @@
   when: "'services' not in validate_skip"
   tags: [validate, services]
 
+# roles/node_storage's own probe and classifier, so validate and the converge
+# cannot disagree about what a finished node looks like: `ready` is the data
+# disk mounted with prjquota and both bind mounts sourced from it.
+- name: Assert this node's docker and containerd state lives on its data disk
+  ansible.builtin.include_tasks:
+    file: storage.yml
+    apply:
+      tags: [validate, storage]
+  when:
+    - "'storage' not in validate_skip"
+    - "'nodes' in group_names"
+    - not (existing_env | default(false) | bool)
+  tags: [validate, storage]
+
 - name: Assert the control-plane containers are running
   ansible.builtin.include_tasks:
     file: containers.yml

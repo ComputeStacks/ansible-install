@@ -115,6 +115,9 @@ inventory directory for attach runs, or drop the other nodes from the copy you
 run this with. Everything the new region needs from its siblings comes from
 the controller, not from their inventory entries.
 
+**The new node needs a second, blank disk named by `docker_data_device`,**
+exactly as a greenfield node does (docs/install.md §1).
+
 **Flag every existing shared host** — controller, metrics, backup, registry,
 nameservers:
 

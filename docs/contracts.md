@@ -33,7 +33,9 @@ hosts and backup hosts; unset everywhere means the single site called
    facts (`ansible_hostname`, `ansible_default_ipv4`, …) — under `--limit`,
    un-targeted hosts have no facts and their regions silently vanish from
    rendered config. Required node vars: `hostname`, `primary_ip`, `public_ip`,
-   `region`, `az`, `container_network`, `container_network_name`. Metrics and
+   `region`, `az`, `container_network`, `container_network_name`,
+   `docker_data_device` (the blank data disk, an absolute path under `/dev/`;
+   roles/node_storage). Metrics and
    backup hosts additionally require `site` — but ONLY when the inventory
    holds more than one site, so a single-site inventory needs no edit. Nodes
    take `site` too; a node that omits it falls into the site called `default`,
@@ -91,9 +93,16 @@ Wave 3H: powerdns
 Wave 4I: controller_seed, controller_post_enroll
 Wave 4J: validate, site.yml/add-region.yml final wiring, attach_fragments,
          controller attach_prep, docs/
+Node data disk (October 2026): node_storage
 Single owners: `ops` docker network -> metrics role. `/etc/update-motd.d/
 50-computestacks` -> common. `/etc/modules-load.d/cs-firewall.conf` -> firewall;
 `/etc/modules-load.d/cs-node.conf` -> node_kernel (separate files, no sharing).
+On nodes, the `docker_data_device` filesystem, its fstab entries (the data
+mount and the `/var/lib/docker` and `/var/lib/containerd` bind mounts) and
+`/etc/systemd/system/{docker,containerd}.service.d/10-cs-data-disk.conf` ->
+node_storage. Its play (`Node container storage` in site.yml, `New node
+container storage` in add-region.yml) must precede the docker install play,
+and roles/preflight and upgrade-docker.yml run its read-only probe first.
 
 ## Cross-wave interface contracts
 

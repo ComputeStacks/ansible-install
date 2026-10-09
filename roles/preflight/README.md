@@ -12,7 +12,16 @@ from the network, which is still not a change to a host.
 - Every host is Ubuntu 26.04 amd64/x86_64 — **skipped** on hosts flagged
   `existing_env: true` (pre-existing v1 environments are Debian).
 - Every node in `groups['nodes']` defines: `hostname`, `primary_ip`,
-  `public_ip`, `region`, `az`, `container_network`, `container_network_name`.
+  `public_ip`, `region`, `az`, `container_network`, `container_network_name`,
+  `docker_data_device`.
+- **The container data disk.** Every new node's `docker_data_device` is an
+  absolute path under `/dev/`; then each new (not `existing_env`) node runs
+  `roles/node_storage`'s read-only `probe` and pure `classify` with
+  `node_storage_classify_fail: false`, and ONE `run_once` assert fails the run
+  if any node's disk was refused, listing every refused node and its reason.
+  A failed `run_once` task fails every host in the play, so one bad disk stops
+  the whole run before any host is changed. A node built before the data-disk
+  requirement has no such disk and is refused: it must be rebuilt.
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
 - Exactly one host in `groups['controller']`, and — when
@@ -201,6 +210,7 @@ not earn.
 | Variable | Default | Purpose |
 |---|---|---|
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
+| `preflight_storage_refused_nodes` | derived | Nodes whose `node_storage_state` fact is `refuse`. A plain fact, so the cross-host read is safe (docs/contracts.md rule 10). |
 | `preflight_site_hint` | see `defaults/main.yml` | What a `site` is and where to set it, as an operator-facing sentence. Shared by all three site assertions. |
 | `preflight_node_sites` | derived | Distinct `cs_site` values across `groups['nodes']`. |
 | `preflight_metrics_sites` / `preflight_backup_sites` | derived | The `cs_site` of each metrics / backup host, **not** deduped — comparing against its own `unique` is how "more than one per site" is detected. |

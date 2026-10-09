@@ -30,6 +30,10 @@ metrics and registry docker hosts are not covered.
   heartbeat-driven offline/evacuation, no HealthCheck/RecoverContainer, no
   placement, customer power actions canceled) and, on release, kicks
   HealthCheck, the load balancer config push and a changelog poll.
+* **The container data disk** (`roles/node_storage` state `ready`) on every
+  target. Checked by `playbooks/upgrade-docker.yml`'s preflight play before
+  this role's own preflight, never set up here; a node built before the
+  data-disk requirement must be rebuilt.
 
 ## Flow (`tasks/main.yml`)
 

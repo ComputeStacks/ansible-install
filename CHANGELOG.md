@@ -10,6 +10,23 @@
 * **The preloaded SFTP bastion image is `cs-docker-bastion:v4`.** `v2` reads
   the metadata path that controller 9.6 removed and crash-loops on start;
   controller 9.8.1 makes the same change to its default.
+* **Nodes now require a second, blank disk, named by `docker_data_device`.**
+  Docker 29 keeps images and container layers in containerd's store under
+  `/var/lib/containerd`, which landed on the root disk. A new role,
+  `roles/node_storage`, runs before docker is installed: it formats the disk
+  XFS with project quotas (only when it is provably blank), mounts it at
+  `/var/lib/docker-data` by UUID, bind-mounts it over `/var/lib/docker` and
+  `/var/lib/containerd`, and makes `docker.service` and `containerd.service`
+  require those mounts. A re-run on a finished node changes nothing.
+* **A disk the role would not touch stops the run before any host changes.**
+  Preflight probes every new node and refuses — listing each node and why —
+  a missing device, a partition or the root disk, a partition table, any other
+  filesystem, a mount elsewhere, a blank disk on a node where docker already
+  wrote to `/`, or our filesystem mounted without `prjquota`.
+* **Nodes built before this change must be rebuilt.** They have no data disk,
+  and `site.yml`, `add-region.yml`, `make upgrade-docker` (in its preflight,
+  before any node is held) and `validate`'s new `storage` check all refuse
+  them.
 
 ***
 

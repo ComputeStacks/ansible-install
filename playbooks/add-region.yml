@@ -148,6 +148,14 @@
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
 
+# As in site.yml: the new node's data disk is set up before docker is
+# installed, so neither daemon ever writes to the root disk
+# (roles/node_storage/README.md).
+- name: New node container storage
+  hosts: nodes
+  roles:
+    - node_storage
+
 # The same docker play as site.yml's, and the same live-node rule: a node that
 # already carries tenant containers (roles/node_upgrade detect_live) -- a
 # re-run after the region went into service -- never has docker upgraded

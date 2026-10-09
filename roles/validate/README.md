@@ -20,6 +20,7 @@ this role exists to catch at install time.
 | Name | Runs on | From | What it asserts |
 | --- | --- | --- | --- |
 | `services` | every host | itself | Every unit that host's groups imply is `systemctl is-active`; `haproxy` on nodes is `is-enabled` only. Asserts **nothing** on an `existing_env` host. |
+| `storage` | nodes (not `existing_env`) | itself | `roles/node_storage`'s probe and classifier report `ready`: the data disk from `docker_data_device` is mounted with `prjquota`, and `/var/lib/docker` and `/var/lib/containerd` are bind mounts from it. Otherwise docker 29's containerd image store fills the root disk. |
 | `containers` | controller | itself | `portal` and `vault-bootstrap` exist and are running. |
 | `agent` | nodes | **the controller** | cs-agent answers on `cs_ports.agent_http` at the address the controller actually dials. |
 | `backfill` | nodes | **the controller** | `nodes.datachannel_backfilled_at` is set for this node. |

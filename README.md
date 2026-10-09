@@ -59,6 +59,15 @@ prerequisites. Hosts in an *existing* v1 environment are the exception: they
 are Debian, they are flagged `existing_env: true`, and attach mode only ever
 adds to them.
 
+**Nodes need a second, blank disk** — a whole device, no partition table, no
+filesystem, sized for every image, container layer and volume the node will
+hold — named by `docker_data_device`. `roles/node_storage` formats it XFS
+with project quotas and bind-mounts it over `/var/lib/docker` and
+`/var/lib/containerd` before docker is installed; docker 29 keeps images and
+container layers under `/var/lib/containerd`, so a single disk fills `/`.
+Preflight refuses any device that is not provably blank (or already set up by
+this role) before any host is changed (docs/install.md §1).
+
 **DNS.** The portal, metrics and registry domains must resolve to their hosts
 before the run, because the TLS certificates are issued during it. Every
 metrics host needs its own name — one per site:
@@ -83,8 +92,8 @@ cp -r inventories/example inventories/prod
 * `hosts.yml` — the groups (`controller`, `metrics`, `backup`, `registry`,
   `nameservers` with `ns_primary`/`ns_followers`, `nodes`) and the host vars.
   Every node needs `hostname`, `primary_ip`, `public_ip`, `region`, `az`,
-  `container_network` and `container_network_name`; preflight asserts all of
-  them. `region` becomes a controller *Location*, `az` becomes a controller
+  `container_network`, `container_network_name` and `docker_data_device`;
+  preflight asserts all of them. `region` becomes a controller *Location*, `az` becomes a controller
   *Region*, and there is exactly one node per `az`.
 * `group_vars/all/main.yml` — domains, locale, currency, DNS driver, ACME
   settings.

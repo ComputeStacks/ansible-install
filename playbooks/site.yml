@@ -12,6 +12,9 @@
 #       -> controller_post_enroll runs the backfills
 #         -> validate asserts the whole graph
 #
+# and, on nodes, the container data disk is mounted before docker exists:
+# `Node container storage` must precede `Docker hosts`.
+#
 # Attach mode (a new region against an EXISTING v1-built environment) is a
 # different playbook: playbooks/add-region.yml. Do not run this one against
 # hosts flagged `existing_env: true`.
@@ -49,6 +52,17 @@
   roles:
     - postgres_repo              # PGDG: 26.04 carries no postgresql-17
     - powerdns
+
+# Before docker is installed, so dockerd and containerd never write a byte to
+# the root disk: the data disk from `docker_data_device` is formatted (only
+# when provably blank), mounted with prjquota, and bind-mounted over
+# /var/lib/docker and /var/lib/containerd, and both daemons require those
+# mounts (roles/node_storage/README.md). Preflight has already refused any
+# node whose disk this role would not touch.
+- name: Node container storage
+  hosts: nodes
+  roles:
+    - node_storage
 
 # geerlingguy.docker installs the engine only. /etc/docker/daemon.json belongs
 # to docker_config and the node TCP/TLS listener to docker_tls; docker

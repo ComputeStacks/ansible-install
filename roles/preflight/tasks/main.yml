@@ -44,11 +44,36 @@
       '{{ item.1 }}' as a host var for {{ item.0 }} in the inventory (see
       inventories/example/hosts.yml for the full required set: hostname,
       primary_ip, public_ip, region, az, container_network,
-      container_network_name).
+      container_network_name, docker_data_device).
     success_msg: "{{ item.0 }}: {{ item.1 }} is defined"
   loop: "{{ groups['nodes'] | product(preflight_required_node_vars) | list }}"
   loop_control:
     label: "{{ item.0 }}.{{ item.1 }}"
+  run_once: true
+
+# Shape only. Whether the device is really a blank disk (or already ours) is
+# the node_storage probe's question, asked further down. A relative path or
+# a bare `vdb` would otherwise reach `realpath` on the node and resolve
+# against whatever directory the task happened to run in.
+- name: Assert every new node's docker_data_device is an absolute path under /dev/
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].docker_data_device is string
+      - hostvars[item].docker_data_device is match('^/dev/\\S+$')
+      - hostvars[item].docker_data_device is not search('(^|/)\\.\\.(/|$)')
+    fail_msg: >-
+      docker_data_device on node '{{ item }}' is
+      '{{ hostvars[item].docker_data_device }}', which is not an absolute path
+      under /dev/. Name the node's blank data disk as a whole device, for
+      example /dev/vdb (KVM), /dev/xvdb (xcp-ng) or, where the platform
+      offers stable names, /dev/disk/by-id/<id> — never a partition.
+    success_msg: "{{ item }}: docker_data_device {{ hostvars[item].docker_data_device }}"
+  loop: "{{ groups['nodes'] | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - hostvars[item].docker_data_device is defined
+    - not (hostvars[item].existing_env | default(false) | bool)
   run_once: true
 
 - name: Assert exactly one node per availability zone
@@ -492,6 +517,53 @@
     - not (existing_env | default(false))
     - controller_image_tag | default('') in ['latest', 'stable', 'main', 'master']
     - controller_image_allow_floating_tag | default(false) | bool
+
+# The container data disk (roles/node_storage/README.md). Read-only on the
+# node — blkid, lsblk and findmnt, no writes — and the role's own pure
+# classifier decides, so preflight and the converge cannot disagree about
+# what a device is. `node_storage_classify_fail: false` makes classify record
+# its verdict (`node_storage_state`, `node_storage_reason`) instead of failing
+# the one node: a per-host failure would only drop THAT node from the run and
+# let every other host carry on into Base system.
+#
+# The verdict is then asserted ONCE, run_once, over every node. A failed
+# run_once task fails every host in the play (ansible's linear strategy marks
+# them all failed, not just the one it ran on), so a single refused node stops
+# the whole run here, before any host is changed — and the message lists
+# every refused node at once rather than the first one found. `existing_env`
+# nodes (v1-built) are never probed and never asserted.
+- name: Probe and classify each new node's container data disk
+  when:
+    - "'nodes' in group_names"
+    - not (existing_env | default(false) | bool)
+  vars:
+    node_storage_classify_fail: false
+  block:
+    - name: Probe the container data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: probe
+
+    - name: Classify the container data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: classify
+
+- name: Assert no node's container data disk is refused
+  ansible.builtin.assert:
+    that:
+      - (preflight_storage_refused_nodes | length) == 0
+    fail_msg: >-
+      The container data disk was refused on
+      {{ preflight_storage_refused_nodes | length }} node(s), and nothing was
+      changed on any host:
+      {% for n in preflight_storage_refused_nodes %}{{ n }} ({{ hostvars[n].docker_data_device }}):
+      {{ hostvars[n].node_storage_reason }}{{ '; ' if not loop.last else '' }}{% endfor %}.
+      Every node needs a second, blank disk named by `docker_data_device`
+      (docs/install.md); a node built before that requirement has none and
+      must be rebuilt.
+    success_msg: "every new node's container data disk is usable"
+  run_once: true
 
 # DNS before the registry: both are network checks, but this one fails on an
 # operator step that has to be fixed outside this repository (and outside this

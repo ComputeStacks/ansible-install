@@ -38,6 +38,18 @@ Nodes additionally need a container network CIDR that does not overlap
 anything else in the environment (RFC 1918, at least a `/28`, `/22` is the
 usual size).
 
+Nodes also need a **second, blank disk** for docker and containerd: a whole
+device with no partition table and no filesystem, sized for every image,
+container layer and volume the node will hold. Docker 29 keeps images and
+container writable layers in containerd's image store under
+`/var/lib/containerd`, not `/var/lib/docker`, so on a single disk they fill
+the root filesystem. `roles/node_storage` formats it XFS with project quotas,
+mounts it at `/var/lib/docker-data` and bind-mounts it over both directories
+before docker is installed. Name it with `docker_data_device` (below).
+Preflight refuses any device that is not provably blank — or already set up
+by this role — before any host is changed, and it never formats anything
+else.
+
 ## 2. Prepare the control machine
 
 ```bash
@@ -192,9 +204,14 @@ $EDITOR inventories/prod/group_vars/all/secrets.yml
 ```
 
 `hosts.yml` carries the topology. Every node needs `hostname`, `primary_ip`,
-`public_ip`, `region`, `az`, `container_network`, `container_network_name`;
-every nameserver needs a unique `powerdns_name` (its FQDN — it becomes the
-zone's NS records).
+`public_ip`, `region`, `az`, `container_network`, `container_network_name` and
+`docker_data_device`; every nameserver needs a unique `powerdns_name` (its
+FQDN — it becomes the zone's NS records).
+
+`docker_data_device` is the blank data disk from §1, as a whole device under
+`/dev/`: `/dev/vdb` on KVM, `/dev/xvdb` on xcp-ng, or a stable
+`/dev/disk/by-id/...` name where the platform offers one. The example sets it
+once as a group var on `nodes`; set it per host where nodes differ.
 
 Each node may also carry `app_domain`, the domain that az's load balancer
 answers on — the pair of DNS records above. It is optional and must be unique

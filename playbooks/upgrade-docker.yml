@@ -27,7 +27,9 @@
 # preflight and reports what each node would get, changing nothing.
 #
 # Requires cs-agent >= 3.4.0 on every node (checked, never installed) and a
-# controller >= 9.8.0 (one that confirms agent holds).
+# controller >= 9.8.0 (one that confirms agent holds), and every target's
+# docker and containerd state on its data disk (roles/node_storage `ready`) --
+# checked first, never set up here.
 
 - name: Select the nodes this playbook upgrades
   hosts: nodes
@@ -51,6 +53,52 @@
   any_errors_fatal: true
   max_fail_percentage: 0
   tasks:
+    # First, before node_upgrade's own preflight: docker 29 keeps images and
+    # container layers under /var/lib/containerd, so upgrading a node whose
+    # docker and containerd state is not on its data disk would move every
+    # layer onto the root disk. roles/node_storage's read-only probe and pure
+    # classifier record the verdict on each target; the run_once assert below
+    # fails every host if any target is not `ready`.
+    - name: Probe and classify the container data disk
+      vars:
+        node_storage_classify_fail: false
+      block:
+        - name: Probe the container data disk
+          ansible.builtin.include_role:
+            name: node_storage
+            tasks_from: probe
+
+        - name: Classify the container data disk
+          ansible.builtin.include_role:
+            name: node_storage
+            tasks_from: classify
+
+    - name: Assert every targeted node keeps docker and containerd on its data disk
+      ansible.builtin.assert:
+        that:
+          - (upgrade_docker_storage_not_ready | length) == 0
+        fail_msg: >-
+          {{ upgrade_docker_storage_not_ready | length }} node(s) do not keep
+          docker and containerd on a data disk:
+          {% for n in upgrade_docker_storage_not_ready %}{{ n }}
+          ({{ hostvars[n].node_storage_state | default('not probed') }}{{ ': ' ~ hostvars[n].node_storage_reason
+             if hostvars[n].node_storage_reason | default('') | length > 0 else '' }}){{ '; ' if not loop.last else '' }}{% endfor %}.
+          A node built before the data-disk requirement must be rebuilt, or
+          its data disk set up by site.yml / add-region.yml, before docker is
+          upgraded on it. Nothing was changed on any node.
+        success_msg: "every targeted node keeps docker and containerd on its data disk"
+      vars:
+        # Every target that is not `ready`, including one with no verdict.
+        upgrade_docker_storage_not_ready: >-
+          {{ groups['node_upgrade_targets'] | default([])
+             | reject('in', groups['node_upgrade_targets'] | default([])
+                            | map('extract', hostvars)
+                            | selectattr('node_storage_state', 'defined')
+                            | selectattr('node_storage_state', 'equalto', 'ready')
+                            | map(attribute='inventory_hostname') | list)
+             | list | sort }}
+      run_once: true
+
     - name: Preflight checks
       ansible.builtin.include_role:
         name: node_upgrade

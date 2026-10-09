@@ -1,0 +1,37 @@
+---
+# Docker 29 keeps images and container layers in containerd's store under
+# /var/lib/containerd, not /var/lib/docker. A node where either directory is
+# not the bind mount from its data disk is filling its root disk instead, and
+# nothing else notices until `/` is full.
+#
+# roles/node_storage's read-only probe and pure classifier, with
+# `node_storage_classify_fail: false` so the verdict is reported by the assert
+# below rather than by the role's generic refusal.
+
+- name: Probe and classify this node's container data disk
+  vars:
+    node_storage_classify_fail: false
+  block:
+    - name: Probe the container data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: probe
+
+    - name: Classify the container data disk
+      ansible.builtin.include_role:
+        name: node_storage
+        tasks_from: classify
+
+- name: Assert this node's container data disk is fully set up
+  ansible.builtin.assert:
+    that:
+      - node_storage_state == 'ready'
+    fail_msg: >-
+      {{ inventory_hostname }}'s container data disk
+      ({{ docker_data_device | default('docker_data_device unset') }}) is
+      '{{ node_storage_state }}', not 'ready'.
+      {{ node_storage_reason }}
+      {{ 'Re-running the converge (its `Node container storage` play) completes it.'
+         if node_storage_state in ['blank', 'ours'] else 'Nothing was changed.' }}
+    success_msg: "{{ inventory_hostname }}: docker and containerd live on {{ docker_data_device }}"
+    quiet: true
