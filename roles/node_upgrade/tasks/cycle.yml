@@ -10,7 +10,7 @@
 #
 # A failure anywhere lands in `rescue`, which re-raises it with the node's
 # state spelled out. `Gate - ` tasks already say exactly what state the node
-# is in and what to do, and are passed through unchanged.
+# is in and what to do, so for those the re-raise just points back at them.
 
 - name: Upgrade the node
   block:

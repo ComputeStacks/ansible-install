@@ -1,6 +1,7 @@
 {#- The re-raised failure of tasks/cycle.yml's block. `Gate - ` tasks already
-    describe the node's state and the operator's next step, so their message
-    passes through unchanged; anything else (apt, docker, ssh, a module error)
+    describe the node's state and the operator's next step, and ansible has
+    printed that message just above, so the re-raise only points back at it;
+    anything else (apt, docker, ssh, a module error)
     gets the node's state appended. Never suggests `cs-agent maintenance off`
     once state.json exists: from then on containers may be stopped, and only
     this playbook knows which to bring back. -#}
@@ -14,7 +15,7 @@
 {%- set why = why ~ ' -- ' ~ (res.stderr | string | trim)[-600:] -%}
 {%- endif -%}
 {%- if task is search('Gate - ') -%}
-{{ why }}
+Stopped at "{{ task }}" on {{ inventory_hostname }}; its message above says what state the node is in and what to do.
 {%- elif not node_upgrade_rescue_state.stat.exists -%}
 "{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
 No upgrade state was written, so no container has been stopped. Run
