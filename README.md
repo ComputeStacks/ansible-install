@@ -281,7 +281,7 @@ Two pins move together and are marked as such in `versions.yml`:
 `borg_version` (the server binary) with `borg_image` (the client container),
 and `loki_image` with `fluentd_loki_image`.
 
-**The controller** is pinned by *minor* tag (`controller_image_tag: "9.7"`),
+**The controller** is pinned by *minor* tag (`controller_image_tag: "9.8"`),
 which is a deliberate rolling channel: patch releases inside the line are
 picked up by
 

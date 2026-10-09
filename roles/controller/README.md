@@ -253,7 +253,7 @@ Assert first, then act:
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `controller_image_repo` / `controller_image_tag` | `ghcr.io/computestacks/controller` / `9.7` | `versions.yml`. Composed into `CS_REG`. The **minor** tag is a deliberate rolling channel; a digest pin would make `cstacks upgrade` a permanent no-op. |
+| `controller_image_repo` / `controller_image_tag` | `ghcr.io/computestacks/controller` / `9.8` | `versions.yml`. Composed into `CS_REG`. The **minor** tag is a deliberate rolling channel; a digest pin would make `cstacks upgrade` a permanent no-op. |
 | `controller_image_allow_floating_tag` | `false` | Permit a `latest`/`stable`/`main`/`master` tag. For an image that publishes no immutable line (an internal build cut on demand); set it as a host var beside the repo override. Costs reproducibility: nothing then records which build a host runs. |
 | `controller_auto_upgrade` | `true` | When the running container's image differs from `CS_REG`, run the full `cstacks upgrade` rather than recreating on an unmigrated schema. Set false to make tag bumps manual. |
 | `controller_wildcard_days` | `3650` | Generated once **per domain**; never rotated by a converge. |

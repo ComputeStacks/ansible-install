@@ -7,7 +7,7 @@
 
 # Controller (rolling minor line — `cstacks upgrade` pulls latest patch)
 controller_image_repo: "ghcr.io/computestacks/controller"
-controller_image_tag: "9.7"
+controller_image_tag: "9.8"
 # `controller_image_repo` can be pointed at a private registry instead; supply
 # its pull credentials (vaulted) as
 # controller_registry_username / controller_registry_password in secrets.yml
@@ -35,11 +35,12 @@ controller_image_allow_floating_tag: false
 # cs-agent — apt PACKAGE version. Historically this was NOT the agent's
 # self-reported version (package 1.5.0 shipped backup-agent 2.0.0), but since
 # the node-agent rename the deb is cut straight from the git tag, so package
-# == agent version. Verified 2026-08-28 (wave D) against
+# == agent version. Verified 2026-10-09 against
 # https://repo.computestacks.com/public/dists/stable/main/binary-amd64/Packages
-# — newest listed package is 3.3.0, which is agent v3.3.0 (the pool is
+# — newest listed package is 3.4.0, which is agent v3.4.0 (the pool is
 # append-only, so every older version stays installable for a rollback).
-cs_agent_apt_version: "3.3.0"
+# 3.4.0 is the minimum for `make upgrade-docker` (`cs-agent maintenance`).
+cs_agent_apt_version: "3.4.0"
 cs_agent_apt_repo: "https://repo.computestacks.com/public"
 cs_agent_apt_key_url: "https://repo.computestacks.com/public/computestacks.gpg.asc"
 
@@ -52,7 +53,8 @@ borg_image: "ghcr.io/computestacks/cs-docker-borg:1.6"
 borg_binary_path: "/opt/computestacks/bin/borg"   # attach mode overrides to the existing server's path
 
 # Node image preloads (controller expects these present)
-bastion_image: "ghcr.io/computestacks/cs-docker-bastion:v2"
+# v4 or later: v2 reads the pre-9.6 metadata path and crashes on controller 9.6+.
+bastion_image: "ghcr.io/computestacks/cs-docker-bastion:v4"
 xtrabackup24_image: "ghcr.io/computestacks/cs-docker-xtrabackup:2.4"
 xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
 
@@ -121,11 +123,11 @@ nginx_image: "nginx:1.30.4"
 # entry is pinned on its own. playbooks/site.yml and add-region.yml strip
 # `=<version>` before `apt-mark hold`, so pinned entries hold correctly.
 docker_apt_packages:
-  - "docker-ce=5:29.7.2-1~ubuntu.26.04~resolute"
-  - "docker-ce-cli=5:29.7.2-1~ubuntu.26.04~resolute"
-  - "docker-ce-rootless-extras=5:29.7.2-1~ubuntu.26.04~resolute"
-  - "containerd.io=2.3.4-1~ubuntu.26.04~resolute"
-  - "docker-buildx-plugin=0.36.1-1~ubuntu.26.04~resolute"
+  - "docker-ce=5:29.9.0-1~ubuntu.26.04~resolute"
+  - "docker-ce-cli=5:29.9.0-1~ubuntu.26.04~resolute"
+  - "docker-ce-rootless-extras=5:29.9.0-1~ubuntu.26.04~resolute"
+  - "containerd.io=2.4.1-2~ubuntu.26.04~resolute"
+  - "docker-buildx-plugin=0.38.0-1~ubuntu.26.04~resolute"
 
 # node_exporter is the distro package on every host (the plan keeps it that
 # way), installed and held by roles/node_exporter. Empty means "whatever

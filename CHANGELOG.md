@@ -1,5 +1,18 @@
 # Changelog
 
+## October 9, 2026
+
+* **Pins moved to controller 9.8, cs-agent 3.4.0 and docker 29.9.0**
+  (containerd.io 2.4.1, buildx 0.38.0). `make upgrade-docker` needs exactly
+  these controller and agent versions; an existing fleet takes the agent on
+  its next `site.yml` run (before a maintenance window, since the install
+  restarts the agent) and the docker bump through `make upgrade-docker`.
+* **The preloaded SFTP bastion image is `cs-docker-bastion:v4`.** `v2` reads
+  the metadata path that controller 9.6 removed and crash-loops on start;
+  controller 9.8.1 makes the same change to its default.
+
+***
+
 ## October 7, 2026
 
 * **Attach mode links the default user group to the new regions only.** The
