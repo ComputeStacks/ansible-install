@@ -8,13 +8,16 @@ interactive conveniences switched off.
 
 ## The contract: what the outer layer must produce
 
-The playbooks' entire input is one inventory directory. The outer layer emits:
+The outer layer creates the VMs to [requirements.md](requirements.md) —
+in particular, **every node gets a second, blank disk** that nothing
+(cloud-init included) formats or mounts — and then emits one inventory
+directory, the playbooks' entire input:
 
 * `hosts.yml` — the topology. The required host vars are asserted by
   `roles/preflight` (see `inventories/example/hosts.yml` for the full set):
   every node needs `hostname`, `primary_ip`, `public_ip`, `region`, `az`,
-  `container_network`, `container_network_name`; every nameserver needs
-  `powerdns_name`.
+  `container_network`, `container_network_name` and `docker_data_device`;
+  every nameserver needs `powerdns_name`.
 * `group_vars/all/main.yml` — the four domains (`cs_portal_domain`,
   `cs_metrics_domain`, `cs_registry_domain`, `cs_app_zone`), admin email,
   DNS driver, ACME settings.

@@ -20,8 +20,10 @@ scrape configuration and the firewall are the two that would take a running
 environment down.
 
 If you are extending a **v2** environment, you do not need this playbook. Add
-the node to the same inventory and re-run `site.yml`, optionally
-`--limit`-scoped.
+the node to the same inventory and re-run `site.yml`, un-limited — a new
+region needs the controller, its site's metrics host and the shared hosts'
+firewalls, which a `--limit region_<name>` would skip (see the README,
+"Adding a region").
 
 ## Prerequisites
 
@@ -116,7 +118,7 @@ run this with. Everything the new region needs from its siblings comes from
 the controller, not from their inventory entries.
 
 **The new node needs a second, blank disk named by `docker_data_device`,**
-exactly as a greenfield node does (docs/install.md §1).
+exactly as a greenfield node does ([requirements.md](requirements.md#node-disk-layout)).
 
 **Flag every existing shared host** — controller, metrics, backup, registry,
 nameservers:
