@@ -85,6 +85,16 @@ usercontent.example.com.  IN NS    ns1.example.com.
 ## Inventory
 
 One inventory describes the whole install — every region, every shared host.
+The words mean something specific here, and two of them are renamed on the
+way into the controller:
+
+| Inventory | Controller | Meaning |
+| --- | --- | --- |
+| `region` | Location | A group of availability zones, e.g. `exm001`. |
+| `az` | Region | One availability zone, served by exactly one node, e.g. `exm-001`. |
+| `site` | — | The physical facility a host lives in (below). Provisioner-only. |
+| `app_domain` | load balancer domain | The name one az's load balancer answers on; defaults to `cs_app_zone`. |
+
 Copy the example and edit it:
 
 ```bash
@@ -371,7 +381,7 @@ docs/
 * [`docs/control-plane.md`](docs/control-plane.md) — who dials whom, on what
   address, with what credential. The 19-row graph `ports.yml`, the firewall
   rules and the play order are all derived from.
-* [`docs/contracts.md`](docs/contracts.md) — the rules every role obeys:
+* [`docs/contracts.md`](docs/contracts.md) — for contributors: the rules every role obeys:
   ownership, play ordering, the ports and prometheus contracts, attach-mode
   limits. Read this before changing anything.
 

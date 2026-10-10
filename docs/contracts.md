@@ -1,10 +1,16 @@
-# v2 implementation contracts (frozen — Wave 0)
+# Design contracts
 
-Binding for every implementer. The full plan lives outside the repo
-(workspace doc); this file is the subset an implementer must not violate.
-Change requests go to the engineering manager, not into the code.
+The rules every role in this repository follows, and the interfaces between
+roles that must not drift. It is written for anyone changing the provisioner;
+to run it, start with the [README](../README.md) and
+[install.md](install.md) instead.
+
+Code comments cite these rules by number ("contracts rule 3") and by section
+("§Variable scope"). Keep the numbering stable, and change a rule in the same
+commit as the code that needs the change.
 
 ## Vocabulary
+
 `region` == controller `Location` (e.g. exm001). `az` == controller `Region`
 (e.g. exm-005). Exactly ONE node per az — enforced by preflight, relied on
 everywhere. The Location/Region mapping exists ONLY inside the seeding layer.
@@ -29,84 +35,113 @@ hosts and backup hosts; unset everywhere means the single site called
 `default`, which is what every inventory that predates this concept is.
 
 ## Hard rules
+
 1. **Inventory vars only in shared-host and seed templates.** Never gathered
    facts (`ansible_hostname`, `ansible_default_ipv4`, …) — under `--limit`,
    un-targeted hosts have no facts and their regions silently vanish from
    rendered config. Required node vars: `hostname`, `primary_ip`, `public_ip`,
    `region`, `az`, `container_network`, `container_network_name`,
    `docker_data_device` (the blank data disk, an absolute path under `/dev/`;
-   roles/node_storage). Metrics and
-   backup hosts additionally require `site` — but ONLY when the inventory
-   holds more than one site, so a single-site inventory needs no edit. Nodes
-   take `site` too; a node that omits it falls into the site called `default`,
-   which preflight catches as "site `default` holds nodes but no metrics
-   host" the moment any other host names a real site.
+   roles/node_storage). Metrics and backup hosts additionally require `site`
+   — but ONLY when the inventory holds more than one site, so a single-site
+   inventory needs no edit. Nodes take `site` too; a node that omits it falls
+   into the site called `default`, which preflight catches as "site `default`
+   holds nodes but no metrics host" the moment any other host names a real
+   site. The one exception is §Facts exception.
 2. **Never index `[0]` in templates.** Iterate groups. (Delegating an ACTION
-   to `groups['controller'][0]` is fine — single controller is architectural.)
+   to `groups['controller'][0]` is fine — a single controller is
+   architectural.)
 3. **Convergent roles.** No `when: service is not defined` install guards.
-   A version bump in versions.yml must roll the change on rerun. Handlers
-   restart services on config change.
-   *Amended (upgrade-docker.yml):* one exception, on **live nodes** only
-   (a node with tenant containers, per `roles/node_upgrade`
-   `tasks_from: detect_live`). A `docker_apt_packages` bump does NOT roll
-   there on a re-run of site.yml/add-region.yml — those skip docker's
-   packages on that node and warn — and a pending reboot is not taken there
-   either. Both roll through `make upgrade-docker ENV=<env>`
-   (`playbooks/upgrade-docker.yml`) in a maintenance window, because
-   restarting dockerd or rebooting stops tenant containers that have no
-   restart policy. A node that is not live, and every other host, still
+   A version bump in `versions.yml` must roll the change on a re-run, and
+   handlers restart services on config change.
+   *One exception, on live nodes only* (a node with tenant containers, per
+   `roles/node_upgrade` `tasks_from: detect_live`): a `docker_apt_packages`
+   bump does NOT roll there on a re-run of `site.yml` or `add-region.yml` —
+   those skip docker's packages on that node and warn — and a pending reboot
+   is not taken there either. Both roll through `make upgrade-docker
+   ENV=<env>` (`playbooks/upgrade-docker.yml`) in a maintenance window,
+   because restarting dockerd or rebooting stops tenant containers that have
+   no restart policy. A node that is not live, and every other host, still
    converges on re-run.
 4. **Every version pinned** in `playbooks/group_vars/all/versions.yml`. No
-   `latest`, `stable`, `main` tags. Items marked VERIFY are the owning wave's
-   DoD.
-5. **Cross-host ports come from `cs_ports`** (ports.yml) — any port another
+   `latest`, `stable` or `main` tags. Each pin carries the date and source it
+   was verified against.
+5. **Cross-host ports come from `cs_ports`** (`ports.yml`) — any port another
    host dials or the firewall opens. Loopback-only role-internal ports (e.g.
-   vault 8200) may live in role defaults. No literal port numbers in templates.
-6. **Public repo hygiene.** No real hostnames, IPs, or credentials in tracked
-   files — RFC 5737/1918 examples only. `workspace/` is gitignored scratch.
-7. **Firewall:** dedicated nftables table via role-owned file + unit. NEVER
-   `flush ruleset` (destroys docker's and the agent's `cs_agent` tables; docker
-   does not recover until dockerd restarts). No forward-hook drop chain. Do not
-   create v1's `expose-ports`/`container-inbound` chains.
+   vault 8200) may live in role defaults. No literal port numbers in
+   templates. [control-plane.md](control-plane.md) is the graph the ports
+   are derived from; change both together.
+6. **Public repo hygiene.** No real hostnames, IPs or credentials in tracked
+   files — RFC 5737/1918 addresses and `example.com` names only. Real
+   inventories and notes live in gitignored paths.
+7. **Firewall:** a dedicated nftables table via a role-owned file and unit.
+   NEVER `flush ruleset` (it destroys docker's and the agent's `cs_agent`
+   tables; docker does not recover until dockerd restarts). No forward-hook
+   drop chain. Do not create v1's `expose-ports`/`container-inbound` chains.
 8. **SECRET_KEY_BASE / USER_AUTH_SECRET are immutable inputs.** Never
-   generated, never re-rendered on existing controllers. Preflight fails on
-   blank/short.
+   generated, never re-rendered on existing controllers. Preflight fails on a
+   blank or short one.
 9. **Attach mode (`existing_env: true`):** the inventory is a PARTIAL view of
-   the fleet — no shared-host file rendered whole. Additive fragments and
-   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script and
-   NEW per-az file_sd fragment files. `/etc/default/computestacks` is
-   append-only, always.
+   the fleet — no shared-host file is rendered whole. Additive fragments and
+   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script
+   and NEW per-az `file_sd` fragment files. `/etc/default/computestacks` is
+   append-only, always. See §Attach mode.
 10. **A variable defined in `playbooks/group_vars/` that references
     `hostvars` may only be read on the host currently executing.** NEVER
     `hostvars[h].<that var>`. See §Variable scope — this one fails silently,
     which is why it is a rule and not a style note.
 
-## Ownership map (role -> wave -> owner)
-Wave 1A: preflight, common, ssh_trust, node_kernel
-Wave 1B: vault, docker_config, docker_tls
-Wave 1C: (controller repo) bootstrap:apply rake + service + specs + schema doc
-Wave 2D: cs_agent, haproxy, node_observability, backup_server
-Wave 2E: metrics, loki
-Wave 2F: firewall, tailscale, ubuntu_pro
-Wave 3G: controller, acme_web, registry
-Wave 3H: powerdns
-Wave 4I: controller_seed, controller_post_enroll
-Wave 4J: validate, site.yml/add-region.yml final wiring, attach_fragments,
-         controller attach_prep, docs/
-Node data disk (October 2026): node_storage
-Single owners: `ops` docker network -> metrics role. `/etc/update-motd.d/
-50-computestacks` -> common. `/etc/modules-load.d/cs-firewall.conf` -> firewall;
-`/etc/modules-load.d/cs-node.conf` -> node_kernel (separate files, no sharing).
-On nodes, the `docker_data_device` filesystem, its fstab entries (the data
-mount and the `/var/lib/docker` and `/var/lib/containerd` bind mounts) and
-`/etc/systemd/system/{docker,containerd}.service.d/10-cs-data-disk.conf` ->
-node_storage. Its play (`Node container storage` in site.yml, `New node
-container storage` in add-region.yml) must precede the docker install play,
-and roles/preflight and upgrade-docker.yml run its read-only probe first.
+## Play ordering
 
-## Cross-wave interface contracts
+The order of plays in `site.yml` is load-bearing:
 
-### Variable scope (hard rule 10)
+* **Preflight runs first, on every host, and changes nothing.** Every check
+  that can fail on inventory or host state belongs there, so a bad input
+  stops the run before any host is touched.
+* **`node_storage` runs before docker is installed** on the nodes; docker or
+  containerd starting first would write their state to the root disk. Its
+  read-only probe also runs in preflight and in `upgrade-docker.yml`.
+* **`controller_seed` → `cs_agent` → `controller_post_enroll`.** Seeding
+  creates the Node rows and mints the agent tokens, the nodes then enroll
+  against those rows, and the backfills call every node's agent, which
+  answers 401 until it is enrolled. They are separate roles for exactly this
+  reason ([control-plane.md](control-plane.md), "The graph fixes the play
+  order").
+* **`validate` runs last.**
+
+`add-region.yml` keeps the same relative order for the new node.
+
+## Attach mode
+
+`playbooks/add-region.yml` builds a new region against an environment the v1
+playbooks built. Rule 9 is the whole contract: the existing hosts are only
+partly described by the inventory, so the run adds to them — a `file_sd`
+fragment, firewall appends, an `authorized_keys` entry, appended environment
+keys — and never re-renders a file on them. Roles that touch a shared host in
+attach mode expose a separate entry point for it (`tasks_from: append`,
+`file_sd`, `attach_prep`) rather than branching inside `main.yml`. Operator-facing detail is in
+[attach-mode.md](attach-mode.md).
+
+## Ownership
+
+Each role's `README.md` states what it owns. Files that more than one role
+could plausibly write have exactly one owner:
+
+* the `ops` docker network → `metrics`;
+* `/etc/update-motd.d/50-computestacks` → `common`;
+* `/etc/modules-load.d/cs-firewall.conf` → `firewall`;
+  `/etc/modules-load.d/cs-node.conf` → `node_kernel` (separate files, no
+  sharing);
+* on nodes, the `docker_data_device` filesystem, its fstab entries (the data
+  mount and the `/var/lib/docker` and `/var/lib/containerd` bind mounts) and
+  `/etc/systemd/system/{docker,containerd}.service.d/10-cs-data-disk.conf` →
+  `node_storage`;
+* `/etc/ansible/facts.d/computestacks.fact`, key `tailscale_ip` →
+  `tailscale` (merged into the file, never overwritten).
+
+## Interface contracts
+
+### Variable scope
 
 A variable defined in `playbooks/group_vars/` that references `hostvars` may
 only be read on the host currently executing:
@@ -303,7 +338,7 @@ action.
 `roles/controller_seed` therefore runs `DRY_RUN=1` on every path that can
 reach an existing row — attach mode, or a run with the address flag — and
 fails the run when the preview reports drift on a load balancer's `domain`
-(gate G). `controller_seed_dry_run_first` governs only whether that preview is
+("gate G" in the role's code and comments). `controller_seed_dry_run_first` governs only whether that preview is
 PRINTED; it cannot switch the gate off.
 
 A converged environment re-run without `existing_env` gets neither preview nor
@@ -317,20 +352,23 @@ in the admin UI first, then re-run the seed. Do not edit the inventory to
 match the stale row unless the row is what you actually want — the inventory
 is also what `roles/controller` names the certificate after.
 
-### Controller invocation helper (used by cs_agent enroll; provided by cstacks)
-The v2 `cstacks` CLI provides:
-    cstacks runner '<ruby one-liner>'
-which executes `bin/rails runner` inside the running `portal` container
-(`docker exec portal bin/rails runner ...`), stdout passed through, exit code
-propagated. The cs_agent role's enroll task runs, delegated to the controller
-host:
-    cstacks runner "puts Node.find_by!(hostname: %q{<node hostname>}).agent_token_hash"
-and writes the 64-hex result into `metadata.admin_token_hash` in
-`/etc/computestacks/agent.yml`, then restarts cs-agent. Empty/non-hex output =
-fail the task loudly. Until Wave 3G lands, cs_agent may stub this behind a
-tagged task and note it in its report.
+### Controller invocation helper
 
-### agent.yml (cs_agent role owns; schema is cs-agent v3.3.0)
+The v2 `cstacks` CLI on the controller provides
+
+    cstacks runner '<ruby one-liner>'
+
+which executes `bin/rails runner` inside the running `portal` container,
+passes stdout through and propagates the exit code. `cs_agent`'s enroll task
+runs, delegated to the controller host,
+
+    cstacks runner "puts Node.find_by!(hostname: %q{<node hostname>}).agent_token_hash"
+
+and writes the 64-hex result into `metadata.admin_token_hash` in
+`/etc/computestacks/agent.yml`, then restarts cs-agent. Empty or non-hex
+output fails the task loudly.
+
+### agent.yml (owned by `cs_agent`)
 - `metadata.listen_addr`: `:8500` when the node is tailnet-joined, else
   `<primary_ip>:8500`. NEVER the tailscale IP (containers dial
   metadata.internal -> primary_ip).
@@ -362,14 +400,13 @@ tailnet membership, and a mixture of spellings makes roles disagree about the
 same host — the agent binding `:8500` on all interfaces while the firewall,
 metrics and manifest all treat the node as off-tailnet.
 
-### Container network placement (input-chain enforceability)
-Node-side containers (cadvisor, fluentd) run with --network=host, listeners
-bound to primary_ip (cadvisor) / 127.0.0.1 (fluentd's docker-log-driver port) —
-published-port DNAT bypasses the input chain, host networking doesn't, and the
-fleet already runs these host-net. Metrics-host containers bind 127.0.0.1
-behind nginx. Galaxy roles install to galaxy_roles/ (gitignored):
-`ansible-galaxy role install -r requirements.yml -p galaxy_roles` and
-`ansible-galaxy collection install -r requirements.yml -p collections`.
+### Container network placement
+
+Node-side containers (cadvisor, fluentd) run with `--network=host`, with
+listeners bound to `primary_ip` (cadvisor) or `127.0.0.1` (fluentd's
+docker-log-driver port): published-port DNAT bypasses the input chain, host
+networking does not, so the firewall can enforce them. Metrics-host
+containers bind `127.0.0.1` behind nginx.
 
 ### Tailscale address derivation (PAIRWISE — never per-node)
 - Manifest `node.agent_host` = node tailscale IP ONLY if the CONTROLLER is
@@ -386,76 +423,43 @@ controller's placement queries use exactly
 every node reports 0 cpu/0 mem and ALL orders are rejected. validate asserts a
 non-empty query result per node.
 
-### Manifest (controller_seed renders; schema owned by controller repo)
-Schema doc: `doc/bootstrap_manifest.md` in the controller repo (Wave 1C
-deliverable; FROZEN after manager review — Wave 4I builds against it).
-Sections omittable. Secrets-bearing file: root 0600, deleted after successful
-apply. `cstacks seed` wraps `rake bootstrap:apply[<path>]`; `DRY_RUN=1`
-supported and used as the attach-mode gate.
+### Manifest
 
-### Final wiring (Wave 4J) — decisions that closed the plan
+`controller_seed` renders the bootstrap manifest; its schema is owned by the
+controller repository (`doc/bootstrap_manifest.md` there). Sections may be
+omitted. The rendered file holds secrets: root 0600, deleted after a
+successful apply. `cstacks seed` wraps `rake bootstrap:apply[<path>]`;
+`DRY_RUN=1` is supported and is what attach mode's drift gate reads.
 
-Recorded here because they change what the ownership map above says, or
-resolve a flag an earlier wave raised. Nothing above is amended; this is the
-delta.
+## Deliberate choices
 
-1. **`attach_fragments` was not built.** The plan gave Wave 4J a thin glue
-   role composing the attach entry points per host group. Written out, it was
-   one role whose entire body was `when: 'metrics' in group_names` branches
-   around three `include_role` calls — strictly worse than the plays that
-   already scope by `hosts:`. The entry points are called directly from
-   `playbooks/add-region.yml`, one play per host group. Ignore
-   `attach_fragments` in the Wave 4J ownership line.
-2. **`node_exporter` is a new role** (`roles/node_exporter`, Wave 4J), on
-   `hosts: all`. The plan assigned it to "a community role in the all-hosts
-   play", but no such role was ever pinned, and both consumers (`metrics`
-   scrapes it everywhere, `firewall` opens 9100 everywhere) were already
-   built. Distro package, held, as the plan requires.
-3. **`add-region.yml` runs the whole `docker_tls` role on the new node**, not
-   `tasks_from: issue`. `tasks/main.yml` routes through `issue.yml` — which
-   is the piece that reaches the existing controller's vault — and then
-   installs the listener drop-in, without which the certificate sits on disk
-   and the controller has nothing to dial. The `issue` entry point remains
-   for callers that only want issuance; `tests/roles.yml` keeps it parsed.
-4. **The metrics/loki containerization style stays as built** (hand-rolled
-   systemd units wrapping `docker run --rm`) alongside `vault`'s
-   `community.docker.docker_container`. Wave 2E flagged the inconsistency;
-   both satisfy rule 3, and unifying them means rewriting three working
-   roles for style. **Punted deliberately** — if it is ever unified, the
-   `docker_container` form is the one to keep, and it is one change across
-   `metrics`, `loki` and `node_observability` at once, not a drive-by.
-5. **`loki_image` and `fluentd_loki_image` stay paired at 2.9.10**, as Wave
-   2D and 2E both asked. `versions.yml` carries the pairing note on both
-   entries; they move together or not at all.
-6. **The docker engine packages and `node_exporter_apt_version` are pinned**
-   like everything else (rule 4). They were left empty during the wave on the
-   belief that neither upstream published for Ubuntu 26.04; re-checked
-   2026-08-28, both do — `download.docker.com/linux/ubuntu` has a `resolute`
-   suite (`resolute` IS 26.04; 25.10 is `questing`) and the 26.04 archive
-   ships `prometheus-node-exporter`. `versions.yml` carries the exact
-   strings and the verification date. Both packages are still `apt-mark
-   hold`-ed after install, which is what v1 actually relied on, and the holds
-   are released before each install so a pin bump still rolls through.
-7. **`playbooks/vars/Ubuntu-26.yml`** supplies the platform variables
-   `geerlingguy.postgresql` 4.0.0 is missing for Ubuntu 26 — its first task
-   is an `include_vars` that would otherwise fail outright. `include_vars`
-   falls back to the playbook directory, so this needs no fork of the pinned
-   role.
-8. **`postgres_repo` is a new role** (`roles/postgres_repo`, Wave 4J), on the
-   controller and the nameservers, before `geerlingguy.postgresql` and
-   `powerdns` respectively. Ubuntu 26.04 ships PostgreSQL 18 and carries no
-   `postgresql-17`, which is the major the controller's schema and CI are
-   validated against, so the pinned major comes from PGDG with an apt
-   preferences pin. `add-region.yml` does not run it: attach mode installs no
-   postgres package anywhere. Resolves the `postgresql_version` VERIFY.
-9. **The eight per-wave syntax harnesses are one file**, `tests/roles.yml`.
-   They existed because `site.yml` did not parse yet. It does now, so the
-   harness keeps only what the two playbooks cannot cover: every role in
-   isolation and every reusable `tasks_from:` entry point.
+Things that look like inconsistencies and are not:
 
-## Definition of done (every provisioner wave)
-`ansible-lint roles/<role>` clean (new .ansible-lint at repo root, production
-profile); `ansible-playbook --syntax-check` of a minimal per-role test play if
-site.yml doesn't parse yet; role README.md (purpose, vars, owner); no writes
-outside your allowlist; STOP AND REPORT rather than guess on any ambiguity —
-that is a successful outcome, silent guessing is not.
+* **`add-region.yml` runs the whole `docker_tls` role on the new node**, not
+  `tasks_from: issue`. `main.yml` routes through `issue.yml` — the piece that
+  reaches the existing controller's vault — and then installs the listener
+  drop-in, without which the certificate sits on disk and the controller has
+  nothing to dial.
+* **Two containerization styles.** `metrics`, `loki` and
+  `node_observability` wrap `docker run --rm` in hand-written systemd units;
+  `vault` uses `community.docker.docker_container`. Both satisfy rule 3. If
+  they are ever unified, keep the `docker_container` form, and change all
+  three roles in one go rather than as a drive-by.
+* **`loki_image` and `fluentd_loki_image` move together**, as do
+  `borg_version` and `borg_image`; `versions.yml` marks both pairs.
+* **`playbooks/vars/Ubuntu-26.yml`** supplies the platform variables the
+  pinned `geerlingguy.postgresql` lacks for Ubuntu 26.04. `include_vars`
+  falls back to the playbook directory, so the galaxy role needs no fork.
+* **`tests/roles.yml` is one harness for every role** in isolation and every
+  reusable `tasks_from:` entry point — the parts the two playbooks' syntax
+  checks cannot reach.
+
+## Before you send a change
+
+* `make check` and `make lint` pass (the production ansible-lint profile).
+* A new or changed role's `README.md` says what it owns, its variables, and
+  why it does what it does.
+* Anything an operator would notice gets a dated `CHANGELOG.md` entry.
+* Nothing in the diff names a real host, address or credential (rule 6).
+* Behavior that only a real host can show — disks, reboots, attach mode — is
+  run end to end against throwaway VMs before it merges.

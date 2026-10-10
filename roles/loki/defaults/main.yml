@@ -1,6 +1,6 @@
 ---
 # loki joins the `ops` docker network, owned by the metrics role (docs/
-# contracts.md ownership map) -- this role never creates it. site.yml's
+# contracts.md §Ownership) -- this role never creates it. site.yml's
 # "Metrics host" play runs metrics before loki for exactly this reason;
 # loki must not be run on a host where metrics hasn't already run.
 loki_ops_network: ops

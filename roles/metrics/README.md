@@ -54,7 +54,7 @@ files usable both here and in attach mode:
 
 * Exactly one node per az (preflight-enforced), so each fragment holds
   exactly one target.
-* **Label contract (docs/contracts.md, frozen):** `region: <az>`,
+* **Label contract (docs/contracts.md §Prometheus contract):** `region: <az>`,
   `node: <hostname>`, job names `node-exporter` / `cadvisor` / `haproxy`. The
   controller's placement queries match on these labels exactly
   (`node="<hostname>",region="<az>",job=~"node-exporter"`); wrong values

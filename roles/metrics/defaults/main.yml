@@ -1,6 +1,6 @@
 ---
 # metrics is the SOLE owner of the `ops` docker network (docs/contracts.md
-# ownership map). loki (same host, Wave 2E) joins it but never creates it;
+# §Ownership). loki (same host) joins it but never creates it;
 # site.yml runs metrics before loki in the "Metrics host" play for exactly
 # this reason.
 metrics_ops_network: ops
@@ -103,7 +103,7 @@ metrics_file_sd_nodes: >-
      | map(attribute='inventory_hostname') | sort | list }}
 
 # v1's container-name ignore list for the container-resource alert rule.
-# FROZEN for fleet compatibility (docs/contracts.md dispatch) -- ported
+# FROZEN for fleet compatibility (v1 parity) -- ported
 # byte-for-byte from roles/prometheus/vars/main.yml in the v1 tree, trailing
 # pipe and duplicate "haproxy" entry included. Do not "clean this up" without
 # checking it against every v1-built metrics host this fragment format must

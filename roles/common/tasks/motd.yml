@@ -1,6 +1,6 @@
 ---
 # common is the SOLE owner of /etc/update-motd.d/50-computestacks
-# (docs/contracts.md ownership map). Rendered from inventory vars only —
+# (docs/contracts.md §Ownership). Rendered from inventory vars only —
 # groups['nodes'] and hostvars are populated from the full inventory
 # regardless of --limit, so this is safe under partial runs.
 

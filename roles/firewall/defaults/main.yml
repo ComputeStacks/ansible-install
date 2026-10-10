@@ -25,7 +25,7 @@ firewall_nft_bin: /usr/sbin/nft
 # if a host's nft build chokes on the add/delete/redefine idiom.
 firewall_validate_config: true
 
-# Role-owned modules-load fragment (docs/contracts.md ownership map — the
+# Role-owned modules-load fragment (docs/contracts.md §Ownership — the
 # node_kernel role owns cs-node.conf, this role owns cs-firewall.conf).
 #   nf_tables    — our own table
 #   nf_conntrack — ct state matching (also sized by node_kernel)

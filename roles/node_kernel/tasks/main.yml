@@ -1,7 +1,7 @@
 ---
 # node_kernel owns /etc/modules-load.d/cs-node.conf. Do NOT touch
 # /etc/modules-load.d/cs-firewall.conf (owned by the firewall role, Wave 2F)
-# — docs/contracts.md ownership map.
+# — docs/contracts.md §Ownership.
 
 - name: Load node kernel modules on boot
   ansible.builtin.copy:

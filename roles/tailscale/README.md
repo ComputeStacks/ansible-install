@@ -41,8 +41,7 @@ regions.
   behavior.
 - **Ownership of `computestacks.fact`.** This role owns the `tailscale_ip` key
   and merges rather than overwrites, so a later role can add its own keys to
-  the same file without losing this one. Not currently in the contracts
-  ownership map — flagged for the manager.
+  the same file without losing this one (`docs/contracts.md` §Ownership).
 
 ## Consumers: how to read another host's tailnet address
 

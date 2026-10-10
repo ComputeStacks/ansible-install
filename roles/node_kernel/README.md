@@ -3,7 +3,7 @@
 **Owner:** Wave 1A
 
 Node-only kernel tuning (`hosts: nodes`). Does **not** own docker/firewall
-concerns — see `docs/contracts.md` ownership map: this role owns
+concerns — see `docs/contracts.md` §Ownership: this role owns
 `/etc/modules-load.d/cs-node.conf`; the `firewall` role (Wave 2F) owns its
 own, separate `/etc/modules-load.d/cs-firewall.conf`. Image preloads and
 docker configuration are owned by later waves (2D/1B), not this role.

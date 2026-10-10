@@ -3,7 +3,7 @@
 **Owner:** Wave 1A
 
 Base system convergence applied to every host (`hosts: all`). Sole owner of
-`/etc/update-motd.d/50-computestacks` (docs/contracts.md ownership map).
+`/etc/update-motd.d/50-computestacks` (docs/contracts.md §Ownership).
 
 ## What it does
 

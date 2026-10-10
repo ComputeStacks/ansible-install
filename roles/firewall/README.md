@@ -6,7 +6,7 @@ Host firewall for every ComputeStacks host. Owns exactly one nftables table,
 `inet cs_static`, rendered from the ports contract
 (`playbooks/group_vars/all/ports.yml`) and inventory group membership, and
 applied by a role-owned oneshot unit. Also owns
-`/etc/modules-load.d/cs-firewall.conf` (docs/contracts.md ownership map —
+`/etc/modules-load.d/cs-firewall.conf` (docs/contracts.md §Ownership —
 `node_kernel` owns `cs-node.conf`; the two files are never shared).
 
 ## What it installs
