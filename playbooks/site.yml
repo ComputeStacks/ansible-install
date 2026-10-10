@@ -50,7 +50,7 @@
 - name: Nameservers
   hosts: nameservers
   roles:
-    - postgres_repo              # PGDG: 26.04 carries no postgresql-17
+    - postgres_repo              # PGDG apt repo + pin (the pinned major)
     - powerdns
 
 # Before docker is installed, so dockerd and containerd never write a byte to
@@ -208,9 +208,7 @@
     redis_requirepass: ""
   roles:
     - vault                     # init/unseal + pki/docker mount + client cert
-    - postgres_repo             # PGDG apt repo + pin: Ubuntu 26.04's archive
-                                # ships 18 and has no postgresql-17 at all,
-                                # and the controller's schema/CI are 17-only.
+    - postgres_repo             # PGDG apt repo + pin for the pinned major.
                                 # MUST precede geerlingguy.postgresql.
     - geerlingguy.postgresql
     - geerlingguy.redis

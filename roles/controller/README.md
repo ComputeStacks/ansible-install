@@ -186,7 +186,7 @@ per-file rather than per-directory means an operator's own
 `geerlingguy.postgresql` is applied by `playbooks/site.yml`'s "Controller
 infrastructure" play, not by this role. These are the values this role's
 `DATABASE_URL` assumes, as that play sets them (`postgresql_version` is the
-global pin in `versions.yml`, 17; the platform paths come from
+global pin in `versions.yml`, 18; the platform paths come from
 `playbooks/vars/Ubuntu-26.yml`):
 
 ```yaml

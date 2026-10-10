@@ -350,20 +350,20 @@ silently:
   Docker has not published a suite for; if you ever set it, change the pinned
   versions in `versions.yml` with it, because those version strings name the
   `resolute` suite.
-* **PostgreSQL is pinned at major 17 and does not come from the Ubuntu
-  archive.** 26.04 ships PostgreSQL 18 and carries no `postgresql-17`, so
-  `roles/postgres_repo` configures the PGDG repository
-  (`apt.postgresql.org`, `resolute-pgdg` suite) with an apt preferences pin
-  and runs before `geerlingguy.postgresql` on the controller and before
-  `roles/powerdns` on the nameservers — the only two places a postgres
-  package is installed. **Do not "fix" a mismatch by bumping
-  `postgresql_version` to whatever major the archive offers**: 17 is the
-  major the controller's schema and CI are validated against, which is the
-  entire reason `postgres_repo` exists. Changing it means re-validating the
-  controller repo and editing `playbooks/vars/Ubuntu-26.yml` in the same
-  commit. That file also supplies the `Ubuntu-26` platform vars
-  `geerlingguy.postgresql` ships no copy of; `include_vars` picks it up from
-  the playbook directory, so no fork or patch is needed.
+* **PostgreSQL is pinned at major 18 and comes from PGDG, not the Ubuntu
+  archive**, even though 26.04 also ships 18. `roles/postgres_repo`
+  configures the PGDG repository (`apt.postgresql.org`, `resolute-pgdg`
+  suite) with an apt preferences pin and runs before `geerlingguy.postgresql`
+  on the controller and before `roles/powerdns` on the nameservers — the only
+  two places a postgres package is installed. The archive only ever carries
+  its one default major; PGDG carries every supported one, so the fleet can
+  move to a later major within this LTS by changing `postgresql_version`, once
+  the controller is validated against it. Moving an existing host needs a
+  `pg_upgrade` the provisioner does not perform. `playbooks/vars/Ubuntu-26.yml`
+  builds every package name and path from `postgresql_version`, and supplies
+  the `Ubuntu-26` platform vars `geerlingguy.postgresql` ships no copy of;
+  `include_vars` picks it up from the playbook directory, so no fork or patch
+  is needed.
 
 The `docker_apt_packages` and `node_exporter_apt_version` entries in
 `versions.yml` both carry exact apt versions, verified against the live

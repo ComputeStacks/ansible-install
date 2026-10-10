@@ -137,17 +137,17 @@ docker_apt_packages:
 node_exporter_apt_version: "1.10.2-1"
 
 # Packages
-# Verified 2026-08-28: Ubuntu 26.04 'resolute' ships PostgreSQL 18
-# (its `postgresql` metapackage is 18+290ubuntu1) and carries NO postgresql-17
-# in resolute, resolute-updates or resolute-backports. 17 is the major the
-# controller's schema and CI are validated against, so the fleet takes it from
-# PGDG instead: roles/postgres_repo configures apt.postgresql.org's
-# resolute-pgdg suite (postgresql-17 is 17.11-1.pgdg26.04+2 there) and pins
-# apt to it. That role runs before geerlingguy.postgresql on the controller
-# and before roles/powerdns on the nameservers -- the only two places a
-# postgres package is installed. Changing this major means changing
-# playbooks/vars/Ubuntu-26.yml with it, and re-validating the controller repo.
-postgresql_version: 17
+# The major the controller's schema and CI are validated against (18 since
+# 2026-10-10). It comes from PGDG, not the Ubuntu archive, even though 26.04
+# also ships 18: roles/postgres_repo configures apt.postgresql.org's
+# resolute-pgdg suite (postgresql-18 is 18.6-1.pgdg26.04+2 there, verified
+# 2026-10-10) and pins apt to it, so a later major can be adopted within this
+# LTS by changing this one value. That role runs before geerlingguy.postgresql
+# on the controller and before roles/powerdns on the nameservers -- the only
+# two places a postgres package is installed. Changing the major on an
+# existing host needs a pg_upgrade the provisioner does not perform, and
+# means re-validating the controller repo first.
+postgresql_version: 18
 # PGDG's long-lived signing key, checksum-pinned: roles/postgres_repo fetches
 # it and refuses anything else. Verified 2026-08-28. A deliberate upstream
 # rotation means updating this checksum (and the URL if it moves) in one

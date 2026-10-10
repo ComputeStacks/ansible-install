@@ -67,9 +67,9 @@ powerdns_lb_records_nodes: "{{ cs_new_nodes | default([]) }}"
 powerdns_enable_dnsupdate: true
 
 # Distro postgresql package paths. postgresql_version is the global pin from
-# playbooks/group_vars/all/versions.yml (currently 17) -- the same value the
-# controller's geerlingguy.postgresql instance uses; both just mean "major
-# version 17", they are unrelated running instances on different hosts.
+# playbooks/group_vars/all/versions.yml -- the same value the controller's
+# geerlingguy.postgresql instance uses; both just mean "this major", they are
+# unrelated running instances on different hosts.
 powerdns_postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}"
 powerdns_postgresql_main_dir: "{{ powerdns_postgresql_data_dir }}/main"
 powerdns_postgresql_conf: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"

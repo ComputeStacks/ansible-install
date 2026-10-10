@@ -1,12 +1,12 @@
 # {{ ansible_managed }}
-# roles/postgres_repo. Keeps this host on PostgreSQL {{ postgresql_version }},
-# which Ubuntu 26.04's own archive does not carry (it ships 18).
+# roles/postgres_repo. Keeps this host on PostgreSQL {{ postgresql_version }}
+# from PGDG, whatever major the Ubuntu archive defaults to.
 #
 # Order matters: apt takes the FIRST stanza that matches a given package
 # version, so the outright refusals come before the blanket PGDG preference.
 
 # 1. The UNVERSIONED metapackages are refused, from EVERY origin -- the
-#    Ubuntu archive's copies track its default major (18), and PGDG publishes
+#    Ubuntu archive's copies track its default major, and PGDG publishes
 #    its own copies tracking the newest major it ships. Both would install a
 #    second cluster beside the pinned one. Every consumer in this repository
 #    names postgresql-<major> explicitly, so nothing legitimate wants these;

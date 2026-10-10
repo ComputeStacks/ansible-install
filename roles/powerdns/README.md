@@ -18,7 +18,7 @@ writing the new az's records and nothing else (see
 ## Purpose
 
 Runs PowerDNS authoritative server (`pdns-server` + `pdns-backend-pgsql`) on
-the `nameservers` inventory group, with a PostgreSQL 17 backend replicated
+the `nameservers` inventory group, with a PostgreSQL backend (the `postgresql_version` major) replicated
 between the group's two sub-groups:
 
 * `ns_primary` -- the writable **leader**. Runs the PowerDNS HTTP API/web
@@ -45,8 +45,7 @@ regardless of leader/follower role.
    (`powerdns_manage_resolved`, on whenever resolved is present).
 3. Installs and starts `postgresql-{{ postgresql_version }}`, its client and
    `python3-psycopg2` (`tasks/postgres.yml`). The major comes from PGDG,
-   which `roles/postgres_repo` configures in the same play — Ubuntu 26.04's
-   archive has no `postgresql-17`.
+   which `roles/postgres_repo` configures in the same play.
 4. **ns_primary only** (`tasks/leader.yml`): points postgres at its own
    inventory address and the ports-contract port, opens replication access to
    every host in `ns_followers` (iterated, not indexed), then creates the
@@ -258,10 +257,10 @@ on the follower side, a `pg_basebackup` bootstrap -- none of which
 install + `postgresql.conf` templating and then hand-writing the replication
 logic on top anyway (which is most of what this role does) is more moving
 parts for the same result than a small inline `apt` + `lineinfile` +
-`postgresql_pg_hba` sequence. `postgresql_version:
-17` (`playbooks/group_vars/all/versions.yml`) is the same global pin the
-controller's `geerlingguy.postgresql` instance uses -- both just mean "major
-version 17"; they are unrelated running instances on different hosts.
+`postgresql_pg_hba` sequence. `postgresql_version`
+(`playbooks/group_vars/all/versions.yml`) is the same global pin the
+controller's `geerlingguy.postgresql` instance uses -- both just mean "this
+major"; they are unrelated running instances on different hosts.
 
 ## Design notes
 
@@ -325,7 +324,7 @@ version 17"; they are unrelated running instances on different hosts.
 | `powerdns_enable_dnsupdate` | `true` | Per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |
 | `powerdns_postgresql_data_dir` / `_main_dir` / `_conf` / `_hba_conf` | distro paths under `/var/lib/postgresql/{{ postgresql_version }}` and `/etc/postgresql/{{ postgresql_version }}/main` | |
 | `pdns_api_key` / `pdns_web_key` / `pdns_db_password` | **required, no default** | From the vaulted inventory. Asserted non-blank and not `CHANGEME`. |
-| `postgresql_version` | **required** (global, `versions.yml`) | Currently `17`. |
+| `postgresql_version` | **required** (global, `versions.yml`) | Currently `18`. |
 | `cs_app_zone` | **required** (global, `main.yml`) | Tenant DNS zone created on the leader. |
 | `cs_ports.dns` / `cs_ports.pdns_api` / `cs_ports.postgres` | **required** (global, `ports.yml`) | `53` / `8081` / `5432`. |
 

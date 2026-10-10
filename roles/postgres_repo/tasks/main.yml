@@ -3,10 +3,9 @@
 # pinned major. Runs BEFORE anything that installs a postgres package:
 # geerlingguy.postgresql on the controller, roles/powerdns on the nameservers.
 #
-# Ubuntu 26.04's own archive ships PostgreSQL 18 and carries no
-# postgresql-17 at all (verified 2026-08-28), while the controller's schema
-# and CI are 17. Without this role, `postgresql-17` simply does not resolve
-# and the controller play dies in geerlingguy.postgresql's apt task.
+# The fleet takes postgres from PGDG rather than the Ubuntu archive so the
+# major is ours to choose for the life of the LTS: the archive carries only
+# its default major (18 on 26.04), PGDG carries every supported one.
 
 - name: Assert the pinned major and key inputs are present
   ansible.builtin.assert:
@@ -109,7 +108,7 @@
   when: postgres_repo_source is changed or postgres_repo_preferences is changed
 
 # Cheap, and it converts the failure mode from "geerlingguy.postgresql's apt
-# task says No package matching postgresql-17" (or powerdns's) into a message
+# task says No package matching postgresql-<major>" (or powerdns's) into a message
 # that names the repository as the cause.
 - name: Check that the pinned postgres major resolves
   ansible.builtin.command:
@@ -132,6 +131,4 @@
       {{ postgres_repo_suite }}. Check that PGDG publishes that major for
       this suite, that the host can reach {{ postgres_repo_uri }}, and that
       {{ postgres_repo_preferences_file }} has not pinned it out.
-      Ubuntu 26.04's own archive carries no postgresql-{{ postgresql_version }},
-      so this repository is the only source for it.
     quiet: true

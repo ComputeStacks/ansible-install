@@ -1,5 +1,15 @@
 # Changelog
 
+## October 10, 2026
+
+* **PostgreSQL 18** on the controller and the nameservers
+  (`postgresql_version: 18`), matching the controller's schema and CI. It
+  still comes from PGDG rather than the Ubuntu archive, so a later major can
+  be adopted within the 26.04 LTS. An existing host on 17 needs a
+  `pg_upgrade` before converging; the provisioner does not do one.
+
+***
+
 ## October 9, 2026
 
 * **Pins moved to controller 9.8, cs-agent 3.4.0 and docker 29.9.0**

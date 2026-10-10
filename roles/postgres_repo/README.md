@@ -14,15 +14,15 @@ does not carry it. Runs before every role that installs a postgres package.
 
 ## Why it exists
 
-Ubuntu 26.04 ("resolute") ships **PostgreSQL 18** — its `postgresql`
-metapackage is `18+290ubuntu1`, depending on `postgresql-18` — and carries
-**no `postgresql-17` at all**, in `resolute`, `resolute-updates` or
-`resolute-backports` (verified 2026-08-28). The controller's schema and CI are
-validated against 17 only, and `postgresql_version: 17` is what
-`playbooks/vars/Ubuntu-26.yml` builds every package name and path from. Without
-this role, `geerlingguy.postgresql` fails on the controller with "no package
-matching postgresql-17", and `roles/powerdns` fails the same way on the
-nameservers.
+The major is the controller's choice, not the distribution's.
+`postgresql_version` (18) is the major the controller's schema and CI are
+validated against, and `playbooks/vars/Ubuntu-26.yml` builds every package
+name and path from it. Ubuntu 26.04 ("resolute") happens to ship 18 as well —
+its `postgresql` metapackage is `18+290ubuntu1` — but the archive only ever
+carries that one major for the life of the release. PGDG carries every
+supported major, so taking postgres from PGDG is what lets the fleet move to
+19 or later on 26.04 by changing one value. (The fleet ran 17 this way before
+the controller moved to 18; the archive has no `postgresql-17` at all.)
 
 The pinned `geerlingguy.postgresql` 4.0.0 cannot solve this itself: its
 `postgresql_enablerepo` is RedHat-only (`tasks/setup-RedHat.yml`), and its
@@ -32,7 +32,7 @@ both consumers — two host groups need it, and neither of them owns apt policy
 for the other.
 
 PGDG publishes the major for this suite: `resolute-pgdg` carries
-`postgresql-17` at `17.11-1.pgdg26.04+2`.
+`postgresql-18` at `18.6-1.pgdg26.04+2` (verified 2026-10-10).
 
 ## What it does
 
@@ -74,8 +74,8 @@ given package version, so the refusals must come first):
 There is deliberately **no `apt-mark hold`** here, unlike `roles/cs_agent`,
 `roles/node_exporter` and the docker packages. Those pin an exact version
 string, so an unattended upgrade would move them off the pin. Here the pin is
-the **major**, and the major is part of the package name: `postgresql-17` can
-only ever receive 17.x updates, which are the security updates the fleet wants
+the **major**, and the major is part of the package name: `postgresql-18` can
+only ever receive 18.x updates, which are the security updates the fleet wants
 and the reason a hold would be actively harmful. What a hold protects against
 elsewhere — drifting onto a different version — is structurally impossible for
 a versioned postgres package.
