@@ -110,15 +110,17 @@ XFS can grow but never shrink.
 
 The host firewall is managed by the provisioner (`roles/firewall`). Any
 provider-level firewall or security group in front of the hosts must allow
-at least this from the internet:
+at least this:
 
-| Host | Ports |
-| --- | --- |
-| `controller` | tcp 80, 443 |
-| `nodes` | tcp 80, 443; tcp and udp 10000–50000 (published container ports) |
-| `registry` | tcp 80, 443; tcp 10000–50000 (tenant registries) |
-| `nameservers` | tcp and udp 53, IPv4 and IPv6 |
-| `metrics` | tcp 80 (ACME HTTP-01); tcp 3101, 3102 from the controller and the nodes |
+| Host | Ports | From |
+| --- | --- | --- |
+| `controller` | tcp 80, 443 | anywhere |
+| `nodes` | tcp 80, 443; tcp and udp 10000–50000 (published container ports) | anywhere |
+| `registry` | tcp 80, 443; tcp 10000–50000 (tenant registries) | anywhere |
+| `nameservers` | tcp and udp 53, IPv4 and IPv6 | anywhere |
+| `metrics` | tcp 80 (ACME HTTP-01) | anywhere |
+| `metrics` | tcp 3101 (prometheus) | the controller |
+| `metrics` | tcp 3102 (loki) | the controller and the nodes |
 
 plus SSH from the control machine, and the private legs between hosts
 (controller to node docker TLS, agent API and SSH; nodes to the

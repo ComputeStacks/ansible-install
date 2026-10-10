@@ -64,8 +64,8 @@ hosts and backup hosts; unset everywhere means the single site called
    no restart policy. A node that is not live, and every other host, still
    converges on re-run.
 4. **Every version pinned** in `playbooks/group_vars/all/versions.yml`. No
-   `latest`, `stable` or `main` tags. Each pin carries the date and source it
-   was verified against.
+   `latest`, `stable` or `main` tags. A bump notes the date and source it was
+   verified against.
 5. **Cross-host ports come from `cs_ports`** (`ports.yml`) — any port another
    host dials or the firewall opens. Loopback-only role-internal ports (e.g.
    vault 8200) may live in role defaults. No literal port numbers in

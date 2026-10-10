@@ -52,8 +52,10 @@ cite its rules by number ("contracts rule 3") and section ("§Variable scope").
 ## Writing
 
 * American English.
-* Each role's `README.md` opens with the same header table (Hosts, Runs in,
-  Attach mode, Requires), then what it does, its variables and design notes.
+* Each role's `README.md` opens with the same header: a one-line summary, a
+  `Runs in | Play | Hosts` table covering every playbook and `tasks_from`
+  caller, then its attach-mode behavior and requirements; then what it does,
+  its variables and design notes.
   Describe the role as it is; don't narrate how it was built.
 * Operator-visible changes get a dated entry at the top of `CHANGELOG.md`.
 * Commit messages: short, imperative, no trailers.

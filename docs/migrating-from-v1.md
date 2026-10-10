@@ -14,8 +14,9 @@ Ubuntu 26.04 instead of Debian, no consul, multi-region inventories, a
 versioned controller manifest instead of a generated rake task, pinned
 versions everywhere, and convergent roles.
 
-Roles with no v1 counterpart — `node_storage`, `node_upgrade`, `preflight`,
-`postgres_repo`, `registry`, `tailscale` — are new in v2 and are not listed
+Roles with no v1 counterpart — `controller_post_enroll`, `node_storage`,
+`node_upgrade`, `preflight`, `postgres_repo`, `registry`, `tailscale`,
+`ubuntu_pro` — are new in v2 and are not listed
 below unless there is something to compare.
 
 

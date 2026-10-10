@@ -387,6 +387,7 @@ docs/
   ownership, play ordering, the ports and prometheus contracts, attach-mode
   limits. Read this before changing anything.
 
-Each role's `README.md` documents what it owns, its variables, and how it
-differs from the v1 role it replaces. They are the reference for behavior;
-this file is the reference for running the thing.
+Each role's `README.md` documents where it runs, what it owns, its variables
+and the reasoning behind it; how each differs from its v1 predecessor is in
+[`docs/migrating-from-v1.md`](docs/migrating-from-v1.md). The role READMEs are
+the reference for behavior; this file is the reference for running the thing.
