@@ -49,7 +49,7 @@ The `Makefile` is a thin wrapper around exactly these commands and the
 playbook runs below — `make deps`, `make site ENV=prod`,
 `make add-region ENV=prod`, `make validate ENV=prod`, `make lint`,
 `make check`. Every playbook target requires `ENV` (there is no default
-inventory) and honours `LIMIT=`, `ARGS=` and `VAULT=`; `make help` lists them.
+inventory) and honors `LIMIT=`, `ARGS=` and `VAULT=`; `make help` lists them.
 Nothing in this README depends on it.
 
 **Managed hosts.** Ubuntu 26.04 LTS, amd64, with root SSH from the control
@@ -189,17 +189,17 @@ preflight -> base system -> tailscale -> nameservers -> docker
   -> node docker TLS -> metrics -> registry -> backup -> node base stack
   -> firewalls -> ssh trust
   -> controller_seed        creates the Node rows and mints the agent tokens
-  -> cs_agent on the nodes  installs and enrols against those rows
+  -> cs_agent on the nodes  installs and enrolls against those rows
   -> controller_post_enroll datachannel + metadata backfills
   -> validate
 ```
 
-Seeding has to precede enrolment (the token does not exist before it), and the
+Seeding has to precede enrollment (the token does not exist before it), and the
 backfills have to follow it (they call every node's agent, which rejects an
 unenrolled node). Re-ordering those three breaks the install.
 
 Useful flags: `--check` for a dry run (with the usual check-mode caveats
-around anything driven by a command's output), `--tags enroll` to re-enrol a
+around anything driven by a command's output), `--tags enroll` to re-enroll a
 node on its own, and `--limit` — with the caveat below.
 
 > **`--limit region_<name>` selects that region's nodes and nothing else.**
@@ -368,5 +368,5 @@ docs/
   limits. Read this before changing anything.
 
 Each role's `README.md` documents what it owns, its variables, and how it
-differs from the v1 role it replaces. They are the reference for behaviour;
+differs from the v1 role it replaces. They are the reference for behavior;
 this file is the reference for running the thing.

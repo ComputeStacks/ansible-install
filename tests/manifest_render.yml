@@ -51,7 +51,7 @@
 #
 #   * `include_vars` outranks inventory group_vars, so an inventory that
 #     overrode a `controller_seed_*` knob would be ignored by this play and
-#     honoured by a real converge. Neither shipped inventory does; if one ever
+#     honored by a real converge. Neither shipped inventory does; if one ever
 #     does, this play stops being a faithful render for it.
 #   * The role's own tasks are NOT run. The assertions in
 #     roles/controller_seed/tasks/main.yml are not exercised here, and any

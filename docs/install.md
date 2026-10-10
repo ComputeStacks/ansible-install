@@ -127,7 +127,7 @@ wildcard exists by querying a random label under the domain *for a CNAME
 record* (`LetsEncryptServices::ValidateDomainService#load_wildcard_cname!`), so
 a wildcard A record answers nothing and the load balancer is marked
 `domain_valid: false` with event_code `2721edc59787a807` ("Missing CNAME
-record"). Two neighbouring failures worth recognising: a wildcard CNAME
+record"). Two neighboring failures worth recognizing: a wildcard CNAME
 pointing anywhere other than the domain itself is `635285f7f2889009`, and an A
 record that is not one of that load balancer's own public addresses is
 `510806d5621c97d5`.
@@ -309,13 +309,13 @@ ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 
 The first run takes a while: it installs docker, pulls a dozen images, issues
 certificates, loads the controller schema, seeds it from the rendered
-manifest, enrols every node and runs the backfills. Watch for these
+manifest, enrolls every node and runs the backfills. Watch for these
 checkpoints:
 
 1. **Preflight** — fails immediately on a missing node var, a duplicate `az`,
    a short `secret_key_base` or a non-Ubuntu host. Nothing has been changed at
    that point.
-2. **Controller infrastructure** — vault initialises and issues the docker
+2. **Controller infrastructure** — vault initializes and issues the docker
    PKI. Nothing to do by hand: a converge unseals a sealed vault on its way
    past, and `playbooks/unseal.yml` does only that if you need it sooner.
 3. **Seed controller** — renders `/var/lib/computestacks/manifest.yml` (root,

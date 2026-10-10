@@ -2,9 +2,9 @@
 # First converge only (guarded by the presence of keys/unseal_key_0).
 # The running container bind-mounts keys/rootkey as /root/.vault-token, which
 # cannot exist before `operator init` — docker would create a directory in its
-# place. So bring the container up WITHOUT that mount, initialise, write the
+# place. So bring the container up WITHOUT that mount, initialize, write the
 # key material, and let tasks/main.yml recreate it with the token mounted.
-- name: Start the vault-bootstrap container for initialisation
+- name: Start the vault-bootstrap container for initialization
   community.docker.docker_container:
     name: "{{ vault_container_name }}"
     image: "{{ vault_image }}"
@@ -18,7 +18,7 @@
     restart_policy: unless-stopped
     state: started
 
-- name: Wait for vault to answer before initialising
+- name: Wait for vault to answer before initializing
   ansible.builtin.command: "{{ vault_command }} status -format=json"
   register: vault_preinit_status
   changed_when: false
@@ -29,7 +29,7 @@
   retries: 12
   delay: 5
 
-- name: Initialise the vault operator
+- name: Initialize the vault operator
   ansible.builtin.command: >-
     {{ vault_command }} operator init
     -key-shares={{ vault_key_shares | int }}

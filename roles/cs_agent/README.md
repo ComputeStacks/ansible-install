@@ -97,19 +97,19 @@ cstacks runner "puts Node.find_by!(hostname: %q{<hostname>}).agent_token_hash"
 
 The output must be 64 lowercase hex characters or the task fails loudly; it is
 written to `metadata.admin_token_hash` and the agent restarted. cs-agent's own
-documented HTTP enrolment endpoint is deliberately **not** used (it is
+documented HTTP enrollment endpoint is deliberately **not** used (it is
 source-IP matched and would have to be reachable from every node); the
 controller only ever stores the hash, so reading it controller-side is the
 cheaper path.
 
 `cstacks` is a **Wave 3G** deliverable. Until it lands these tasks fail with a
-missing command, which is the intended behaviour — **end-to-end verification of
+missing command, which is the intended behavior — **end-to-end verification of
 this path is Wave 4J's** (`validate`). Nothing here is stubbed.
 
-Re-enrol a node on its own with `--tags enroll`: the `agent.yml` render carries
+Re-enroll a node on its own with `--tags enroll`: the `agent.yml` render carries
 the same tag so the fetched hash is written out and the service restarted.
 `tasks/read_token_hash.yml` (also tagged) pre-seeds the hash from whatever is
-already in `agent.yml`, so a converge that does not re-enrol can never
+already in `agent.yml`, so a converge that does not re-enroll can never
 re-render the file with an empty hash — an empty hash disables the admin scope
 and the controller loses the node.
 

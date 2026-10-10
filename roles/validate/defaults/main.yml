@@ -72,7 +72,7 @@ validate_containers_controller:
 
 # --- backfill -------------------------------------------------------------
 # Set to an absolute path if `cstacks` is not on the controller's
-# non-interactive PATH (the same knob roles/cs_agent exposes for enrolment).
+# non-interactive PATH (the same knob roles/cs_agent exposes for enrollment).
 validate_cstacks_bin: "{{ cs_agent_enroll_command | default('cstacks') }}"
 
 # --- agent ----------------------------------------------------------------

@@ -188,7 +188,7 @@ replaces it with:
   `metrics_infra_node_exporter_groups` (`controller`, `registry`, `metrics`,
   `backup`, `nameservers` — every group that runs the distro node_exporter
   package but isn't a per-AZ node), one target/labels block per host,
-  labelled `region: "<group name>"` / `node: "<hostname>"` so these never
+  labeled `region: "<group name>"` / `node: "<hostname>"` so these never
   collide with a real node's `region="<az>"` label. `backup` is not in the
   wave dispatch's literal group list but was in v1's own node-exporter
   scrape set (`roles/prometheus/templates/node_exporter.yml` looped

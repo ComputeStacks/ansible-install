@@ -44,7 +44,7 @@ cs_agent_listen_addr: >-
 # is already in agent.yml so a re-render can never blank a working node.
 cs_agent_admin_token_hash: ""
 
-# --- agent behaviour -------------------------------------------------------
+# --- agent behavior -------------------------------------------------------
 cs_agent_iptables_cmd: iptables
 cs_agent_ip6tables_cmd: ip6tables
 cs_agent_store_data_dir: /var/lib/cs-agent

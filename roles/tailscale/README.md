@@ -38,7 +38,7 @@ regions.
   docs/contracts.md rule 4. The upstream role has no version-pin variable, so
   `present` (install once, upgrade deliberately) is the closest honest fit.
   Override with `tailscale_package_state: latest` if you want the old
-  behaviour.
+  behavior.
 - **Ownership of `computestacks.fact`.** This role owns the `tailscale_ip` key
   and merges rather than overwrites, so a later role can add its own keys to
   the same file without losing this one. Not currently in the contracts

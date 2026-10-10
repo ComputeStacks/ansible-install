@@ -3,7 +3,7 @@
 # enrolled: the agent coordination tables start empty, and
 # agent:datachannel_backfill calls each node's agent, which 401s until the
 # node holds its admin token. site.yml's play order is the contract:
-# controller_seed -> cs_agent (enrol) -> this role. See README.md.
+# controller_seed -> cs_agent (enroll) -> this role. See README.md.
 #
 # `cstacks` has no general rake passthrough (its `seed` and `test`
 # subcommands each wrap one specific task), so these run through the same

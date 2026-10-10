@@ -8,7 +8,7 @@
 #       tasks_from: unseal
 #
 # Every action is delegated to vault_host, so a node (docker_tls, add-region)
-# gets the same behaviour as the controller itself. This file NEVER creates or
+# gets the same behavior as the controller itself. This file NEVER creates or
 # recreates the container — attach mode must not touch an existing v1
 # controller's vault-bootstrap definition.
 - name: Gather the vault-bootstrap container state

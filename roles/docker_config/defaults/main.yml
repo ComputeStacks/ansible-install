@@ -18,7 +18,7 @@ docker_config_live_restore: true
 #
 # Kept under 90 on purpose. Docker's packaged unit sets no TimeoutStopSec, so
 # systemd's DefaultTimeoutStopSec (90s) is the real ceiling -- a larger value
-# here cannot be honoured, because systemd kills dockerd first. 60 leaves the
+# here cannot be honored, because systemd kills dockerd first. 60 leaves the
 # daemon 30s to finish its own teardown after the last container exits. Raising
 # this past ~85 means also shipping a TimeoutStopSec drop-in for docker.service,
 # which this role deliberately does not own.

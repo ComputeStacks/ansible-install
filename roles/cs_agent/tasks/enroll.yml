@@ -4,11 +4,11 @@
 # The controller mints the per-node agent token when controller_seed creates
 # the Node row, and only ever stores its sha256. v2 therefore reads the hash
 # controller-side through the cstacks CLI rather than through cs-agent's
-# documented HTTP enrolment endpoint (which is source-IP matched and would
+# documented HTTP enrollment endpoint (which is source-IP matched and would
 # have to be reachable from every node).
 #
 # `cstacks` is a wave 3G deliverable: until it lands these tasks fail loudly
-# on a missing command, which is the intended behaviour — end-to-end
+# on a missing command, which is the intended behavior — end-to-end
 # verification of this path belongs to wave 4J. Run them on their own with
 # `--tags enroll` (the agent.yml render carries the same tag, so the fetched
 # hash is written out and the service restarted).

@@ -48,14 +48,14 @@
   loop_control:
     label: "{{ item.path }}"
 
-- name: Check whether vault has already been initialised
+- name: Check whether vault has already been initialized
   ansible.builtin.stat:
     path: "{{ vault_storage_path }}/keys/unseal_key_0"
-  register: vault_initialised
+  register: vault_initialized
 
-- name: Initialise vault
+- name: Initialize vault
   ansible.builtin.include_tasks: initialize.yml
-  when: not vault_initialised.stat.exists
+  when: not vault_initialized.stat.exists
 
 - name: Ensure the vault-bootstrap container is running
   community.docker.docker_container:

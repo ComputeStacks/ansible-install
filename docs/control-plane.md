@@ -16,7 +16,7 @@ manifest variable, never by value.
 | 2 | controller → node dockerd | `primary_ip` | `docker_tls` TLS | vault-issued PKI client cert | Heartbeat and every container operation. |
 | 3 | controller → cs-agent | `agent_host` if set, else `primary_ip` | `agent_http` HTTP | per-node admin Bearer | Admin API. **Cleartext** — see below. |
 | 4 | controller → node, root ssh | `primary_ip` | `ssh` | controller app + root keys | Volumes, haproxy certificate deploy, LB reload. |
-| 5 | node → controller (enrolment) | portal domain | `controller_https` | `NODE_ENROLLMENT_TOKEN` | v2 does not use this leg — see below. |
+| 5 | node → controller (enrollment) | portal domain | `controller_https` | `NODE_ENROLLMENT_TOKEN` | v2 does not use this leg — see below. |
 | 6 | node → controller (LB config fetch) | `https://<Setting.hostname>` | `controller_https` | none (signed URL path) | The node curls this after the controller triggers it over #4. |
 | 7 | node haproxy → controller (ACME backend) | `regions[].acme_server` | `controller_acme_backend` HTTP | none | Tenant HTTP-01 challenges proxied back to the portal. |
 | 8 | container → cs-agent | `metadata.internal` = `primary_ip` | `agent_http` HTTP | tenant Bearer | The agent must be reachable on `primary_ip`. |
@@ -88,9 +88,9 @@ v1 solved the same problem by rewriting `/etc/hosts` on every node
 (`local_dns`). v2 does not: the portal domain resolves publicly, and where a
 private path exists, `acme_server` carries it.
 
-### Row 5 is not how v2 enrols
+### Row 5 is not how v2 enrolls
 
-The HTTP enrolment endpoint needs `NODE_ENROLLMENT_TOKEN` in the controller
+The HTTP enrollment endpoint needs `NODE_ENROLLMENT_TOKEN` in the controller
 environment (absent on v1 controllers) and matches on source IP, which is
 fragile behind a CDN or a tailnet. v2 instead reads the hash controller-side —
 `cstacks runner` against `Node.find_by(hostname: …).agent_token_hash`,
@@ -118,7 +118,7 @@ does, over row 4 plus the node's fetch in row 6.
 `agent:datachannel_backfill` calls every node's agent, and agents answer 401
 until they are enrolled. So `site.yml` runs: controller up → `bootstrap:apply`
 (creates the Node rows and mints the tokens) → the nodes play (`cs_agent`
-installs, enrols, restarts) → a **second** controller play
+installs, enrolls, restarts) → a **second** controller play
 (`controller_post_enroll`: datachannel backfill, metadata agent backfill,
 `test_connection:all`) → `validate`. `controller_seed` and
 `controller_post_enroll` are separate roles for exactly this reason.

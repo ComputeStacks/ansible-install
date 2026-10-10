@@ -297,7 +297,7 @@
   hosts: controller
   tasks:
     # :3000 (the node's haproxy ACME backend), :2376 return traffic, the
-    # enrolment path — v1 grants a peer its whole inbound set with one
+    # enrollment path — v1 grants a peer its whole inbound set with one
     # blanket accept per address, which is what this appends.
     - name: Append the new node addresses to this host's firewall
       ansible.builtin.include_role:

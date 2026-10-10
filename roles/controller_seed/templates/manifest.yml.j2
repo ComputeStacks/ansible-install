@@ -202,9 +202,9 @@ locations:
             agent_host: {{ node_ts | to_json }}
 {% endif %}
         networks:
-          # `name` is normalised controller-side (downcased, non-alphanumerics
+          # `name` is normalized controller-side (downcased, non-alphanumerics
           # stripped): net-exm-001 is stored as netexm001. The raw inventory
-          # name is passed through; the apply matches on the normalised form.
+          # name is passed through; the apply matches on the normalized form.
           - name: {{ hostvars[host].container_network_name | to_json }}
             label: {{ (hostvars[host].az ~ ' shared') | to_json }}
             subnet: {{ hostvars[host].container_network | to_json }}

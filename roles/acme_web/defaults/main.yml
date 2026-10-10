@@ -119,7 +119,7 @@ acme_web_domain_args: "{{ ['-d'] | product(acme_web_domains) | list | flatten }}
 acme_web_force_install_cert: false
 
 # Renewal timer (acme.sh --cron). acme.sh's own cron installer is disabled
-# (--nocron) in favour of this unit.
+# (--nocron) in favor of this unit.
 acme_web_renew_service: acme_renew
 
 # --- container registry ---------------------------------------------------

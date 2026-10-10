@@ -9,14 +9,14 @@ enrolled. Second controller play in `playbooks/site.yml`:
 
 ```
 controller_seed (creates Node rows, mints tokens)
-  -> cs_agent on the nodes (installs, ENROLS, restarts)
+  -> cs_agent on the nodes (installs, ENROLLS, restarts)
     -> controller_post_enroll        <- this role
       -> validate
 ```
 
 That order is a frozen contract (docs/contracts.md): the agent coordination
 tables start empty, and `agent:datachannel_backfill` calls every node's agent,
-which 401s until the node holds its admin token. Running it before enrolment
+which 401s until the node holds its admin token. Running it before enrollment
 always fails.
 
 ## What it runs

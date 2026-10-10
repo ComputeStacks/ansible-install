@@ -8,8 +8,8 @@ Render the ComputeStacks **bootstrap manifest** from the inventory and apply
 it with `cstacks seed` (`rake bootstrap:apply[<manifest>]`). This is the step
 that creates the Locations, Regions, Nodes, Networks and Load Balancers — and
 therefore the step that mints the agent tokens `roles/cs_agent` reads back
-during enrolment. It runs **after every host is built and before the nodes
-enrol** (`playbooks/site.yml`, "Seed controller").
+during enrollment. It runs **after every host is built and before the nodes
+enroll** (`playbooks/site.yml`, "Seed controller").
 
 The schema is the controller repo's `doc/bootstrap_manifest.md`,
 `schema_version: 1`, **frozen**. An unknown key there is a hard error, not a
@@ -66,7 +66,7 @@ role is the only place the mapping exists (docs/contracts.md §Vocabulary).
 | `az` host var (e.g. `exm-001`) | `locations[].regions[].name` (`Region`) | Exactly **one node per az** — preflight enforces it, this role relies on it. |
 | node in `groups['nodes']` | `…regions[].nodes[]` (`Node`) | `hostname`/`label` from the `hostname` host var, never `ansible_hostname`. |
 | `container_network` | `…regions[].networks[].subnet` | Must be RFC-1918 and at least a `/28`. |
-| `container_network_name` | `…regions[].networks[].name` | Passed **raw**; the model normalises it (`net-exm-001` is stored as `netexm001`). The apply matches on the normalised form, so the raw value is stable and readable in the diff. |
+| `container_network_name` | `…regions[].networks[].name` | Passed **raw**; the model normalizes it (`net-exm-001` is stored as `netexm001`). The apply matches on the normalized form, so the raw value is stable and readable in the diff. |
 | the az's single node | `…regions[].load_balancer` | `ext_ip`/`internal_ip` = that node's `primary_ip`, `public_ip` = its `public_ip`. |
 | `app_domain` host var, else `cs_app_zone` | `…load_balancer.domain` **and** the CN of `…load_balancer.shared_certificate` | **Per az**, through the cross-host-safe `hostvars[host].cs_app_domain`. One load balancer per az, and in a real estate every one of them answers on a different domain. Both fields are keyed off the same value so they cannot disagree — a mismatch is a failed TLS handshake for every tenant container in that az. |
 | `site` host var | *(nothing — the controller has no column for it)* | Decides **which** client each az names. One `metric_clients[]`/`log_clients[]` entry per site this run seeds nodes into, deduped by endpoint. |
@@ -206,7 +206,7 @@ string would be stored as an empty `agent_host` rather than read as "unset".
   address.** `roles/powerdns` writes the controller's `primary_ip`/`public_ip`
   into `webserver-allow-from`; a request from the controller's tailnet address
   would be rejected. (It is plain HTTP with an API key in a header — v1
-  behaviour, unchanged here; see "Known gaps".)
+  behavior, unchanged here; see "Known gaps".)
 * **`loki_endpoint` carries no credentials.** It is the *container* write path;
   `Region#loki_container_endpoint` splices the log client's username/password
   into it controller-side.
@@ -323,7 +323,7 @@ printed.
 
 The regions still reference the metric/log clients **by endpoint**, now that
 site's own endpoint. The match is exact and a miss aborts the apply — which is
-the wanted behaviour: it means the existing controller's client endpoint is not
+the wanted behavior: it means the existing controller's client endpoint is not
 what this inventory says it is, and creating a second client would silently
 split the placement metrics. Check the rendered strings against the live
 `MetricClient.endpoint` / `LogClient.endpoint` character for character before

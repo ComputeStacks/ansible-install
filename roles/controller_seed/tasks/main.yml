@@ -1,7 +1,7 @@
 ---
 # Render the bootstrap manifest from INVENTORY VARS and apply it with
 # `cstacks seed` (rake bootstrap:apply). Runs on the controller, after every
-# host is built and BEFORE the nodes enrol -- the apply is what creates the
+# host is built and BEFORE the nodes enroll -- the apply is what creates the
 # Node rows whose agent tokens cs_agent reads back. See README.md.
 
 - name: Assert the environment inputs the manifest needs are present
@@ -211,7 +211,7 @@
 
 # `regions[].acme_server` falls back to the controller's primary_ip for every
 # node that is not tailnet-paired with the controller. On a node in the same
-# datacentre that is correct; on a REMOTE region it is an address that routes
+# datacenter that is correct; on a REMOTE region it is an address that routes
 # nowhere, and nothing notices until a tenant certificate fails to issue. This
 # only actually lands on a region seeded for the FIRST time by this apply --
 # an az that already exists on the controller keeps its own acme_server

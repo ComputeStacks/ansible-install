@@ -8,7 +8,7 @@
 # enrollment and the backfills depend on it:
 #
 #   seed creates Node rows (minting agent tokens)
-#     -> the nodes install cs-agent and ENROL
+#     -> the nodes install cs-agent and ENROLL
 #       -> controller_post_enroll runs the backfills
 #         -> validate asserts the whole graph
 #
@@ -269,7 +269,7 @@
 - name: Node agents (requires seeded Node rows)
   hosts: nodes
   roles:
-    - cs_agent                  # apt install, agent.yml, enrol, borg key
+    - cs_agent                  # apt install, agent.yml, enroll, borg key
 
 - name: Post-enrollment controller tasks
   hosts: controller

@@ -38,7 +38,7 @@ ARGS  ?=
 # play, so the run ends green having done roughly half the work:
 #
 #   site.yml         no controller_seed (no Location/Region/Node rows, so the
-#                    node's cs-agent has nothing to enrol against), no
+#                    node's cs-agent has nothing to enroll against), no
 #                    prometheus file_sd fragments, no firewall on the shared
 #                    hosts, no ssh trust from the controller.
 #   add-region.yml   the same, plus no controller prep and none of the v1
@@ -82,7 +82,7 @@ help:
 	@echo "                                  node upgrade selection rules and the node data"
 	@echo "                                  disk classification"
 	@echo ""
-	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honoured."
+	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honored."
 	@echo ""
 	@echo "LIMIT=region_<name> selects that region's NODES only -- the plays that"
 	@echo "target the controller, metrics and backup hosts then match no host and"

@@ -31,7 +31,7 @@ path returns early when live restore is enabled and containers are running — i
 leaves them alone rather than stopping them, so the budget is never spent. The
 value is here for the operator who sets `docker_config_live_restore: false`.
 
-v1 set 120. That number could never be honoured: docker's packaged unit sets no
+v1 set 120. That number could never be honored: docker's packaged unit sets no
 `TimeoutStopSec`, so systemd's `DefaultTimeoutStopSec` of 90s is the real
 ceiling and would kill dockerd first. 60 fits inside it with headroom for the
 daemon's own teardown. Anything past ~85 needs a `TimeoutStopSec` drop-in for
@@ -129,7 +129,7 @@ either playbook). Other geerlingguy vars worth knowing:
 | `docker_daemon_options` | `{}` (default) | **Required.** Otherwise it fights `docker_config` for `daemon.json` and restarts dockerd. |
 | `docker_service_manage` | `true` (default) | Lets it enable/start docker; `docker_tls` restarts via its own handler afterwards. |
 | `docker_restart_handler_state` | `restarted` (default) | Only fires on package/repo changes. |
-| `docker_packages` / `docker_packages_state` | pin + `present` | Contract 4 (pin everything). The engine version pin belongs in `versions.yml` and is **not yet set** — flagged to Wave 4J, since `versions.yml` edits outside `vault_image` are outside this wave's allowlist. v1 additionally ran `apt-mark hold` on the docker packages so an unattended `apt upgrade` could not restart every container; Wave 4J should keep that behaviour. |
+| `docker_packages` / `docker_packages_state` | pin + `present` | Contract 4 (pin everything). The engine version pin belongs in `versions.yml` and is **not yet set** — flagged to Wave 4J, since `versions.yml` edits outside `vault_image` are outside this wave's allowlist. v1 additionally ran `apt-mark hold` on the docker packages so an unattended `apt upgrade` could not restart every container; Wave 4J should keep that behavior. |
 | `docker_install_compose` | `false` (default) | Nothing uses the standalone binary. |
 | `docker_apt_release_channel` | `stable` (default) | |
 
