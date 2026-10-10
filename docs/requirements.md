@@ -37,11 +37,11 @@ column says what grows.
 | `metrics` | 2 | 4 GB | 20 GB | — | prometheus TSDB and loki chunks (loki keeps 14 days), with the number of nodes |
 | `backup` | 2 | 2 GB | 20 GB | — | borg repositories in `/var/lib/computestacks/backups`: every tenant volume, times retention. Size this one for storage first |
 | `nameservers` | 2 | 2 GB | 12 GB | — | very little |
-| `nodes` | 2 | 4 GB | 40 GB | **required**, 30 GB tested | everything tenant: images, container layers, volumes — all on the data disk |
+| `nodes` | 2 | 4 GB | 20 GB | **required**, 30 GB tested | everything tenant: images, container layers, volumes — all on the data disk |
 | `registry` | — | — | — | — | not covered by the test environment; tenant registries store under `/computestacks-mnt` on the root disk |
 
 A node's root disk holds only the OS, logs and packages once the data disk is
-in place, so 40 GB stays enough however large the node grows. Its data disk
+in place, so it stays small however large the node grows. Its data disk
 sets how much a node can host; size it for the tenants you expect, and grow
 it later rather than over-buying (below).
 
