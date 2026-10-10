@@ -30,3 +30,5 @@ test inventory with real addresses can live there safely.
   (`docs/contracts.md` rule 6).
 * Version bumps in `playbooks/group_vars/all/versions.yml`, with the date and
   source you verified them against.
+* Version bumps pass `make check-pins` (network; confirms every pin exists
+  upstream).
