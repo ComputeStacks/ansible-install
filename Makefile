@@ -64,7 +64,7 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region upgrade-docker validate add-region-validate lint check
+.PHONY: help deps site add-region upgrade-docker validate add-region-validate lint check check-pins
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
@@ -81,6 +81,8 @@ help:
 	@echo "                                  the powerdns load balancer record plan and the"
 	@echo "                                  node upgrade selection rules and the node data"
 	@echo "                                  disk classification"
+	@echo "check-pins                        confirm every pin in versions.yml and requirements.yml"
+	@echo "                                  exists upstream (network; not part of check)"
 	@echo ""
 	@echo "LIMIT=<pattern>, ARGS='...', VAULT='--vault-password-file ...' are honored."
 	@echo ""
@@ -169,3 +171,9 @@ check:
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
 	@echo "       node data disk classification formats only a provably blank disk"
+
+# Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
+# requirements.yml) is looked up at its source -- apt indexes, registries,
+# release assets, checksums. Kept out of `check`, which must stay offline.
+check-pins:
+	python3 tests/check_pins.py
