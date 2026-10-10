@@ -11,8 +11,8 @@
 #
 # Each file in tests/fixtures/node_storage/ is one node as tasks/probe.yml
 # would have registered it -- the `realpath`, `stat`, `blkid -p -o export`,
-# `lsblk -J -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS`, `findmnt -J --mountpoint`
-# and `find` results, in util-linux's documented output shapes (MOUNTPOINTS a
+# `lsblk -J -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS`, `findmnt -J --mountpoint`,
+# `find` and per-path `stat` (follow: false) results, in util-linux's documented output shapes (MOUNTPOINTS a
 # list with null for "not mounted"; a bind mount's findmnt SOURCE
 # `/dev/xvdb[/docker]`; blkid rc 2 and no output when nothing is found) --
 # plus the expected state and a substring of the expected reason. Every case
@@ -31,7 +31,12 @@
 # ours but docker state on the root disk; the data mount held by another disk
 # (R2); a bind target from another disk; a bind target from the wrong
 # subdirectory; a changed docker_data_device on a built node; mounted at /mnt;
-# mounted at a prefix look-alike of the data mount; blkid rc 8 (ambivalent).
+# mounted at a prefix look-alike of the data mount; blkid rc 8 (ambivalent);
+# blkid rc 2 that could not read the device; no blkid signature but an lsblk
+# FSTYPE; no signature yet mounted; the data mount a subdirectory bind of the
+# disk; a symlinked bind target and a symlinked data mount path; a bind
+# target that is a regular file; a non-empty, unmounted data mount path; a
+# find error on an existing directory; a failed stat.
 #
 # The one `fatal: ... refusing to set up container storage` in the output is
 # expected: it is the refusal path of classify.yml, caught by `rescue:`.
@@ -59,7 +64,8 @@
       vars:
         node_storage_probe: >-
           {{ nst_ready.device_input | node_storage_build_probe(nst_ready.realpath, nst_ready.stat,
-               nst_ready.blkid, nst_ready.lsblk, nst_ready.findmnt, nst_ready.find) }}
+               nst_ready.blkid, nst_ready.lsblk, nst_ready.findmnt, nst_ready.find,
+               nst_ready.path_stat) }}
 
     - name: "Assert: ready, no reason"
       ansible.builtin.assert:
@@ -78,7 +84,8 @@
           vars:
             node_storage_probe: >-
               {{ nst_ext4.device_input | node_storage_build_probe(nst_ext4.realpath, nst_ext4.stat,
-                   nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find) }}
+                   nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find,
+               nst_ext4.path_stat) }}
 
         - name: Record that classify.yml did not fail
           ansible.builtin.set_fact:
@@ -112,7 +119,8 @@
         node_storage_classify_fail: false
         node_storage_probe: >-
           {{ nst_ext4.device_input | node_storage_build_probe(nst_ext4.realpath, nst_ext4.stat,
-               nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find) }}
+               nst_ext4.blkid, nst_ext4.lsblk, nst_ext4.findmnt, nst_ext4.find,
+               nst_ext4.path_stat) }}
 
     - name: "Assert: refuse recorded, play continues"
       ansible.builtin.assert:
@@ -131,7 +139,8 @@
         nst_verdict: >-
           {{ nst_case.device_input
              | node_storage_build_probe(nst_case.realpath, nst_case.stat, nst_case.blkid,
-                                        nst_case.lsblk, nst_case.findmnt, nst_case.find)
+                                        nst_case.lsblk, nst_case.findmnt, nst_case.find,
+                                        nst_case.path_stat)
              | node_storage_classify(node_storage_mount, node_storage_label, node_storage_binds) }}
       ansible.builtin.set_fact:
         nst_results: >-
@@ -162,7 +171,7 @@
       ansible.builtin.assert:
         that:
           - nst_results | map(attribute='expect.state') | unique | sort == ['blank', 'ours', 'ready', 'refuse']
-          - nst_results | length >= 20
+          - nst_results | length >= 40
         quiet: true
 
     - name: Summary

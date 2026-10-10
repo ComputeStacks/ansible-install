@@ -92,24 +92,66 @@
   ],
   "find": [
     {
-      "item": {
-        "src_subdir": "docker",
-        "target": "/var/lib/docker",
-        "mode": "0710"
-      },
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": "/var/lib/docker-data/containerd",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
       "rc": 0,
       "stdout": "/var/lib/docker/volumes",
       "stderr": ""
     },
     {
-      "item": {
-        "src_subdir": "containerd",
-        "target": "/var/lib/containerd",
-        "mode": "0711"
-      },
+      "item": "/var/lib/containerd",
       "rc": 0,
       "stdout": "/var/lib/containerd/tmpmounts",
       "stderr": ""
+    }
+  ],
+  "path_stat": [
+    {
+      "item": "/var/lib/docker-data",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/docker-data",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    },
+    {
+      "item": "/var/lib/docker",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/docker",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    },
+    {
+      "item": "/var/lib/containerd",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/containerd",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
     }
   ]
 }

@@ -1,0 +1,124 @@
+{
+  "case": "no blkid signature, yet mounted at the data mount",
+  "expect": {
+    "state": "refuse",
+    "reason": "has no filesystem signature yet is mounted at /var/lib/docker-data"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": null,
+          "mountpoints": [
+            "/var/lib/docker-data"
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker-data",
+            "source": "/dev/xvdb",
+            "fstype": "xfs",
+            "options": "rw,noatime,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/docker': No such file or directory"
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 1,
+      "stdout": "",
+      "stderr": "find: '/var/lib/containerd': No such file or directory"
+    }
+  ],
+  "path_stat": [
+    {
+      "item": "/var/lib/docker-data",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/docker-data",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    },
+    {
+      "item": "/var/lib/docker",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": false
+      }
+    },
+    {
+      "item": "/var/lib/containerd",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": false
+      }
+    }
+  ]
+}

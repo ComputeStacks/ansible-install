@@ -12,14 +12,20 @@
 #                  /dev/disk/by-id/... link compares as its kernel name
 #   is_block       the resolved path is a block device
 #   blkid          `blkid -p -o export` as {KEY: VALUE}; {} when blkid found
-#                  nothing (rc 2); {BLKID_RC: <rc>} on any other failure, which
-#                  the classifier refuses as an unrecognized signature
+#                  nothing (rc 2, silent); {BLKID_RC: <rc>} on any other
+#                  failure, which the classifier refuses as an unrecognized
+#                  signature
+#   blkid_error    blkid's stderr when it exited 2 AND complained -- it could
+#                  not open or read the device; refused, never read as blank
 #   lsblk          blockdevices[0] of `lsblk -J`, children included, or null
 #   mounts         {<path>: findmnt filesystem or null} for the data mount and
 #                  each bind target, by exact mountpoint
-#   dir_nonempty   {<bind target>: true} when the directory has contents AND
-#                  nothing is mounted there (docker or containerd already ran
-#                  on the root disk)
+#   path_type      {<path>: absent|directory|symlink|file|other|unknown} for
+#                  the same three paths, from stat WITHOUT following links
+#   dir_nonempty   {<path>: true} when the directory has contents AND nothing
+#                  is mounted there (docker or containerd already ran on the
+#                  root disk, or something wrote under the data mount)
+#   find_error     {<path>: why} when a directory could not be listed
 
 - name: Resolve docker_data_device to its kernel device
   ansible.builtin.command:
@@ -40,7 +46,8 @@
   check_mode: false
 
 # `-p` probes the device itself instead of answering from the udev cache, so
-# it is correct immediately after a mkfs. rc 2 = no signature of any kind.
+# it is correct immediately after a mkfs. rc 2 = no signature of any kind --
+# unless stderr says blkid could not read the device, which also exits 2.
 - name: Probe the device for filesystem and partition table signatures
   ansible.builtin.command:
     argv: [blkid, -p, -o, export, "{{ node_storage_realpath.stdout | trim }}"]
@@ -70,15 +77,30 @@
   failed_when: node_storage_findmnt.rc not in [0, 1]
   check_mode: false
 
-- name: Check whether the bind targets already hold anything
+# Not following links: a symlinked /var/lib/docker must read as a symlink
+# (and be refused), never as the directory it points at.
+- name: Check what the data mount and the bind targets are on disk
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop: "{{ [node_storage_mount] + (node_storage_binds | map(attribute='target') | list) }}"
+  register: node_storage_path_stat
+  failed_when: false
+  check_mode: false
+
+# Only what a directory holds counts: find does not follow a symlinked start
+# point, which path_type above catches instead. A missing path (rc 1) is
+# simply empty; any other failure on an existing directory is recorded and
+# refused by the classifier, never read as empty.
+- name: Check whether the data mount and the bind targets already hold anything
   ansible.builtin.command:
-    argv: [find, "{{ item.target }}", -mindepth, "1", -maxdepth, "1", -print, -quit]
-  loop: "{{ node_storage_binds }}"
-  loop_control:
-    label: "{{ item.target }}"
+    argv: [find, "{{ item }}", -mindepth, "1", -maxdepth, "1", -print, -quit]
+  loop: "{{ [node_storage_mount] + (node_storage_binds | map(attribute='target') | list) }}"
   register: node_storage_find
   changed_when: false
-  # A missing directory (rc 1) is simply empty.
   failed_when: false
   check_mode: false
 
@@ -91,4 +113,5 @@
       {{ docker_data_device | default('')
          | node_storage_build_probe(node_storage_realpath, node_storage_device_stat,
                                     node_storage_blkid, node_storage_lsblk,
-                                    node_storage_findmnt.results, node_storage_find.results) }}
+                                    node_storage_findmnt.results, node_storage_find.results,
+                                    node_storage_path_stat.results) }}

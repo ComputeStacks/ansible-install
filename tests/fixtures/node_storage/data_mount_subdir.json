@@ -1,0 +1,156 @@
+{
+  "case": "the data mount is a subdirectory bind of the data disk",
+  "expect": {
+    "state": "refuse",
+    "reason": "/var/lib/docker-data is mounted from /dev/xvdb[/foo], a subdirectory of"
+  },
+  "device_input": "/dev/xvdb",
+  "realpath": {
+    "rc": 0,
+    "stdout": "/dev/xvdb",
+    "stderr": ""
+  },
+  "stat": {
+    "stat": {
+      "exists": true,
+      "isblk": true,
+      "ischr": false,
+      "path": "x"
+    }
+  },
+  "blkid": {
+    "rc": 0,
+    "stdout": "DEVNAME=/dev/xvdb\nUUID=3f6c1b8e-2d4a-4c7e-9b1f-5a8d0e6c2b71\nLABEL=dockerdata\nBLOCK_SIZE=4096\nTYPE=xfs\nUSAGE=filesystem",
+    "stderr": ""
+  },
+  "lsblk": {
+    "rc": 0,
+    "stdout": {
+      "blockdevices": [
+        {
+          "name": "xvdb",
+          "path": "/dev/xvdb",
+          "type": "disk",
+          "fstype": "xfs",
+          "mountpoints": [
+            "/var/lib/containerd",
+            "/var/lib/docker",
+            "/var/lib/docker-data"
+          ]
+        }
+      ]
+    },
+    "stderr": ""
+  },
+  "findmnt": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker-data",
+            "source": "/dev/xvdb[/foo]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/docker",
+            "source": "/dev/xvdb[/docker]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 0,
+      "stdout": {
+        "filesystems": [
+          {
+            "target": "/var/lib/containerd",
+            "source": "/dev/xvdb[/containerd]",
+            "fstype": "xfs",
+            "options": "rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,prjquota"
+          }
+        ]
+      },
+      "stderr": ""
+    }
+  ],
+  "find": [
+    {
+      "item": "/var/lib/docker-data",
+      "rc": 0,
+      "stdout": "/var/lib/docker-data/containerd",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/docker",
+      "rc": 0,
+      "stdout": "/var/lib/docker/volumes",
+      "stderr": ""
+    },
+    {
+      "item": "/var/lib/containerd",
+      "rc": 0,
+      "stdout": "/var/lib/containerd/io.containerd.content.v1.content",
+      "stderr": ""
+    }
+  ],
+  "path_stat": [
+    {
+      "item": "/var/lib/docker-data",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/docker-data",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    },
+    {
+      "item": "/var/lib/docker",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/docker",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    },
+    {
+      "item": "/var/lib/containerd",
+      "changed": false,
+      "failed": false,
+      "stat": {
+        "exists": true,
+        "path": "/var/lib/containerd",
+        "isdir": true,
+        "islnk": false,
+        "isreg": false,
+        "isblk": false,
+        "ischr": false
+      }
+    }
+  ]
+}

@@ -5,13 +5,17 @@
 #
 #   blank  -> mkfs.xfs, then every mount below
 #   ours   -> only the mounts that are missing
-#   ready  -> no mount task runs at all: the role never unmounts, never
-#             remounts, and on a finished node only asserts
+#   ready  -> no mount happens: the role never unmounts, never remounts
 #
-# Mounts already in place are never passed to ansible.posix.mount as
-# `mounted`: that state REMOUNTS a mounted filesystem whenever its fstab line
-# changes, and a remount is exactly what this role must never do under a
-# running docker. They get `present` (fstab only) instead.
+# On EVERY state, ready included, the three fstab entries are ensured: a node
+# whose mounts are live but missing from fstab (or carried by hand-made
+# lines) would otherwise come back after a reboot with docker writing to the
+# root disk. Mounts already in place are never passed to ansible.posix.mount
+# as `mounted`: that state REMOUNTS a mounted filesystem whenever its fstab
+# line changes, and a remount is exactly what this role must never do under a
+# running docker. They get `present` (fstab only, never mounts or remounts)
+# instead. On a node this role built the lines already match field for
+# field, so `present` changes nothing.
 
 - name: Require a classification this role may act on
   ansible.builtin.assert:
@@ -49,7 +53,8 @@
 
 # Re-read, not taken from the probe: on a blank disk the UUID only exists now.
 # `-p` reads the device itself, not udev's cache, which may not have caught up
-# with the mkfs yet. In --check nothing was formatted, so there is no UUID.
+# with the mkfs yet. In --check a blank disk was not formatted, so it has no
+# UUID yet. Read on ready nodes too: their fstab line is ensured below.
 - name: Read the data filesystem's UUID
   ansible.builtin.command:
     argv: [blkid, -p, -s, UUID, -o, value, "{{ node_storage_probe.device }}"]
@@ -59,12 +64,13 @@
     not ansible_check_mode
     and (node_storage_uuid_read.rc != 0 or node_storage_uuid_read.stdout | trim == '')
   check_mode: false
-  when: node_storage_state != 'ready'
 
 # By UUID, not LABEL: a second disk carrying a stray `dockerdata` label must
-# never be able to win the mount. Pass 0 because fsck.xfs is a no-op (XFS
-# replays its log at mount). No `nofail`: a missing data disk must stop the
-# boot rather than let docker start on the root disk's empty directories.
+# never be able to win the mount. A hand-made line for the same path (by
+# LABEL, by device name, other options) is rewritten to this one. Pass 0
+# because fsck.xfs is a no-op (XFS replays its log at mount). No `nofail`: a
+# missing data disk must stop the boot rather than let docker start on the
+# root disk's empty directories.
 - name: Mount the data filesystem
   ansible.posix.mount:
     path: "{{ node_storage_mount }}"
@@ -74,7 +80,6 @@
     dump: "0"
     passno: "0"
     state: "{{ 'present' if node_storage_probe.mounts[node_storage_mount] else 'mounted' }}"
-  when: node_storage_state != 'ready'
 
 # Only now: created any earlier, they would land on the root disk underneath
 # the mount. Modes match what docker (0710) and containerd (0711) give their
@@ -92,7 +97,8 @@
   when: node_storage_state != 'ready'
 
 # systemd's fstab generator gives each bind mount a RequiresMountsFor= on its
-# source, so these always come up after the data mount.
+# source, so these always come up after the data mount. Like the data mount:
+# `present` (fstab only) on every path already mounted, ready nodes included.
 - name: Bind-mount the data filesystem over docker's and containerd's paths
   ansible.posix.mount:
     path: "{{ item.target }}"
@@ -105,7 +111,6 @@
   loop: "{{ node_storage_binds }}"
   loop_control:
     label: "{{ item.target }}"
-  when: node_storage_state != 'ready'
 
 - name: Create the systemd drop-in directories
   ansible.builtin.file:

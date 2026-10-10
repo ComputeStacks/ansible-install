@@ -3,8 +3,8 @@
 Everything in here is a function of its arguments: no command runs, nothing
 is read off a host. tasks/probe.yml collects what a node reports about
 `docker_data_device` (`realpath`, `blkid -p -o export`, `lsblk -J`,
-`findmnt -J --mountpoint`, whether the docker/containerd directories hold
-anything) into one fact, tasks/classify.yml hands that fact to
+`findmnt -J --mountpoint`, the type of the data mount and bind target paths
+and whether they hold anything) into one fact, tasks/classify.yml hands that fact to
 node_storage_classify, and tests/node_storage_classify.yml feeds it canned
 copies of the same output to prove the rules without a disk.
 
@@ -125,14 +125,27 @@ def parse_blkid(stdout):
 
 
 def _blkid(result):
-    """{} when blkid found nothing (rc 2) or did not run; the parsed export on
-    rc 0; {BLKID_RC: rc} on anything else (e.g. 8, ambivalent probe), which
-    the classifier refuses as an unrecognized signature."""
+    """{} when blkid found nothing (rc 2, silent) or did not run; the parsed
+    export on rc 0; {BLKID_RC: rc} on anything else (e.g. 8, ambivalent
+    probe), which the classifier refuses as an unrecognized signature.
+
+    rc 2 is ALSO what blkid returns when it could not open or read the device
+    at all, with a warning on stderr; that case is not "no signature" and is
+    reported separately by _blkid_error.
+    """
     if not _ran(result) or result["rc"] == 2:
         return {}
     if result["rc"] == 0:
         return parse_blkid(result.get("stdout"))
     return {"BLKID_RC": str(result["rc"])}
+
+
+def _blkid_error(result):
+    """blkid's stderr when it exited 2 and complained (could not read the
+    device), else ''. rc 2 with an empty stderr is a genuinely blank device."""
+    if _ran(result) and result["rc"] == 2:
+        return (result.get("stderr") or "").strip()
+    return ""
 
 
 def _lsblk(result):
@@ -156,21 +169,63 @@ def _findmnt(result):
     return filesystems[-1] if filesystems else None
 
 
-def node_storage_build_probe(device_input, realpath, stat, blkid, lsblk, findmnt, find):
+def _path_type(result):
+    """One ansible.builtin.stat result (follow: false) -> the path's type:
+    absent | directory | symlink | file | other, or unknown when the stat did
+    not run or failed. A symlink is reported as a symlink, never as what it
+    points at."""
+    if not isinstance(result, dict) or result.get("skipped") or result.get("failed"):
+        return "unknown"
+    st = result.get("stat")
+    if not isinstance(st, dict) or "exists" not in st:
+        return "unknown"
+    if not st.get("exists"):
+        return "absent"
+    if st.get("islnk"):
+        return "symlink"
+    if st.get("isdir"):
+        return "directory"
+    if st.get("isreg"):
+        return "file"
+    return "other"
+
+
+def _item_path(item):
+    """A loop item -> the path it is about: the item itself, or a bind entry's
+    `target`."""
+    if isinstance(item, dict):
+        return item.get("target")
+    return item
+
+
+def node_storage_build_probe(device_input, realpath, stat, blkid, lsblk, findmnt, find,
+                             path_stat=None):
     """tasks/probe.yml's registered results -> the node_storage_probe fact.
 
     device_input  docker_data_device as configured
     realpath      `realpath -e -- <device_input>`        {rc, stdout}
     stat          ansible.builtin.stat of the resolved path (or skipped)
-    blkid         `blkid -p -o export <device>`         {rc, stdout} (or skipped)
+    blkid         `blkid -p -o export <device>`         {rc, stdout, stderr} (or skipped)
     lsblk         `lsblk -J -o ... <device>`            {rc, stdout} (or skipped)
     findmnt       loop results, item = mountpoint path   [{item, rc, stdout}]
-    find          loop results, item = a bind entry      [{item: {target}, rc, stdout}]
-                  (`find <target> -mindepth 1 -maxdepth 1 -print -quit`)
+    find          loop results, item = a path            [{item, rc, stdout, stderr}]
+                  (`find <path> -mindepth 1 -maxdepth 1 -print -quit`)
+    path_stat     loop results, item = a path            [{item, stat}]
+                  (ansible.builtin.stat, follow: false)
 
-    dir_nonempty is true only when the directory has an entry AND nothing is
-    mounted there: a mounted target shows the mounted filesystem's contents,
-    which say nothing about the root disk underneath.
+    For each path (the data mount and every bind target):
+
+    path_type     absent | directory | symlink | file | other | unknown
+    dir_nonempty  true only when the path is a directory with an entry AND
+                  nothing is mounted there: a mounted path shows the mounted
+                  filesystem's contents, which say nothing about the root disk
+                  underneath.
+    find_error    set (to find's stderr, or a description) when the path is a
+                  directory but find did not list it cleanly. An unreadable
+                  directory is never taken for an empty one. find is not
+                  consulted for a path that is absent (nothing to hide) or not
+                  a directory (refused on its type: find does not follow a
+                  symlinked start point, so a symlink always reads as empty).
     """
     device = (realpath.get("stdout") or "").strip() if _ran(realpath) and realpath["rc"] == 0 else ""
     st = (stat or {}).get("stat") or {}
@@ -180,22 +235,40 @@ def node_storage_build_probe(device_input, realpath, stat, blkid, lsblk, findmnt
     for r in findmnt or []:
         mounts[r.get("item")] = _findmnt(r)
 
+    types = {}
+    for r in path_stat or []:
+        path = _item_path(r.get("item"))
+        if path:
+            types[path] = _path_type(r)
+
     nonempty = {}
+    errors = {}
     for r in find or []:
-        target = (r.get("item") or {}).get("target")
-        if not target:
+        path = _item_path(r.get("item"))
+        if not path:
             continue
-        found = _ran(r) and r["rc"] == 0 and bool((r.get("stdout") or "").strip())
-        nonempty[target] = found and not mounts.get(target)
+        if types.get(path) != "directory":
+            nonempty[path] = False
+            continue
+        if not _ran(r) or r["rc"] != 0:
+            errors[path] = ((r.get("stderr") or "").strip()
+                            or "find exited %s" % (r.get("rc") if _ran(r) else "without running"))
+            nonempty[path] = False
+            continue
+        found = bool((r.get("stdout") or "").strip())
+        nonempty[path] = found and not mounts.get(path)
 
     return {
         "device_input": device_input or "",
         "device": device,
         "is_block": is_block,
         "blkid": _blkid(blkid) if is_block else {},
+        "blkid_error": _blkid_error(blkid) if is_block else "",
         "lsblk": _lsblk(lsblk) if is_block else None,
         "mounts": mounts,
+        "path_type": types,
         "dir_nonempty": nonempty,
+        "find_error": errors,
     }
 
 
@@ -208,16 +281,19 @@ def node_storage_classify(probe, mount, label, binds):
 
     Returns {state, reason}, state one of:
 
-    * blank  -- a whole disk with no signature of any kind, mounted nowhere,
-                with nothing mounted at the data mount or the bind targets and
-                nothing already written to /var/lib/docker or
-                /var/lib/containerd. The ONLY state apply.yml formats.
+    * blank  -- a whole disk with no signature of any kind (and blkid read it
+                cleanly), mounted nowhere, with nothing mounted at the data
+                mount or the bind targets, and each of those three paths
+                absent or an EMPTY plain directory (not a symlink, not a file,
+                not unreadable). The ONLY state apply.yml formats.
     * ours   -- our XFS (label `label`), no partition table, no children,
                 mounted nowhere outside the allowed set, but at least one of
-                the three mounts is still missing. apply.yml mounts.
+                the three mounts is still missing; each unmounted path absent
+                or an empty plain directory. apply.yml mounts.
     * ready  -- ours, mounted at `mount` from THIS device with project quotas
                 on, and every bind target mounted from `<mount>/<subdir>` on
-                THIS device. apply.yml changes nothing.
+                THIS device. apply.yml only makes sure fstab has the three
+                entries; on a node it built, that changes nothing.
     * refuse -- anything else, with an operator-facing reason that names the
                 device, says what to do, and says nothing was changed.
 
@@ -285,6 +361,15 @@ def node_storage_classify(probe, mount, label, binds):
             "out for something else; the role only uses a whole disk with no "
             "partition table. If its contents are disposable, wipe it "
             "(`wipefs -a` on each of those, then on %s) and re-run." % (dev, held, device))
+
+    # blkid -p exits 2 both for "no signature" and for "could not open or read
+    # the device" -- only the second one prints anything. A device blkid could
+    # not read is never taken for a blank one.
+    if probe.get("blkid_error"):
+        return _refuse(
+            "%s could not be read by blkid (%s), so whether it already holds "
+            "data cannot be told. Check the device on the node with "
+            "`blkid -p %s`." % (dev, probe["blkid_error"], device))
 
     blkid = dict(probe.get("blkid") or {})
     if blkid.get("PTTYPE"):
@@ -368,6 +453,41 @@ def node_storage_classify(probe, mount, label, binds):
                     "%s%s on %s. Unmount %s and re-run." % (path, src, sub, mount, want, dev, path))
         mounted[path] = True
 
+    # --- what the three paths are on the root disk ----------------------------
+    # Each path that is NOT a mountpoint must be absent or a plain directory.
+    # A symlink (say /var/lib/docker -> /srv/docker) would keep docker's state
+    # at its target while reading as empty here -- find does not follow a
+    # symlinked start point -- and the mount would then go over the link. A
+    # path that could not be checked is never taken for an empty one.
+    types = probe.get("path_type") or {}
+    errors = probe.get("find_error") or {}
+    for path in allowed:
+        if mounted.get(path):
+            continue
+        ptype = types.get(path) or "unknown"
+        if ptype == "unknown":
+            return _refuse(
+                "%s cannot be put in place: %s could not be checked on the "
+                "node (stat failed or did not run). Check it by hand with "
+                "`ls -ld %s`." % (dev, path, path))
+        if ptype not in ("absent", "directory"):
+            what = {"symlink": "a symlink", "file": "a regular file"}.get(ptype, "not a directory")
+            return _refuse(
+                "%s cannot be put in place: %s is %s, not a directory. "
+                "Mounting over it would hide whatever it holds or points at "
+                "(`ls -ld %s`). Move that state onto the data disk by hand or "
+                "rebuild the node with the data disk attached." % (dev, path, what, path))
+    for path in allowed:
+        if errors.get(path):
+            return _refuse(
+                "%s cannot be put in place: the contents of %s could not be "
+                "listed (%s), so whether it already holds data cannot be told. "
+                "Check it by hand with `ls -A %s`." % (dev, path, errors[path], path))
+        if not mounted.get(path) and types.get(path) == "directory" and path not in nonempty:
+            return _refuse(
+                "%s cannot be put in place: the contents of %s were not "
+                "checked. Check it by hand with `ls -A %s`." % (dev, path, path))
+
     # --- docker or containerd already written to the root disk --------------
     # A bind target that is not mounted but already has contents means docker
     # or containerd ran before the data disk was in place. Binding over it
@@ -381,6 +501,15 @@ def node_storage_classify(probe, mount, label, binds):
             "with the data disk attached." % (
                 dev, " and ".join(written), "" if len(written) > 1 else "s",
                 "are" if len(written) > 1 else "is"))
+
+    # The same for the data mount itself: files sitting in an unmounted
+    # /var/lib/docker-data on the root disk would vanish under the mount.
+    if not mounted.get(mount) and nonempty.get(mount):
+        return _refuse(
+            "%s cannot be put in place: %s is not mounted but already has "
+            "contents on the root disk, which mounting the data disk would "
+            "hide. Find out what wrote there (`ls -A %s`), move it away or "
+            "remove it, and re-run." % (dev, mount, mount))
 
     if not ours:
         return {"state": "blank", "reason": "%s is blank; it will be formatted XFS "

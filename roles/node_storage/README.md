@@ -73,23 +73,28 @@ The layout used to come from a hypervisor cloud-init script
 
 | Step | File | What happens |
 | --- | --- | --- |
-| probe | `probe.yml` | Read-only, `changed_when: false`, runs in `--check`. `realpath -e` of the device (so a by-id link compares as its kernel name), `stat`, `blkid -p -o export`, `lsblk -J -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS`, `findmnt -J --mountpoint` for the data mount and both bind targets, and whether each bind target already has contents while nothing is mounted there. Sets `node_storage_probe`. Never fails on a wrong device. |
+| probe | `probe.yml` | Read-only, `changed_when: false`, runs in `--check`. `realpath -e` of the device (so a by-id link compares as its kernel name), `stat`, `blkid -p -o export`, `lsblk -J -o NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS`, `findmnt -J --mountpoint` for the data mount and both bind targets, `stat` of those three paths WITHOUT following links (absent / directory / symlink / file / other), and whether each already has contents while nothing is mounted there. Sets `node_storage_probe`. Never fails on a wrong device. |
 | classify | `classify.yml` | Pure (no command): the `node_storage_classify` filter -> `node_storage_state` and `node_storage_reason`. Fails on `refuse` unless `node_storage_classify_fail: false`. |
-| apply | `apply.yml` | xfsprogs; `mkfs.xfs` (blank only, no `-f`); UUID re-read with `blkid -p`; data mount; bind source dirs (only after the data mount is up); bind mounts; drop-ins and an immediate `daemon-reload` when they changed; then probe + classify again and require `ready`. |
+| apply | `apply.yml` | xfsprogs; `mkfs.xfs` (blank only, no `-f`); UUID re-read with `blkid -p` (every state); data mount; bind source dirs (only after the data mount is up; not on `ready`); bind mounts; drop-ins and an immediate `daemon-reload` when they changed; then probe + classify again and require `ready`. |
 
-Mounts already in place are written to fstab (`state: present`) but never
-passed to `ansible.posix.mount` as `mounted`: that state remounts a mounted
-filesystem whenever its fstab line changes. **The role never unmounts and
-never remounts.** On a `ready` node no mount task runs at all; only the
-drop-ins are (re)written, which on a node this role built changes nothing.
+**fstab is ensured on every state, `ready` included.** A node whose three
+mounts are live but missing from fstab (or carried by hand-made lines) would
+otherwise reboot with docker writing to the root disk. Mounts already in
+place are written to fstab (`state: present`, which never mounts or
+remounts) but never passed to `ansible.posix.mount` as `mounted`: that state
+remounts a mounted filesystem whenever its fstab line changes. **The role
+never unmounts and never remounts.** A hand-made line for one of the three
+paths (by LABEL, by device name, other options) is rewritten to the role's
+own; on a node this role built the lines already match field for field, so
+on a `ready` node the fstab and drop-in tasks change nothing.
 
 ## States
 
 | State | Meaning | apply.yml |
 | --- | --- | --- |
-| `blank` | Whole disk, no signature of any kind, no partition table, no children, mounted nowhere; nothing mounted at the data mount or either bind target; `/var/lib/docker` and `/var/lib/containerd` absent or empty. | formats, then mounts everything |
-| `ours` | XFS labeled `dockerdata`, no partition table, no children, mounted nowhere outside the allowed set, but at least one of the three mounts is missing. | mounts what is missing |
-| `ready` | `ours`, mounted at the data mount from THIS device with `prjquota`, and both bind targets mounted from `<mount>/docker` / `<mount>/containerd` on THIS device. | nothing (asserts) |
+| `blank` | Whole disk, no signature of any kind (and blkid read it cleanly), no partition table, no children, mounted nowhere; nothing mounted at the data mount or either bind target; `/var/lib/docker-data`, `/var/lib/docker` and `/var/lib/containerd` each absent or an empty plain directory. | formats, then mounts everything and writes fstab |
+| `ours` | XFS labeled `dockerdata`, no partition table, no children, mounted nowhere outside the allowed set, but at least one of the three mounts is missing; each unmounted path absent or an empty plain directory. | mounts what is missing, ensures fstab |
+| `ready` | `ours`, mounted at the data mount from THIS device with `prjquota`, and both bind targets mounted from `<mount>/docker` / `<mount>/containerd` on THIS device. | ensures the three fstab entries (`present` only; a no-op on a node it built) |
 | `refuse` | Anything else, with a reason. | never reached |
 
 The **allowed mountpoints** of the device are the data mount, the two bind
@@ -112,6 +117,11 @@ changed." The rule lives in `filter_plugins/node_storage.py`;
 * it carries **any signature** other than XFS labeled `dockerdata` -- ext4, a
   config drive's iso9660/vfat, LVM2_member, swap, an unlabeled XFS or one with
   another label -- or blkid could not decide (`BLKID_RC=8`, ambivalent);
+* **blkid could not read the device**: `blkid -p` exits 2 both for "no
+  signature" and for "could not open or read", and only the second prints
+  anything; rc 2 with stderr is refused, never read as blank;
+* blkid finds no signature but lsblk reports an `FSTYPE`, or the device has
+  no signature yet is mounted somewhere;
 * it is mounted anywhere outside the allowed set (`/mnt`, and a prefix
   look-alike such as `/var/lib/docker-data2`, are both outside);
 * the data mount or either bind target is **mounted from anything other than
@@ -126,10 +136,20 @@ changed." The rule lives in `filter_plugins/node_storage.py`;
   enforced project quotas) and `pquota`. `pqnoenforce` (accounting only) and
   `noquota` are refused. The fix needs a window: stop docker and containerd,
   unmount the bind mounts and the data mount, re-run;
+* the data mount or a bind target is **not mounted and is not a plain
+  directory** -- a symlink (say `/var/lib/docker -> /srv/docker`, whose
+  state `find` would read as empty because it does not follow a symlinked
+  start point), a regular file, anything else -- or could not be checked
+  (stat failed);
+* the data mount or a bind target is a directory whose contents **could not
+  be listed** (`find` failed for any reason other than the path not
+  existing): never taken for empty;
 * `/var/lib/docker` or `/var/lib/containerd` is **not mounted but already has
   contents** -- docker or containerd ran on the root disk before the data
   disk was in place. Mounting over it would hide that state. Such a node is
-  rebuilt with the data disk attached.
+  rebuilt with the data disk attached;
+* `/var/lib/docker-data` is **not mounted but already has contents** on the
+  root disk, which the mount would hide.
 
 Refusals are fatal for the whole run before any host changes: preflight runs
 probe + classify on every node and fails once, listing each refused node.
