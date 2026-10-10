@@ -3,11 +3,10 @@
 #
 # ns_primary is expected to hold exactly one host -- the same single-node
 # assumption docs/contracts.md makes explicit for `controller` (and that the
-# `vault` role encodes as `vault_host: groups['controller'][0]`). Nothing in
-# preflight currently asserts ns_primary's size; this role trusts the
-# inventory shape and is delegation-flavoured, not a template index, so it
-# is consistent with contracts.md rule 2. Flagged in README for the manager
-# in case a hard assertion belongs in the preflight role instead.
+# `vault` role encodes as `vault_host: groups['controller'][0]`).
+# roles/preflight asserts ns_primary holds exactly one host whenever
+# dns_driver is powerdns. The index is delegation-flavored, not a template
+# index, so it is consistent with contracts.md rule 2.
 powerdns_is_leader: "{{ 'ns_primary' in group_names }}"
 powerdns_is_follower: "{{ 'ns_followers' in group_names }}"
 powerdns_primary_host: "{{ groups['ns_primary'][0] }}"

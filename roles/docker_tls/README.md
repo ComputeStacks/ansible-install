@@ -1,6 +1,20 @@
 # docker_tls
 
-**Owner: Wave 1B.** Nodes only.
+Gives each node's dockerd its mTLS TCP listener on `primary_ip:2376`, with a
+server certificate issued by the controller's vault.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Node docker TLS" | `nodes` |
+| `site.yml` (`tasks_from: clear_stale_dropin`) | "Docker hosts" (pre_task) | `nodes` only |
+| `add-region.yml` | "New node docker TLS, issued from the existing Vault" | `nodes` (the new node) |
+| `add-region.yml` (`tasks_from: clear_stale_dropin`) | "New node docker" (pre_task) | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; issuance reaches the existing controller's
+vault but writes nothing there (see "Attach mode"). **Requires:** the `vault`
+role's task files and the controller's `vault-bootstrap` container;
+`geerlingguy.docker` + `docker_config` in an earlier play.
 
 ## Purpose
 
@@ -16,18 +30,17 @@ It does three things:
    `/etc/docker/certs/{server.crt,ca.crt,server.key}`.
 2. Creates the `dockremap` user (v1 parity — see below).
 3. Deploys `/etc/systemd/system/docker.service.d/startup.conf`, which replaces
-   `ExecStart` with the TCP + `--tlsverify` listener plus v1's node hardening
-   flags, and restarts docker **via a handler** when anything changed.
+   `ExecStart` with the TCP + `--tlsverify` listener plus the node hardening
+   flags (`docker_tls_daemon_flags`), and restarts docker **via a handler** when anything changed.
 
 `daemon.json` is **not** touched here — `roles/docker_config` owns it on all
 docker hosts. Docker hard-errors when an option is set both there and on the
 command line, so the ExecStart line deliberately carries no
 `--live-restore`/`--registry-mirror`.
 
-## Convergence (the deliberate difference from v1)
+## Convergence
 
-v1 issued a certificate exactly once (`when: not key_exists`) and never looked
-at it again — a 5-year cert nobody watched. v2 re-issues when, and only when:
+The certificate is re-issued when, and only when:
 
 * the certificate file is missing, **or**
 * it is within `docker_tls_renew_days` (30) of `notAfter`, **or**
@@ -43,34 +56,45 @@ ca_ttl` → `docker exec vault-bootstrap vault write -format=json
 pki/docker/issue/server …`, delegated to `vault_host`
 (`groups['controller'][0]`, a delegation target — permitted by contracts rule
 2). The requested TTL is `vault_effective_cert_ttl_hours`: 1 year, clamped to
-the CA's remaining lifetime (v1 asked for 5 years, unclamped).
+the CA's remaining lifetime.
 
 ## Attach mode (`existing_env: true`)
 
-`tasks/issue.yml` is self-contained for exactly this reason:
+`playbooks/add-region.yml` runs the **whole role** on the new node, not just
+`tasks_from: issue`: `tasks/main.yml` routes through `tasks/issue.yml`, which
+is the part that reaches the existing controller, and the rest of `main.yml` —
+the listener drop-in on `primary_ip:2376` — is what makes the new node
+dialable at all.
 
-```yaml
-- name: Issue the node docker daemon certificate
-  ansible.builtin.include_role:
-    name: docker_tls
-    tasks_from: issue
-```
+`tasks/issue.yml` unseals the existing controller's vault first (a v1
+controller that has ever rebooted is sealed, and nobody notices because certs
+are static files), reads the unseal keys from v1's own layout, and writes
+**nothing** on the controller. No new infrastructure, no re-render of anything
+on a shared host. It is self-contained, so it can also be included on its own
+with `tasks_from: issue`.
 
-It unseals the existing controller's vault first (a v1 controller that has ever
-rebooted is sealed, and nobody notices because certs are static files), reads
-the unseal keys from v1's own layout, and writes **nothing** on the controller.
-No new infrastructure, no re-render of anything on a shared host.
+## Stale drop-in cleanup (`tasks/clear_stale_dropin.yml`)
+
+Included as a pre_task by the docker plays in `site.yml` and `add-region.yml`,
+**before** `geerlingguy.docker` starts the daemon. The drop-in this role wrote
+on a previous converge pins `-H tcp://<primary_ip>:2376`; if the host's
+`primary_ip` has changed since, dockerd refuses to start (`bind: cannot assign
+requested address`) and the run dies several plays before this role's main
+task could rewrite the file. So a drop-in naming an endpoint the host can no
+longer bind is removed and systemd reloaded, docker starts on its default
+socket, and `tasks/main.yml` writes the correct drop-in later in the same run.
+Only this role's own `startup.conf` is ever removed, and only on `nodes`.
 
 ## Variables
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `docker_tls_listen_ip` | `{{ primary_ip }}` | Inventory var, never a gathered fact. v1 bound `0.0.0.0`; v2 binds the private address. |
+| `docker_tls_listen_ip` | `{{ primary_ip }}` | Inventory var, never a gathered fact. The private address, never `0.0.0.0`. |
 | `docker_tls_common_name` | `{{ hostname }}` | |
 | `docker_tls_alt_names` | `[localhost, {{ hostname }}]` | DNS SANs. |
 | `docker_tls_ip_sans` | `[127.0.0.1, {{ primary_ip }}]` | |
 | `docker_tls_renew_days` | `30` | Re-issue window. |
-| `docker_tls_daemon_flags` | `[--icc=false, --userland-proxy=false]` | v1's node hardening, unchanged. `--userland-proxy=false` is why `node_kernel` raises the conntrack limits. |
+| `docker_tls_daemon_flags` | `[--icc=false, --userland-proxy=false]` | Node hardening (the same flags v1 used). `--userland-proxy=false` is why `node_kernel` raises the conntrack limits. |
 | `docker_tls_certs_dir` | `/etc/docker/certs` | v1 path. |
 | `docker_tls_ca_file` / `docker_tls_cert_file` / `docker_tls_key_file` | `ca.crt` / `server.crt` / `server.key` | v1 names. |
 | `docker_tls_dropin_dir` / `docker_tls_dropin_file` | `/etc/systemd/system/docker.service.d` / `startup.conf` | v1 filename kept so a host can never carry two ExecStart drop-ins. |
@@ -90,28 +114,10 @@ Consumed from elsewhere: `cs_ports.docker_tls` (ports.yml), `hostname` and
   `cryptography` on the ansible control machine.
 * Run after `geerlingguy.docker` and `docker_config`.
 
-## Deviations from v1
-
-* Convergent re-issue (expiry / SAN change) instead of issue-once-forever.
-* TTL 1 year, clamped to the CA (v1: 43800h, unclamped).
-* Binds `primary_ip:2376`, not `0.0.0.0:2376`.
-* SANs come from the inventory (`hostname`, `primary_ip`); v1 used
-  `ansible_hostname` (a gathered fact — banned by contracts rule 1) and a
-  `consul_listen_ip` var that defaulted to `127.0.0.1`, which quietly produced
-  certificates with no usable IP SAN unless the inventory overrode it.
-* Restart via handler (v1 stopped docker, wrote the drop-in, then started it —
-  on every single run).
-* File modes: dir 0750, `server.crt`/`ca.crt` 0640, `server.key` 0600 (v1: dir
-  0740, everything 0440).
-* `--registry-mirror` moved out of ExecStart into `daemon.json`
-  (`docker_config_registry_mirrors`).
-* `docker exec` without `-it`, so v1's `ansible_ssh_pipelining: no` workaround
-  is gone.
-
-### dockremap
+## dockremap
 
 v1 created a `dockremap` user (uid 1001) but never enabled `userns-remap` — not
-in its ExecStart, not in `daemon.json`. It is **vestigial**; it is ported for
+in its ExecStart, not in `daemon.json`. It is **vestigial**; it is kept for
 parity only and can be switched off with
 `docker_tls_create_dockremap_user: false`. If user-namespace remapping is ever
 actually wanted, docker creates and manages the user itself when

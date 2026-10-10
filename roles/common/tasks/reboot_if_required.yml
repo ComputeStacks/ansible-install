@@ -2,7 +2,7 @@
 # Package install (above) can pull in a new kernel and remove the running
 # kernel's /lib/modules; after that, modprobe of br_netfilter/nf_nat/etc.
 # fails and dockerd cannot build its firewall chains until the host reboots
-# onto the new kernel. See README.md "Deviations from v1" — this replaces
+# onto the new kernel. See README.md "Reboot right after package install" — this replaces
 # v1's unconditional post-docker-install reboot hack.
 #
 # NEVER fires on existing_env hosts: attach mode must never reboot a live

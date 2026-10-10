@@ -45,9 +45,9 @@
 # alternate entry point (`tasks_from:`), which is a parameter of
 # include_role/import_role and NOT of a play's `roles:` keyword — ansible
 # silently ignores it there and runs `tasks/main.yml` instead. That is a
-# greenfield converge against a live production controller. The earlier
-# skeleton of this file had exactly that bug; roles/controller/README.md
-# documents it. Every alternate entry point below is therefore a task.
+# greenfield converge against a live production controller
+# (roles/controller/README.md, "Attach mode"). Every alternate entry point
+# below is therefore a task.
 
 - name: Preflight validation and attach-mode inventory checks
   hosts: all

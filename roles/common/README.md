@@ -1,9 +1,20 @@
 # common
 
-**Owner:** Wave 1A
+Base system convergence for every host: packages, a reboot when one is
+pending, sshd hardening, chrony, unattended-upgrades, the MOTD fragment and
+root's SSH directory. Sole owner of `/etc/update-motd.d/50-computestacks`
+(docs/contracts.md §Ownership).
 
-Base system convergence applied to every host (`hosts: all`). Sole owner of
-`/etc/update-motd.d/50-computestacks` (docs/contracts.md §Ownership).
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Base system" | `all` |
+| `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; never runs on an existing shared host, and
+never reboots an `existing_env` host even if pointed at one. **Requires:**
+`preflight` first; calls `roles/node_upgrade` (`tasks_from: detect_live`)
+itself when a node has a reboot pending.
 
 ## What it does
 
@@ -13,7 +24,7 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
   update pulled in by package install), unless `common_allow_reboot` is set
   false or the host is flagged `existing_env: true` — attach mode must never
   reboot a live v1 controller/metrics/backup host. Runs right after package
-  install (see "Deviations from v1" for why).
+  install (see "Reboot right after package install" for why).
 - Never reboots a **live node** either: a host in `nodes` that already carries
   tenant containers, per `roles/node_upgrade`'s `tasks_from: detect_live`
   (probed only when a reboot is pending). It prints a warning instead —
@@ -52,37 +63,14 @@ Base system convergence applied to every host (`hosts: all`). Sole owner of
 Consumed, not owned: `hostname`, `primary_ip`, `region`, `az` (node inventory
 vars, asserted present by `preflight`).
 
-## Deviations from v1 (`roles/base`)
+## Reboot right after package install
 
-- **Dropped the `tmux.conf`-from-personal-gist download entirely** (per Wave
-  1A instructions) — the `tmux` package is still installed, but no custom
-  dotfile is fetched.
-- **Package list curated**, dropping: `linux-headers-amd64` (Debian-specific
-  package name, no Ubuntu equivalent asserted needed here), `apt-transport-https`
-  (no-op since APT 1.5+), `gnupg-agent` (functionality merged into `gnupg`),
-  `pass` (a personal password-store tool, unrelated to server operations),
-  and `nfs-common` (NFS backend is stripped from v2 — SSH/borg only, per the
-  v2 plan). Renamed `gnupg2` -> `gnupg` (the current, non-transitional
-  package name).
-- **Service names corrected for Debian/Ubuntu**: v1's handlers used `sshd`
-  and `chronyd` (RHEL-style unit names); this role uses the correct
-  Debian/Ubuntu unit names `ssh` and `chrony`.
-- MOTD is rendered as an executable `/etc/update-motd.d/50-computestacks`
-  script (dynamic MOTD), not a static `/etc/motd` template — v1 wrote
-  `/etc/motd` directly. Static `/etc/motd` is now emptied instead.
-- Does not port v1's `/etc/hosts` localhost line or DNS/admin-credential
-  preflight checks — out of this role's scope for Wave 1A (see `preflight`
-  and, later, `validate`).
-- **Replaces v1's unconditional post-docker-install reboot hack** (v1
-  rebooted every host, unconditionally, right after installing docker) with
-  a targeted, convergent check: reboot only when
-  `/var/run/reboot-required` actually exists, and never on `existing_env`
-  hosts. Root cause (found by Wave 1B while investigating the docker role):
-  the initial package install can pull in a new kernel and remove the
-  running kernel's `/lib/modules`, after which `modprobe` of
-  `br_netfilter`/`nf_nat`/etc. fails and dockerd cannot build its firewall
-  chains — so the fix belongs here, before docker is ever installed, not in
-  the docker roles. `common` has no distinct "apt upgrade" task (package
-  install uses `state: present`, not `state: latest`), so this task runs
-  immediately after package install rather than after a separate upgrade
-  step.
+The initial package install can pull in a new kernel and remove the running
+kernel's `/lib/modules`, after which `modprobe` of `br_netfilter`/`nf_nat`/etc.
+fails and dockerd cannot build its firewall chains. The reboot check therefore
+lives here, before docker is ever installed, rather than in the docker roles,
+and it is targeted and convergent: reboot only when `/var/run/reboot-required`
+actually exists, never on `existing_env` hosts, never on a live node. `common`
+has no distinct "apt upgrade" task (package install uses `state: present`, not
+`state: latest`), so the check runs immediately after package install rather
+than after a separate upgrade step.

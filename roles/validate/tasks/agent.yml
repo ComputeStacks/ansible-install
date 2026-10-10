@@ -3,7 +3,7 @@
 # The probe runs FROM the controller, on the address the controller actually
 # uses (pairwise tailnet derivation), because that is the leg that breaks.
 #
-# There is no unauthenticated route to call: in cs-agent v3.3.0 every handler
+# There is no unauthenticated route to call: in cs-agent v3.4.0 every handler
 # is wrapped in requireCustomer/requireAdmin, and a request with no
 # Authorization header is answered 401 by `authenticate`
 # (httpapi/httpapi.go). A 401 is therefore the success condition — it proves

@@ -1,11 +1,23 @@
 # controller_post_enroll
 
-**Owner: Wave 4I.** `hosts: controller`.
+Runs the controller-side backfills and the connectivity report that can only
+run after every node's cs-agent has enrolled.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Post-enrollment controller tasks" | `controller` |
+| `add-region.yml` | "Post-enrollment controller tasks" | `controller` (`existing_env: true`) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** each backfill is scoped to the new node(s) with
+`NODE=<hostname>` (see "Greenfield vs attach mode"). **Requires:** the
+`portal` container running (`controller`) and every node enrolled
+(`cs_agent`).
 
 ## Purpose
 
 The controller-side rake tasks that can only run **after** the nodes have
-enrolled. Second controller play in `playbooks/site.yml`:
+enrolled. Its place in `playbooks/site.yml` and `playbooks/add-region.yml`:
 
 ```
 controller_seed (creates Node rows, mints tokens)
@@ -27,15 +39,15 @@ always fails.
 | `metadata:agent_backfill` | Provisions each project's tenant on the node agent and pushes its managed blobs. Mints any missing per-node `agent_token` first. |
 | `test_connection:all` | Controller → node SSH, docker mTLS and cs-agent probes, plus the DNS provider check. |
 
-Both backfills are idempotent and resumable, and since Wave 1C they **exit
-non-zero on any failure** — which is what makes them usable from a play. They
+Both backfills are idempotent and resumable, and they **exit non-zero on any
+failure** — which is what makes them usable from a play. They
 are included one at a time (`tasks/backfill.yml`) rather than looped inside a
 single task, so a failure stops the sequence instead of running the next
 backfill against a fleet that just failed and burying the real error.
 
 `test_connection:all` prints `[FAILED] …` lines for a leg it could not dial but
 **exits 0**, so it cannot fail this play. Read its output; the `validate` role
-(Wave 4J) owns the hard assertions.
+owns the hard assertions.
 
 ## How the tasks are invoked
 

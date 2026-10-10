@@ -1,7 +1,16 @@
 # postgres_repo
 
-**Owner: Wave 4J.** `hosts: controller` and `hosts: nameservers`, always
-**before** the role that installs a postgres package.
+Adds the PGDG apt repository and an apt preferences pin so the pinned
+PostgreSQL major (`postgresql_version`) installs on Ubuntu 26.04, whose archive
+does not carry it. Runs before every role that installs a postgres package.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Nameservers" (before `powerdns`) | `nameservers` |
+| `site.yml` | "Controller infrastructure" (before `geerlingguy.postgresql`) | `controller` |
+| `add-region.yml`, `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** not run (see below). **Requires:** —.
 
 ## Why it exists
 
@@ -77,8 +86,10 @@ a versioned postgres package.
 attach mode installs no postgres package anywhere. Its plays touch the new
 nodes (which run no database), the existing controller (firewall appends,
 `cstacks`, seeding, backfills — never `geerlingguy.postgresql`), the existing
-metrics and backup hosts, and never the nameservers. An existing v1
-environment's postgres is not this repository's to re-point.
+metrics and backup hosts, and — with `dns_driver: powerdns` — the existing
+leader nameserver, where only `roles/powerdns`'s `lb_records` entry point runs
+(`pdnsutil` record writes; it installs nothing). An existing environment's
+postgres is not this repository's to re-point.
 
 ## Variables
 
@@ -105,10 +116,3 @@ Three files move together, and the controller repo has to agree:
 `playbooks/vars/Ubuntu-26.yml`, and the controller's own schema/CI. Nothing
 here upgrades an existing cluster — apt installing a new major installs a
 *second* cluster; the data migration is a separate, manual operation.
-
-## Deviations from v1
-
-v1 installed whatever postgres the distro shipped, because on 22.04/24.04 that
-happened to be the major the controller wanted. On 26.04 it is not, and the
-mismatch is silent right up to the point where the controller's migrations run
-against a cluster with a schema it does not support.

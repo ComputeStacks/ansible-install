@@ -1,19 +1,28 @@
 # ubuntu_pro
 
-**Owner:** Wave 2F (with `firewall` and `tailscale`)
+Attaches a host to an Ubuntu Pro contract and keeps livepatch enabled. Entirely
+optional — `site.yml` and `add-region.yml` gate it on `ubuntu_pro_token` being set in the
+vaulted secrets file, so an environment without a token never runs it.
 
-Attaches a host to an Ubuntu Pro contract and keeps livepatch enabled. Runs on
-`hosts: all`, gated in `site.yml` on `ubuntu_pro_token` being set in the vaulted
-secrets file. Entirely optional — an environment without a token never runs it.
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Tailscale mesh and Ubuntu Pro" | `all` |
+| `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; the existing shared hosts are never attached.
+**Requires:** —.
 
 ## What it does
 
-1. Installs `ubuntu-pro-client` (present on Ubuntu server images already; the
+1. Asserts `ubuntu_pro_token` is set (the playbooks' gate, restated so a direct
+   role invocation fails clearly).
+2. Installs `ubuntu-pro-client` (present on Ubuntu server images already; the
    task keeps the role convergent on a minimal image).
-2. Asks `pro api u.pro.status.is_attached.v1` whether the host is attached, and
+3. Asks `pro api u.pro.status.is_attached.v1` whether the host is attached, and
    runs `pro attach` **only if it is not**. `pro attach` on an already-attached
    host exits non-zero, so the check is what makes the role idempotent.
-3. Reads `pro status --all --format json`, diffs the enabled services against
+4. Reads `pro status --all --format json`, diffs the enabled services against
    `ubuntu_pro_services`, and enables only what is missing.
 
 The token is passed as a command argument, so the attach task is `no_log: true`

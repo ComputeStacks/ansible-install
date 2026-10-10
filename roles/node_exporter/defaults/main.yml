@@ -1,5 +1,5 @@
 ---
-# The distro prometheus-node-exporter package, on every host. Wave 4J.
+# The distro prometheus-node-exporter package, on every host.
 node_exporter_package: prometheus-node-exporter
 node_exporter_service: prometheus-node-exporter
 

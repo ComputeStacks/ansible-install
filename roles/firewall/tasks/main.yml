@@ -1,8 +1,9 @@
 ---
 # Two mutually exclusive paths:
 #   * greenfield / v2-built hosts -> our own nftables table (nftables.yml)
-#   * attach mode (existing_env)  -> additive appends to the v1 iptables
-#                                    script and to the live chain (v1_append.yml)
+#   * attach mode (existing_env)  -> additive appends to whichever firewall the
+#                                    host runs (append.yml -> v1_append.yml or
+#                                    v2_append.yml)
 # The nftables path must NEVER run on an existing_env host: it would replace a
 # working v1 INPUT policy with a table built from a PARTIAL inventory view
 # (docs/contracts.md rule 9) and lock the operator out of the fleet.

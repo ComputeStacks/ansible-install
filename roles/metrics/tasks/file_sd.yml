@@ -16,16 +16,15 @@
 # add-region.yml runs this against an EXISTING v1 metrics host
 # (existing_env: true). Each fragment is a whole-file write keyed by az --
 # the per-AZ-fragment exception docs/contracts.md's attach-mode rule names
-# explicitly (rule 9 / rev-4 write-set item 5) -- so WHICH azs this loop
+# explicitly (rule 9) -- so WHICH azs this loop
 # visits is the whole blast radius, and the role decides that itself:
 #
 #   * `metrics_file_sd_nodes` (defaults/main.yml) is this metrics host's own
 #     site's nodes, minus `cs_existing_hosts`. Nothing else is ever written.
 #   * `--limit` is NOT what keeps the loop in bounds, and never was. It
 #     removes hosts from PLAYS; it does not remove them from `groups[]`, and
-#     this loop reads `groups`. An earlier version of this comment claimed
-#     `--limit` scoped the render -- an un-scoped loop on a two-site estate
-#     had each metrics host write a fragment for every node in the
+#     this loop reads `groups`. An un-scoped loop on a two-site estate would
+#     have each metrics host write a fragment for every node in the
 #     inventory, the other facility's and the v1 estate's included.
 #
 # `--limit` still matters for a different reason: see the facts note below.

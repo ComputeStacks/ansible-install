@@ -1,11 +1,21 @@
 # node_storage
 
-**Owner: container storage on the nodes.** Run on `groups['nodes']` by the
-`Node container storage` play in `playbooks/site.yml` and
-`playbooks/add-region.yml`, immediately BEFORE the play that installs docker.
-Its read-only half (`tasks_from: probe` + `classify`) also runs in preflight,
-in `playbooks/upgrade-docker.yml`'s preflight and in validate's `storage`
-check.
+Puts a node's docker and containerd state on a dedicated XFS data disk, in
+the play immediately before docker is installed. Its read-only half
+(`tasks_from: probe` + `classify`) is also the one data-disk check preflight,
+validate and the docker upgrade use.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Node container storage" | `nodes` |
+| `add-region.yml` | "New node container storage" | `nodes` (the new node) |
+| `upgrade-docker.yml` (`tasks_from: probe`, `classify`) | "Preflight every targeted node" | `node_upgrade_targets` |
+| `roles/preflight` (`tasks_from: probe`, `classify`) | "Preflight validation" / "Preflight validation and attach-mode inventory checks" | `nodes`, not `existing_env` |
+| `roles/validate` (`tasks_from: probe`, `classify`) | `storage` check, wherever validate runs | `nodes`, not `existing_env` |
+| `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; `existing_env` nodes are never probed.
+**Requires:** `docker_data_device` on every node; `ansible.posix` (mounts).
 
 **Nodes only.** The controller, metrics, registry, backup and nameserver hosts
 keep a single disk and docker's default locations.

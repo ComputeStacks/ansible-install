@@ -6,7 +6,7 @@
 # Passed to the upstream role's `state` variable. 'present' installs the
 # package and leaves it alone; the upstream default of 'latest' would upgrade
 # tailscale on every converge, which contradicts docs/contracts.md rule 4
-# (every version pinned, nothing floats). See README §pinning.
+# (every version pinned, nothing floats). See README §Decisions.
 tailscale_package_state: present
 
 # MagicDNS would rewrite /etc/resolv.conf on every host. Servers here resolve

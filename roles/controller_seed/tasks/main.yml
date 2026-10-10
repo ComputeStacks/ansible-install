@@ -167,8 +167,7 @@
       dns_driver is '{{ dns_driver | default('none') }}'. controller_seed
       renders the manifest's dns section for 'powerdns' only, and omits the
       section entirely for 'none'. AutoDNS seeding is not implemented in v2 --
-      configure the driver in the admin UI and set dns_driver: none, or raise
-      it with the engineering manager.
+      configure the driver in the admin UI and set dns_driver: none.
     quiet: true
 
 - name: Assert the powerdns inputs the dns section needs are present

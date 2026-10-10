@@ -1,6 +1,20 @@
 # acme_web
 
-**Owner: Wave 3G.** `hosts: controller`, `metrics`, `registry`.
+The TLS edge for the controller, metrics and registry hosts: a pinned nginx
+container plus acme.sh, which issues and renews each host's certificate.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Controller infrastructure" | `controller` |
+| `site.yml` | "Metrics host" | `metrics` |
+| `site.yml` | "Registry host" | `registry` |
+| `add-region.yml`, `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** not run; an existing controller, metrics or registry host
+keeps its own nginx and certificates. **Requires:** docker on the host
+(`geerlingguy.docker` + `docker_config`, "Docker hosts" play);
+`community.docker`, `community.general`; `cryptography` on the ansible control
+machine.
 
 ## Purpose
 
@@ -15,9 +29,27 @@ membership.
 | `metrics` | `cs_ports.metrics_prometheus` (3101), `cs_ports.metrics_loki` (3102) | `127.0.0.1:9090` (prometheus), `127.0.0.1:3100` (loki), both behind basic auth |
 | `registry` | 80/443 | nothing — its job here is the certificate, which the registry containers mount |
 
-The 3101/3102 interface is exactly the one `roles/metrics/README.md`
-documents: prometheus and loki publish loopback-only on this host and this
-role is the only way in.
+## Exposing prometheus and loki (3101/3102)
+
+prometheus (`roles/metrics`) and loki (`roles/loki`) publish **loopback-only**
+on the metrics host — `127.0.0.1:{{ metrics_prometheus_internal_port }}` (9090)
+and `127.0.0.1:{{ loki_internal_port }}` (3100) — and this role's nginx is the
+only way in from off the host. It terminates TLS on
+`cs_ports.metrics_prometheus` (3101) and `cs_ports.metrics_loki` (3102),
+enforces basic auth (see "Per-site basic-auth credentials"), and proxies to
+those loopback upstreams (`acme_web_prometheus_upstream` /
+`acme_web_loki_upstream`).
+
+| Port | Upstream | Who connects |
+| --- | --- | --- |
+| 3101 | prometheus `127.0.0.1:9090` | the controller (`MetricClient`) |
+| 3102 | loki `127.0.0.1:3100` | the controller's log reads (`LogClient`) and every node's fluentd log shipping |
+
+`roles/firewall` opens 3101 to the controller's addresses and 3102 to the
+controller's and every node's. `roles/metrics` and `roles/loki` write neither
+the vhosts nor the htpasswd files — this role owns both. The public name the
+vhosts answer on is this site's metrics name (see "Which metrics name goes on
+the certificate").
 
 ## Host networking is load-bearing
 
@@ -30,8 +62,7 @@ preference:
 > `roles/firewall`'s `cs_static` table into intent rather than enforcement.
 
 `roles/firewall/README.md` §"What an input chain can and cannot enforce"
-flagged this as pending on Wave 3G; this is the resolution. Host networking is
-also what lets these vhosts reach their `127.0.0.1` upstreams — a container on
+explains why. Host networking is also what lets these vhosts reach their `127.0.0.1` upstreams — a container on
 a user-defined bridge cannot. The metrics-host nginx therefore does **not**
 join the `ops` docker network.
 
@@ -65,8 +96,8 @@ The upstream installer **never runs** — its only jobs are a cron entry,
 shell-profile edits and the self-upgrade machinery, all unwanted here. There
 is no git clone (tags are mutable upstream; the checksum is not) and no
 `--upgrade` invocation ever (in acme.sh that is the *upgrade command*: it
-contacts the GitHub API and replaces the install with git master — v1 ran it
-from cron, which made any pin decorative). `AUTO_UPGRADE="0"` is additionally
+contacts the GitHub API and replaces the install with git master, which would
+make any pin decorative). `AUTO_UPGRADE="0"` is additionally
 pinned in `account.conf`, because the renewal timer runs `--cron`, which
 self-upgrades whenever that value is `1`.
 
@@ -105,13 +136,11 @@ on the registry host running it restarts every registry container.
 ### DNS-01
 
 `acme_web_dns_providers` maps `acme_challenge_method` to an acme.sh `--dns`
-plugin and the environment it reads, in one data structure. v1 had eleven
-near-identical task files under `roles/nginx/tasks/dns/`; adding a provider is
-now a defaults edit. The issuance task is `no_log`. Full per-provider
-documentation, ported from v1's `ACME_VALIDATIONS.md`, is in
-`docs/acme-providers.md`.
+plugin and the environment it reads, in one data structure; adding a provider
+is a defaults edit. The issuance task is `no_log`. Full per-provider
+documentation is in `docs/acme-providers.md`.
 
-Operator-facing variable names are unchanged from v1 (`acme_challenge_method`,
+Operator-facing variable names keep v1's spellings (`acme_challenge_method`,
 `acme_cf_token`, …); the role reads each through an `acme_web_`-prefixed
 variable so both the documented vocabulary and the role-prefix lint rule hold.
 
@@ -188,7 +217,7 @@ A host that cannot expose 80 to the internet at all needs a DNS-01 provider
 
 ### htpasswd file permissions
 
-The htpasswd directory is `0755` and the files inside it `0644`, matching v1.
+The htpasswd directory is `0755` and the files inside it `0644`.
 nginx's worker processes drop to `user nginx` (uid 101) inside the container
 and read the files at request time; `0750`/`0640 root:root` makes every
 authenticated 3101/3102 request fail. The files hold bcrypt/md5-crypt hashes,
@@ -202,10 +231,9 @@ registry host the role installs twice — for nginx, then for
 fires, and its `--reloadcmd` has to cover both. `post_acme_reload`
 therefore rsyncs the renewed files into nginx's directory, reloads nginx, and
 then restarts every running registry container (they read their certificate
-once, at start). This is v1's arrangement, with two bugs fixed: v1 passed two
-`--filter ancestor=` values to a single `docker ps` (same-key filters are not
-reliably OR'd, so it could match nothing), and it `rm -rf`'d nginx's
-certificate directory before copying into it.
+once, at start). It runs one `docker ps --filter ancestor=` per image, because
+repeated same-key filters in a single `docker ps` are not reliably OR'd, and
+it rsyncs over nginx's certificate directory rather than emptying it first.
 
 `/opt/container_registry/ssl` is created here because `site.yml` runs
 `acme_web` before `registry` and `--install-cert` needs its target to exist.
@@ -251,36 +279,10 @@ only one of them site-aware.
 * **`Restart nginx`** — the unit file, `nginx.conf` and the image, all of
   which are fixed at container creation.
 
-## Deviations from v1 (`roles/nginx` + `roles/acme`)
-
-* The two v1 roles are merged. Splitting acme.sh from the nginx that serves
-  its challenges bought nothing and let the two drift.
-* Checksum-verified tarball install, per-version directories, no upstream
-  installer, self-upgrade pinned off (see above).
-* `nginx_image` is a single `repo:tag` pin instead of v1's split
-  `nginx_image` / `nginx_image_tag` floating on `stable`.
-* The container drops `--privileged` — nothing it does needs it.
-* Config mounts are `:ro`.
-* `listen … http2` (deprecated since nginx 1.25.1) is replaced by the
-  `http2 on;` directive.
-* v1's `grafana.conf` vhost is not ported — no grafana is deployed.
-* v1 passed `--force` on an ungated issuance task, re-issuing a perfectly
-  good certificate every time it ran. Now the *gate* lives in ansible (SAN
-  convergence, above) and `--force` is passed only once that gate has decided
-  issuance must happen — acme.sh's "not due yet" skip must not veto it, and
-  without it a failed `--install-cert` after a successful `--issue` wedges
-  behind acme.sh's renewal window.
-* v1's `enable_cloudflare_real_ip` cron hook is gone; `ProxyIpList` in the
-  controller owns the CDN address lists now.
-* The default NSUPDATE TSIG algorithm moves from `hmac-md5` to `hmac-sha256`
-  (documented in `docs/acme-providers.md`; set it explicitly to reuse an
-  existing v1 key).
-* No `ops` docker network membership, no `-p` publishing — see "Host
-  networking is load-bearing".
-
 ## Requirements
 
 `community.docker` (image pull), `community.general` (`htpasswd`), both
-pinned in `requirements.yml`. Runs after `geerlingguy.docker` +
+pinned in `requirements.yml`; `cryptography` on the ansible control machine
+(the SAN check). Runs after `geerlingguy.docker` +
 `docker_config`, and before `metrics`/`loki`/`registry` on their hosts
 (`playbooks/site.yml`).

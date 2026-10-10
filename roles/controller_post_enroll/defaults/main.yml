@@ -4,7 +4,7 @@
 
 controller_post_enroll_container: portal
 
-# In order. Both are idempotent, resumable, and (since Wave 1C) exit non-zero
+# In order. Both are idempotent, resumable, and exit non-zero
 # on any failure, which is what makes them usable from a play.
 controller_post_enroll_backfills:
   - agent:datachannel_backfill
@@ -12,7 +12,7 @@ controller_post_enroll_backfills:
 
 # Controller -> node connectivity report (ssh, docker mTLS, cs-agent) plus the
 # DNS provider check. Informational: the task prints "[FAILED] ..." lines but
-# exits 0, so it cannot fail this play -- the validate role (Wave 4J) owns the
+# exits 0, so it cannot fail this play -- the validate role owns the
 # hard assertions.
 controller_post_enroll_test_connection: true
 controller_post_enroll_test_connection_task: test_connection:all

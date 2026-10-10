@@ -155,5 +155,5 @@ cs_agent_mariadb_long_queries_timeout: 20
 
 # --- enrollment ------------------------------------------------------------
 cs_agent_controller_group: controller
-# The cstacks CLI (wave 3G) executes this inside the running portal container.
+# The cstacks CLI (roles/controller) runs this inside the portal container.
 cs_agent_enroll_command: cstacks

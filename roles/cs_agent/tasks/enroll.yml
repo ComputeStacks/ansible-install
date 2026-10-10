@@ -7,9 +7,8 @@
 # documented HTTP enrollment endpoint (which is source-IP matched and would
 # have to be reachable from every node).
 #
-# `cstacks` is a wave 3G deliverable: until it lands these tasks fail loudly
-# on a missing command, which is the intended behavior — end-to-end
-# verification of this path belongs to wave 4J. Run them on their own with
+# `cstacks` is installed on the controller by roles/controller; roles/validate
+# checks enrollment end to end. Run these tasks on their own with
 # `--tags enroll` (the agent.yml render carries the same tag, so the fetched
 # hash is written out and the service restarted).
 #

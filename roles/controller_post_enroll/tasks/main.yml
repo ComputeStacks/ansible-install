@@ -63,7 +63,7 @@
     - name: Show the connectivity report
       # test_connection:all prints "[FAILED] ..." for a leg it could not dial
       # but still exits 0, so this output has to be read. The validate role
-      # (Wave 4J) turns the same checks into hard assertions.
+      # turns the same checks into hard assertions.
       ansible.builtin.debug:
         var: controller_post_enroll_connectivity.stdout_lines
       when: (controller_post_enroll_connectivity.stdout_lines | default([])) | length > 0

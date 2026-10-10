@@ -26,9 +26,9 @@
       this node and on the metrics host that serves it, or on neither if the
       whole inventory is a single site.
     # `success_msg` is templated when the task's args are FINALIZED, before
-    # the assertion is evaluated — the same trap as `delegate_to` further down
-    # the wave, and it bites hardest in exactly the case this assert exists to
-    # report. An unguarded `cs_site_metrics_hosts[cs_site]` here raises
+    # the assertion is evaluated — the same trap `delegate_to` has — and it
+    # bites hardest in exactly the case this assert exists to report. An
+    # unguarded `cs_site_metrics_hosts[cs_site]` here raises
     # "object of type 'dict' has no attribute '<site>'" for a node whose site
     # has no metrics host, and ansible reports THAT instead of the fail_msg
     # written above. Jinja's inline `if` is lazy, so gating the subscript on

@@ -1,8 +1,25 @@
 # firewall
 
-**Owner:** Wave 2F (with `tailscale` and `ubuntu_pro` — they interlock)
+Host firewall for every ComputeStacks host: one role-owned nftables table,
+`inet cs_static`, rendered from the ports contract and inventory, plus an
+additive append path for existing shared hosts in attach mode.
 
-Host firewall for every ComputeStacks host. Owns exactly one nftables table,
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Host firewalls" | `all` |
+| `add-region.yml` | "New node firewall" | `nodes` (the new node) |
+| `add-region.yml` (`tasks_from: append`) | "Existing metrics host — prometheus file_sd fragments only" | `metrics` |
+| `add-region.yml` (`tasks_from: append`) | "Existing controller — firewall appends only" | `controller` |
+| `add-region.yml` (`tasks_from: append`) | "Existing backup server — account, repository path, firewall appends" | `backup` |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** the nftables table is never rendered on an `existing_env`
+host; `tasks_from: append` adds the new node's addresses to whichever firewall
+the host already runs (see [attach mode](#attach-mode-existing_env-true)).
+**Requires:** `community.general` (`modprobe`). Tailnet membership is read
+from inventory, so it does not depend on `tailscale` having run.
+
+Owns exactly one nftables table,
 `inet cs_static`, rendered from the ports contract
 (`playbooks/group_vars/all/ports.yml`) and inventory group membership, and
 applied by a role-owned oneshot unit. Also owns
@@ -16,6 +33,7 @@ applied by a role-owned oneshot unit. Also owns
 | `/etc/nftables.d/cs-static.nft` | The table. Rendered from `templates/cs-static.nft.j2`, `nft --check`-validated before install. |
 | `/etc/systemd/system/cs-firewall.service` | Oneshot `nft -f <file>`, `RemainAfterExit`, `WantedBy=sysinit.target`, ordered `Before=network-pre.target`. No `ExecStop`. |
 | `/etc/modules-load.d/cs-firewall.conf` | `nf_tables`, `nf_conntrack`, `xt_physdev` (also `modprobe`d immediately). |
+| `/etc/nftables.d/cs-peers.nft` | Attach mode on a v2-built host only: additive peer rules, loaded by the same unit after the table (a missing file is a no-op). |
 
 The distro `nftables.service` is **stopped and disabled** (see below).
 
@@ -161,8 +179,8 @@ running `nft --check`):
 
 In all four the public interface stays closed for 8080 and 81: the only accepts
 that exist for those ports are the metrics host's addresses and, where both ends
-are on the tailnet, `tailscale0`. That matters more than it used to — Wave 2D's
-`node_observability` now runs cadvisor on the **host network bound to
+are on the tailnet, `tailscale0`. That matters because
+`node_observability` runs cadvisor on the **host network bound to
 `0.0.0.0`** (a `primary_ip` bind would refuse the tailnet scrape), so this
 accept set is the only thing keeping 8080 off the public interface. The one way
 to undo that is `firewall_extra_allowed_ipv4` / `_ipv6`, which are blanket
@@ -191,7 +209,7 @@ serve nothing but metrics. That is the correct trade, and the comment at the
 would otherwise "fix" it.
 
 Attach mode is the one place the fleet partition does show up, and it is
-handled by `existing_env` rather than by `site`: `tasks/v1_append.yml` appends
+handled by `existing_env` rather than by `site`: `tasks/append.yml` appends
 addresses only for nodes this run provisions, skipping hosts already flagged
 `existing_env` (docs/contracts.md rule 9).
 
@@ -244,8 +262,30 @@ tailnet IP (a fact) and would break under `--limit`.
 ## Attach mode (`existing_env: true`)
 
 `tasks/main.yml` hard-guards the two paths: the nftables path never runs on a
-flagged host (it would replace a working v1 policy with a table built from a
-partial inventory view — docs/contracts.md rule 9). Instead
+flagged host (it would replace a working policy with a table built from a
+partial inventory view — docs/contracts.md rule 9). Instead it includes
+`tasks/append.yml`, which is also the entry point the add-region plays call
+directly on the existing metrics, controller and backup hosts:
+
+```yaml
+- ansible.builtin.include_role:
+    name: firewall
+    tasks_from: append
+```
+
+`append.yml` asserts the host is flagged and detects which firewall it runs —
+never assumes:
+
+* **v1-built host** (`/usr/local/bin/cs-recover_iptables` present) →
+  `tasks/v1_append.yml`, below.
+* **v2-built host** (no v1 script) → `tasks/v2_append.yml`: re-templates the
+  role-owned unit (it carries no inventory data) and adds one
+  `add rule inet cs_static input … saddr <addr> accept` line per new node
+  address to `/etc/nftables.d/cs-peers.nft`, which the unit loads after the
+  table. `cs-static.nft` itself is never re-rendered from the partial
+  inventory, and the peers file is only ever appended to. A host with neither
+  the v1 script nor the v2 table fails loudly.
+
 `tasks/v1_append.yml`:
 
 1. appends `iptables -A INPUT -p all -s <addr> -j ACCEPT` for every new node
@@ -282,14 +322,6 @@ absolute `/sbin/iptables`, a trailing `-m comment` — does not match and gets a
 second, additive line. A duplicate `-A … ACCEPT` is cosmetic and self-limiting;
 rewriting a line on a production boot script we did not write is not.
 
-Wave 4J's `attach_fragments` role calls this entry point directly:
-
-```yaml
-- ansible.builtin.include_role:
-    name: firewall
-    tasks_from: v1_append
-```
-
 ## What an input chain can and cannot enforce
 
 An input chain only sees traffic terminating on the **host**. A port published
@@ -303,10 +335,10 @@ Current status of every port in the matrix that is served by a container:
 
 | Port | Owning role | Status |
 |---|---|---|
-| `cadvisor` 8080 (nodes) | Wave 2D `node_observability` | **Enforced.** Runs on the host network with no `-p`, bound `0.0.0.0`; this role's accept set is its only protection. |
-| fluentd forward (nodes) | Wave 2D `node_observability` | **N/A.** Host network bound `127.0.0.1` — only docker's local log driver dials it, so there is no matrix entry at all. |
-| `haproxy_stats` 81 (nodes) | Wave 2D `haproxy` | **Enforced.** haproxy runs on the host. |
-| `metrics_prometheus` 3101 / `metrics_loki` 3102 (metrics) | Wave 3G `acme_web` | **Pending.** prometheus and loki themselves bind `127.0.0.1` inside their containers (Wave 2E); the nginx TLS terminator that will listen on 3101/3102 is Wave 3G's. It must run on the host network or bind host addresses — if it publishes with `-p`, these accepts become intent rather than enforcement. Flagged for Wave 3G. |
+| `cadvisor` 8080 (nodes) | `node_observability` | **Enforced.** Runs on the host network with no `-p`, bound `0.0.0.0`; this role's accept set is its only protection. |
+| fluentd forward (nodes) | `node_observability` | **N/A.** Host network bound `127.0.0.1` — only docker's local log driver dials it, so there is no matrix entry at all. |
+| `haproxy_stats` 81 (nodes) | `haproxy` | **Enforced.** haproxy runs on the host. |
+| `metrics_prometheus` 3101 / `metrics_loki` 3102 (metrics) | `acme_web` | **Enforced.** The nginx TLS terminator runs with `--network=host` and no `-p`, in front of loopback-only prometheus and loki — see [`roles/acme_web/README.md`](../acme_web/README.md). |
 
 ## Variables
 
@@ -314,6 +346,7 @@ Current status of every port in the matrix that is served by a container:
 |---|---|---|
 | `firewall_table` | `cs_static` | Table name. Never `cs_agent` (the agent owns that). |
 | `firewall_config_file` | `/etc/nftables.d/cs-static.nft` | The rendered table. |
+| `firewall_peers_file` | `/etc/nftables.d/cs-peers.nft` | Attach-mode additive rules on a v2-built host; appended to, never rewritten. |
 | `firewall_service` | `cs-firewall.service` | Role-owned unit. |
 | `firewall_validate_config` | `true` | `nft --check --file` before install. |
 | `firewall_disable_distro_service` | `true` | Stop/disable `nftables.service`. |
@@ -334,19 +367,4 @@ Consumed, not owned: `cs_ports`, `primary_ip`, `public_ip`, `existing_env`,
 `firewall_tailscale_udp_port` is deliberately **not** in `cs_ports`: that file
 is the control-plane graph (who dials whom on the ComputeStacks control plane),
 and 41641 is peer-to-peer WireGuard, not a control-plane hop. Opening it lets
-peers form direct connections instead of relaying through DERP. Flagged for the
-manager in case the contract should absorb it anyway.
-
-## Deviations from v1 (`roles/iptables`)
-
-- nftables-native single table instead of a generated `iptables` shell script
-  re-run by a handler (which appended duplicate rules on every converge).
-- No `expose-ports` / `container-inbound` chain creation: the agent now renders
-  its own native table and no longer needs the provisioner to pre-create them.
-- v6 traffic is dropped by policy rather than `REJECT`-with-log; enable
-  `firewall_log_dropped` for the log half.
-- Container traffic to the host is limited to the agent port (v1 accepted all
-  TCP from `container_network`).
-- All source addresses come from `primary_ip` / `public_ip`; v1's per-role
-  address vars (`consul_listen_ip`, `metrics_ip_address`, `node_ip`, …) are
-  gone along with consul.
+peers form direct connections instead of relaying through DERP.

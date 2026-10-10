@@ -1,6 +1,6 @@
 ---
 # node_kernel owns /etc/modules-load.d/cs-node.conf. Do NOT touch
-# /etc/modules-load.d/cs-firewall.conf (owned by the firewall role, Wave 2F)
+# /etc/modules-load.d/cs-firewall.conf (owned by the firewall role)
 # — docs/contracts.md §Ownership.
 
 - name: Load node kernel modules on boot

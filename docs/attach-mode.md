@@ -286,4 +286,6 @@ their v1 configuration, their v1 firewall and their v1 packages; only the
 `cstacks` script and the two appended environment keys change, and both are
 additive. Converging old hosts onto the v2 roles is out of scope —
 `site.yml` against a v1 host would re-render files it does not fully
-describe, which is exactly what the flag exists to prevent.
+describe, which is exactly what the flag exists to prevent. What differs
+between the v1 roles and these is listed in
+[migrating-from-v1.md](migrating-from-v1.md).

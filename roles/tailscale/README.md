@@ -1,18 +1,29 @@
 # tailscale
 
-**Owner:** Wave 2F (with `firewall` and `ubuntu_pro`)
+Joins a host to the tailnet and records its tailnet address (`tailscale_ip`)
+for the roles that derive control-plane addresses pairwise. A thin wrapper
+around the pinned community role `artis3n.tailscale` (`requirements.yml`,
+`v5.0.1` — verified to resolve on 2026-08-28 with
+`ansible-galaxy role install artis3n.tailscale,v5.0.1`).
 
-Thin wrapper around the pinned community role `artis3n.tailscale`
-(`requirements.yml`, `v5.0.1` — verified to resolve on 2026-08-28 with
-`ansible-galaxy role install artis3n.tailscale,v5.0.1`). Runs on `hosts: all`,
-gated in `site.yml` on `tailscale_authkey` being set in the vaulted secrets
-file, with a per-host/group `tailscale_enabled: false` opt-out for same-L2
-regions.
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Tailscale mesh and Ubuntu Pro" | `all` |
+| `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+Both plays gate it on `tailscale_authkey` being set in the vaulted secrets
+file and on `tailscale_enabled` — a per-host/group opt-out for same-L2
+regions, defaulting to `true` in `site.yml` and to `false` in
+`add-region.yml`.
+
+**Attach mode:** new node only, and only with an explicit
+`tailscale_enabled: true` (see [Gotchas](#gotchas)). **Requires:** —.
 
 ## What it does
 
-1. Asserts an auth key is present (site.yml's gate, restated so a direct role
-   invocation fails clearly).
+1. Asserts an auth key is present (the playbooks' gate, restated so a direct
+   role invocation fails clearly).
 2. Includes `artis3n.tailscale` with `state: present` and
    `tailscale up --accept-dns=false`.
 3. Reads `tailscale ip -4` and **asserts** it returned a `100.x` address — a
@@ -25,9 +36,8 @@ regions.
 
 - **`--accept-dns=false`.** MagicDNS rewrites `/etc/resolv.conf` on every host
   it manages. These are servers with their own resolver configuration, and the
-  control plane dials addresses rather than names (the plan explicitly replaced
-  v1's `local_dns` role with per-AZ `acme_server` addresses), so DNS is left
-  alone. Turning it on would also make the portal domain resolve differently on
+  control plane dials addresses rather than names (each az's manifest carries
+  an `acme_server` address, not a name), so DNS is left alone. Turning it on would also make the portal domain resolve differently on
   nodes than everywhere else.
 - **No exit node, no subnet routes, no tags.** The tailnet carries control-plane
   traffic between ComputeStacks hosts and nothing else. Extra `tailscale up`
@@ -37,7 +47,7 @@ regions.
   upgrade the tailscale package on every converge, which contradicts
   docs/contracts.md rule 4. The upstream role has no version-pin variable, so
   `present` (install once, upgrade deliberately) is the closest honest fit.
-  Override with `tailscale_package_state: latest` if you want the old
+  Override with `tailscale_package_state: latest` if you want the upstream
   behavior.
 - **Ownership of `computestacks.fact`.** This role owns the `tailscale_ip` key
   and merges rather than overwrites, so a later role can add its own keys to
@@ -65,11 +75,11 @@ The derivation is **pairwise**, never per-node (docs/contracts.md §Tailscale
 address derivation). Both consumers look like this:
 
 ```jinja
-{# Wave 4I — manifest node.agent_host: tailnet address ONLY if the CONTROLLER
+{# controller_seed — manifest node.agent_host: tailnet address ONLY if the CONTROLLER
    is itself on the tailnet, else omit the key (controller dials primary_ip). #}
 {% if controller_on_tailnet and peer_ts %}agent_host: {{ peer_ts }}{% endif %}
 
-{# Wave 2E — prometheus scrape target: tailnet address ONLY if the METRICS host
+{# metrics — prometheus scrape target: tailnet address ONLY if the METRICS host
    is itself on the tailnet, else primary_ip. #}
 {{ peer_ts if (metrics_host_on_tailnet and peer_ts) else hostvars[h].primary_ip }}
 ```

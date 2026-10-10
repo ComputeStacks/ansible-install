@@ -1,7 +1,7 @@
 ---
 # PowerDNS authoritative server + PostgreSQL backend on the `nameservers`
 # hosts (ns_primary = leader, ns_followers = streaming replicas). See
-# README.md for the leader/follower mechanism and the deviations from v1.
+# README.md for the leader/follower mechanism and its design notes.
 
 # SOA identity used for zones the leader creates. Override this per
 # environment (e.g. group_vars/nameservers/main.yml in your inventory) to

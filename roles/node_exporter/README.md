@@ -1,17 +1,20 @@
 # node_exporter
 
-**Owner: Wave 4J.** `hosts: all`.
+Installs the distro `prometheus-node-exporter` package, holds it, and keeps it
+running on every host. Nothing else.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Base system" | `all` |
+| `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; existing hosts keep the exporter they have.
+**Requires:** —
 
 ## Purpose
 
-Installs the distro `prometheus-node-exporter` package, holds it, and keeps it
-running. Nothing else.
-
-This role exists because nothing else owned it. The plan says node_exporter
-"stays the distro apt package" and is "applied via a community role in the
-all-hosts play", but no such role was ever pinned in `requirements.yml`, and
-v1's own `roles/node_exporter` was a two-task `apt: state=latest` + `systemd`
-pair. Both consumers were already built and waiting for it:
+Its consumers:
 
 * `roles/metrics` scrapes `cs_ports.node_exporter` on every node (per-AZ
   `file_sd` fragments) **and** on the infrastructure groups
@@ -20,8 +23,8 @@ pair. Both consumers were already built and waiting for it:
 * `roles/firewall` opens that port for the metrics host's addresses on every
   host in the fleet.
 
-A three-task role is cheaper than a play-level task block duplicated across
-`site.yml` and `add-region.yml`, and it is lintable and taggable like every
+A small role rather than a play-level task block duplicated across
+`site.yml` and `add-region.yml`, so it is lintable and taggable like every
 other role here.
 
 ## Bind address
@@ -44,9 +47,7 @@ length).
 | `node_exporter_apt_version` | `versions.yml` | Exact apt version. Empty installs whatever the archive offers. |
 | `node_exporter_hold_package` | `true` | `apt-mark hold` equivalent. Released before each install, so a version change still rolls through on a rerun. |
 
-## Deviations from v1 (`roles/node_exporter`)
-
-* `state: present` + hold instead of `state: latest` unheld, which let an
-  unattended upgrade swap the exporter under a live scrape.
-* The hold is released before the install, so the role stays convergent when
-  the pinned version moves (docs/contracts.md rule 3).
+The package is installed at an exact version and held, so an unattended
+upgrade cannot swap the exporter under a live scrape; releasing the hold
+before each install keeps the role convergent when the pin moves
+(docs/contracts.md rule 3).

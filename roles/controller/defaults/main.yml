@@ -81,7 +81,7 @@ controller_completion_file: /etc/bash_completion.d/cstacks
 
 # --- self-signed tenant wildcards, one per availability zone ---------------
 # The LoadBalancer `shared_certificate` input (manifest
-# locations[].regions[].load_balancer.shared_certificate, Wave 4I). Cert and
+# locations[].regions[].load_balancer.shared_certificate, roles/controller_seed). Cert and
 # key are written into ONE pem, which is the form haproxy wants.
 #
 # GENERATE-ONCE, PER DOMAIN (`creates:` on that domain's own path). v1

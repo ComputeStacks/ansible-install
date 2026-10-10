@@ -1,6 +1,22 @@
 # vault
 
-**Owner: Wave 1B.** Slim port of v1's `vault` role.
+Runs the `vault-bootstrap` container on the controller and the `pki/docker` CA
+that signs the controller's docker client certificate and every node's docker
+daemon certificate; its `unseal` and `ca_ttl` entry points are reused from
+nodes and on their own.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Controller infrastructure" | `controller` |
+| `unseal.yml` (`tasks_from: unseal`) | "Unseal the controller vault" | `controller` |
+| `roles/docker_tls` (`tasks_from: unseal`, `ca_ttl`) | `site.yml` "Node docker TLS"; `add-region.yml` "New node docker TLS, issued from the existing Vault" | `nodes`, delegated to `vault_host` |
+| `add-region.yml` (whole role), `upgrade-docker.yml` | not run | — |
+
+**Attach mode:** the role itself never runs against an `existing_env`
+controller; only `unseal` and `ca_ttl`, through `docker_tls` on the new node,
+reach the existing controller's vault (unseal if sealed, read the CA).
+**Requires:** `geerlingguy.docker` and `docker_config` on the controller
+(the "Docker hosts" play).
 
 ## Purpose
 
@@ -12,16 +28,16 @@ Runs the `vault-bootstrap` container on the controller and owns the
 * every node's docker daemon **server** certificate (issued by `docker_tls`,
   which reuses this role's task files).
 
-v1's `pki/consul` mount is **not** ported — consul is gone from the stack.
-
 This PKI is interim. cs-agent Phase 4 (controller-as-CA) replaces it, which is
-why leaf TTLs are short (1 year, not v1's 5) and why nothing here tries to be a
+why leaf TTLs are short (1 year) and why nothing here tries to be a
 long-lived CA management system.
 
 ## What it does, in order
 
 1. Asserts `vault_image` is an exact pin (from `group_vars/all/versions.yml`).
-2. Creates the v1 on-disk layout under `/etc/computestacks/.vault-bootstrap/`.
+2. Creates the on-disk layout under `/etc/computestacks/.vault-bootstrap/` —
+   the same layout v1 used, so attach mode finds an existing controller's
+   keys where it expects them.
 3. **First converge only** (`keys/unseal_key_0` absent): starts the container
    without the root-token bind mount, runs `operator init -key-shares=5
    -key-threshold=3`, and writes `keys/unseal_key_{0..4}` + `keys/rootkey`
@@ -33,7 +49,9 @@ long-lived CA management system.
    absent; (re)writes the `server` and `client` PKI roles every run, so a TTL
    change in defaults rolls out.
 7. Issues the controller client cert if it is missing or within
-   `vault_cert_renew_days` of expiry.
+   `vault_cert_renew_days` of expiry. `roles/controller` records the
+   certificate's fingerprint and recreates the portal container when it
+   changes — the portal reads the certificate only at boot.
 
 Re-running does not re-init, does not recreate the CA, and does not rotate a
 healthy certificate.
@@ -53,8 +71,9 @@ healthy certificate.
 ```
 
 Both delegate every action to `vault_host`, so they work unchanged from a node
-— that is how `docker_tls` and attach mode (`add-region.yml`) reach an
-**existing** v1 controller's vault. `unseal.yml` never creates or recreates the
+— that is how `docker_tls`, in `site.yml` and in attach mode
+(`add-region.yml`), reaches the controller's vault, including an **existing**
+controller's. `unseal.yml` never creates or recreates the
 container; on an existing controller it will only `docker start` a stopped one.
 
 `playbooks/unseal.yml` is the same include on its own, for when a converge is
@@ -113,29 +132,13 @@ failing loudly if that is ≤ 0. Every issuance in this repo passes that value a
   machine** (`delegate_to: localhost`) against slurped/piped PEM, so the
   managed hosts need no python crypto libraries.
 
-## Deviations from v1
-
-* No `pki/consul` mount, no consul certificates.
-* Leaf TTL 8760h (1y) instead of 43800h (5y), and clamped to the CA.
-* Unseals whenever vault reports sealed, on every converge (v1 only unsealed on
-  the run that happened to see a non-zero `vault status`, and its issuance
-  tasks would then fail opaquely).
-* Re-issues the controller client cert inside the renewal window. **The portal
-  container may need a restart to pick up a renewed client cert** — Wave 3G
-  (controller role) should notify its restart handler on
-  `{{ vault_docker_certs_path }}/cert.pem` changing.
-* `docker exec` without `-it` (no TTY needed), so v1's
-  `ansible_ssh_pipelining: no` workaround is gone.
-* Key files are mode 0600 (v1 left them at the copy default).
-* `client.pem` (cert+ca+key concatenation) is still written for v1 parity; no
-  consumer for it is known in this repo.
-
 ## Notes on the contracts
 
 * `vault_listen_port: 8200` is a role default rather than a `cs_ports` entry.
   `ports.yml` is the *cross-host* port contract (firewall, scrape configs,
   vhosts, manifest); vault's listener is loopback-only, never firewalled, and
-  referenced by no other role. Flagged for the manager: move it into `cs_ports`
-  if the contract is meant to cover every port literal.
+  referenced by no other role.
 * `groups['controller'][0]` is used only as a **delegation target**, which
   `docs/contracts.md` rule 2 permits.
+* `client.pem` (cert+ca+key concatenation) is also written, matching the
+  layout an existing controller has; no consumer for it is known in this repo.

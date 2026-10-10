@@ -1,9 +1,16 @@
 # backup_server
 
-**Owner:** Wave 2D. **Hosts:** `backup` (at most one server per **site**).
-
 The borg backup server a node's cs-agent SSHes into: the `cstacks` account,
 the pinned upstream borg release, and the repository path.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Backup server" | `backup` (at most one per **site**) |
+| `add-region.yml` | "Existing backup server — account, repository path, firewall appends" | `backup` (`existing_env: true`) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** only `tasks/account.yml` runs, and its one write is
+`~cstacks/.ssh` (see "Attach mode" below). **Requires:** —.
 
 A fleet may hold several backup servers, one per `site`
 (docs/contracts.md §Site scoping). The role itself is site-agnostic — it runs
@@ -119,15 +126,3 @@ Consumed, not owned: `borg_version`, `borg_release_gpg_fingerprint`,
 (inventory). The role reads no site map itself; `site` matters here only
 because `cs_agent` and `validate` use it to decide which backup server a given
 node belongs to.
-
-## Deviations from v1 (`roles/backup`)
-
-- Upstream GPG-verified borg release instead of `apt install borgbackup`
-  (`state: latest`, which floated the version out from under the client image).
-- No NFS export path, no `/etc/exports`, no `exportfs`.
-- No root SSH key distribution (v1 pushed every node's **root** key into the
-  backup server's `root` `authorized_keys` — v2 nodes only ever authenticate as
-  `cstacks`, with a dedicated per-node key).
-- No borg compaction cron or logrotate for it: compaction is in-agent now.
-- Not behind `tags: ['never', 'bootstrap']` — the role is convergent and runs
-  in a normal converge.

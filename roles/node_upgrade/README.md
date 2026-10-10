@@ -1,8 +1,22 @@
 # node_upgrade
 
-**Owner: the rolling docker upgrade.** Run by `playbooks/upgrade-docker.yml`
+The rolling docker upgrade: run by `playbooks/upgrade-docker.yml`
 (`make upgrade-docker ENV=<env>`), one node at a time, inside a scheduled
-customer maintenance window. Never unattended.
+customer maintenance window. Never unattended. Its `detect_live` probe also
+keeps the converges from disrupting a live node.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `upgrade-docker.yml` | "Upgrade docker, one node at a time" | `node_upgrade_targets` |
+| `upgrade-docker.yml` (`tasks_from: preflight`) | "Preflight every targeted node" | `node_upgrade_targets` |
+| `site.yml` (`tasks_from: detect_live`) | "Docker hosts" | `nodes` |
+| `add-region.yml` (`tasks_from: detect_live`) | "New node docker" | `nodes` (the new node) |
+| `roles/common` (`tasks_from: detect_live`) | "Base system" / "New node base system", before a reboot | nodes, not `existing_env` |
+| `unseal.yml` | not run | — |
+
+**Attach mode:** never touches an `existing_env` host — upgrade-docker.yml
+never selects one, and the role's preflight refuses it. **Requires:** a provisioner-built node with the data disk `ready`
+(`node_storage`) and the contract dependencies below.
 
 ## Purpose
 

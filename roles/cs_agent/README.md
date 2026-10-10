@@ -1,7 +1,5 @@
 # cs_agent
 
-**Owner:** Wave 2D. **Hosts:** `nodes`.
-
 Installs the ComputeStacks node agent (cs-agent, pinned in `versions.yml`) from the upstream apt
 repository, renders `/etc/computestacks/agent.yml`, enrolls the node against
 the controller, and authorizes the node's borg key on the shared backup
@@ -10,6 +8,17 @@ server.
 Runs **after** the `controller_seed` play — enrollment reads a hash that only
 exists once the controller has a `Node` row for this hostname
 (`playbooks/site.yml` freezes that order).
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Node agents (requires seeded Node rows)" | `nodes` |
+| `add-region.yml` | "New node agent (requires the seeded Node row)" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; on the existing backup server it adds one
+delegated `authorized_keys` entry for the new node and nothing else.
+**Requires:** `controller_seed` (the Node row), `controller` (`cstacks` on the
+controller), `backup_server` (`~cstacks/.ssh` on this site's backup host).
 
 ## What it does
 
@@ -102,9 +111,11 @@ source-IP matched and would have to be reachable from every node); the
 controller only ever stores the hash, so reading it controller-side is the
 cheaper path.
 
-`cstacks` is a **Wave 3G** deliverable. Until it lands these tasks fail with a
-missing command, which is the intended behavior — **end-to-end verification of
-this path is Wave 4J's** (`validate`). Nothing here is stubbed.
+`cstacks` (and its `runner` subcommand) is installed on the controller by
+`roles/controller`; set `cs_agent_enroll_command` to an absolute path if it is
+not on the controller's non-interactive `PATH`. `roles/validate` asserts the
+result end to end: a node whose enrollment failed never latches its
+datachannel backfill.
 
 Re-enroll a node on its own with `--tags enroll`: the `agent.yml` render carries
 the same tag so the fetched hash is written out and the service restarted.
@@ -173,15 +184,3 @@ token hash, and a `--diff` run would otherwise print both.
 `/mnt` and `/usr/bin/borg`), `backup_ssh_port` is required when that server's
 sshd is not on `cs_ports.ssh`, and `backups_key` must be the existing
 environment's value.
-
-## Deviations from v1 (`roles/cs_agent`)
-
-- Native deb under systemd instead of a container + a hand-written unit; no
-  image pull, no `cs-agent.service.j2`.
-- Not guarded by `when: ansible_facts.services[...] is not defined` — the role
-  is convergent, so a version or config change actually applies on a rerun.
-- Consul is gone (no `consul:` block, no consul/docker cert plumbing here).
-- Every NFS key is gone.
-- The key moved from `/etc/computestacks/.ssh/` to
-  `/etc/computestacks/backup/.ssh/`, matching the agent's own default.
-- `compress` -> `compression`; `mariadb` hoisted to top level.

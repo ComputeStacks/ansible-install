@@ -9,7 +9,7 @@
 # node being attached. The scoped form additionally fails when the node it was
 # asked about does not latch.
 #
-# Both tasks exit non-zero on any failure (Wave 1C), so the command's own exit
+# Both tasks exit non-zero on any failure, so the command's own exit
 # code is the gate; the output is shown either way because it names the nodes
 # and projects that still need a re-run.
 

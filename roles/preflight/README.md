@@ -1,11 +1,24 @@
 # preflight
 
-**Owner:** Wave 1A
+Assert-only role that checks the inventory, the hosts, the registries and the
+load balancer DNS before anything is built. It never changes a host — it only
+fails loudly (or, for the tailscale case, warns) before any other role runs.
+The registry and DNS checks read from the network, which is still not a change
+to a host.
 
-Assert-only role. It never changes a host — it only fails loudly (or, for the
-tailscale case, warns) before any other role runs. Runs on `hosts: all` with
-`gather_facts: true` (see `playbooks/site.yml`). The registry checks below read
-from the network, which is still not a change to a host.
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Preflight validation" | `all` |
+| `add-region.yml` | "Preflight validation and attach-mode inventory checks" | `all` |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+Both plays run it first, with `gather_facts: true`.
+
+**Attach mode:** runs on every host, existing ones included, and changes
+nothing; the OS, data-disk, registry-login and controller-image checks skip
+`existing_env` hosts, and the delegation check is skipped in attach mode.
+**Requires:** — (it includes `roles/node_storage`'s read-only `probe` and pure
+`classify` task files itself).
 
 ## What it asserts
 
@@ -72,8 +85,8 @@ from the network, which is still not a change to a host.
     assert for that reason. The suffix test has a label boundary in it:
     with a zone of `usercontent.example.com`, `notusercontent.example.com`
     ends with the string and is not under the zone.
-  - **In attach mode** (decided by the CONTROLLER's `existing_env`, the same
-    predicate `roles/ssh_trust` uses), every new node names its own
+  - **In attach mode** (decided by the CONTROLLER's `existing_env`, not by the
+    host the check runs against), every new node names its own
     `app_domain` and it is not `cs_app_zone`. Merely being defined is not
     enough: set equal to the zone it selects the legacy single-certificate
     path, generates nothing, and seeds the new region's load balancer with
@@ -221,7 +234,7 @@ not earn.
 | `preflight_app_domain_nodes` / `preflight_node_app_domains` | derived | The nodes that explicitly set it, and their values — **not** deduped, since comparing against its own `unique` is how the collision is detected. |
 | `preflight_app_domains_outside_zone` | derived | Explicitly-set domains that are neither `cs_app_zone` nor beneath it at a label boundary. |
 | `preflight_app_zone_labels` | derived | Label count of `cs_app_zone`; the `LetsEncryptAuth` walk reaches 2–5 and nothing deeper. |
-| `preflight_attach_mode` | derived | The CONTROLLER's `existing_env`, character for character the predicate `roles/ssh_trust` uses — not the host this role happens to run against. |
+| `preflight_attach_mode` | derived | The CONTROLLER's `existing_env` — not the host this role happens to run against. |
 | `preflight_attach_nodes_sharing_zone` | derived | New nodes whose `cs_app_domain` is still `cs_app_zone` — set nowhere, or set equal to it, which are the same failure. |
 | `preflight_wildcard_domain_overrides` | derived | Hosts setting the retired `controller_wildcard_domain` to anything but `cs_app_zone`. `roles/controller`'s own default is not in scope here, so anything found was written by an operator. |
 | `preflight_check_app_domain_dns` | `true` | Both load balancer DNS checks — the public record dig (hand-made records) and the delegation check (records written by roles/powerdns). False for split horizon or records published after the run. |

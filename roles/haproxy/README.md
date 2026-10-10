@@ -1,9 +1,16 @@
 # haproxy
 
-**Owner:** Wave 2D. **Hosts:** `nodes`.
-
 Installs distro haproxy on a node and pre-creates everything the controller's
 runtime configuration depends on.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Node base stack" | `nodes` |
+| `add-region.yml` | "New node base stack" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; never runs on an existing shared host.
+**Requires:** `community.crypto` (DH parameters).
 
 ## The controller owns haproxy.cfg — this role does not
 
@@ -42,19 +49,17 @@ The stats port the metrics host scrapes (`cs_ports.haproxy_stats`, 81) is set
 by the controller in the generated config, not here — but it must equal
 `load_balancer.stats_bind` on the controller side.
 
-## Deviations from v1 (`roles/haproxy`)
+## Design notes
 
-- **Adds `/etc/haproxy/dhparam.pem`.** The controller's generated config carries
-  `ssl-dh-param-file /etc/haproxy/dhparam.pem` unconditionally and haproxy
-  refuses to start when the file is missing; nothing in v1 ever created it.
-  Set `haproxy_manage_dhparam: false` if the file is supplied another way.
-- **Adds `/etc/haproxy/errors/` and backfills missing error pages** with the
-  generic 503 page (`force: false`, so a distro or operator page is never
-  overwritten). v1 installed only `default.http`, leaving the six other
-  `errorfile` paths entirely dependent on the distro package.
-- **Holds the package** (v1 let unattended upgrades move it).
-- **Enabled, not started** (v1 used `state: started`, which fails on a fresh
-  node whose stock config has no listener).
-- Not guarded by `when: ansible_facts.services[...] is not defined` — the role
-  is convergent.
-- `certs/` is 0700 (v1 left it at the default 0755 with private keys in it).
+- **`/etc/haproxy/dhparam.pem` is generated here.** The controller's generated
+  config carries `ssl-dh-param-file /etc/haproxy/dhparam.pem` unconditionally
+  and haproxy refuses to start when the file is missing. Set
+  `haproxy_manage_dhparam: false` if the file is supplied another way.
+- **Missing error pages are backfilled** with the generic 503 page
+  (`force: false`, so a distro or operator page is never overwritten), so none
+  of the controller's `errorfile` paths depends on the distro package alone.
+- **The package is held**, so an unattended upgrade cannot move the load
+  balancer under a live region.
+- **Enabled, not started** — starting it would fail on a fresh node whose stock
+  config has no listener (see above).
+- **`certs/` is 0700**: it holds tenant private keys.

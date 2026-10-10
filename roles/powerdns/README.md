@@ -1,6 +1,19 @@
 # powerdns
 
-**Owner: Wave 3H.** Port of v1's `powerdns` role.
+Runs the bundled PowerDNS authoritative nameservers — a writable leader and
+postgres-streaming followers — creates the tenant zone, and writes each az's
+load balancer records into it.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Nameservers" (after `postgres_repo`) | `nameservers` |
+| `add-region.yml` (`tasks_from: lb_records`) | "Existing nameserver — the new az's load balancer records only" | `ns_primary`, only with `dns_driver: powerdns` and `powerdns_manage_lb_records` on |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** only `tasks_from: lb_records` runs, on the existing leader,
+writing the new az's records and nothing else (see
+[Load balancer records](#load-balancer-records)). **Requires:** `postgres_repo`
+(the PGDG repository for `postgresql-<major>`) and `community.postgresql`.
 
 ## Purpose
 
@@ -22,14 +35,24 @@ regardless of leader/follower role.
 1. Asserts `pdns_api_key` / `pdns_web_key` / `pdns_db_password` are set to
    real values (not blank, not the `CHANGEME` placeholder) and that
    `postgresql_version` is defined.
-2. Installs and starts the distro `postgresql-{{ postgresql_version }}`
-   package (`tasks/postgres.yml`).
-3. **ns_primary only** (`tasks/leader.yml`): points postgres at its own
+2. **Both roles** (`tasks/packages.yml`): frees port 53 and installs
+   `pdns-server` + `pdns-backend-pgsql`. It runs first because the leader's
+   schema load reads a file that ships with `pdns-backend-pgsql`. Port 53 is
+   held by systemd-resolved's stub listener, and on Ubuntu that stub *is* the
+   host's resolver, so resolved is not stopped: a drop-in sets
+   `DNSStubListener=no`, `/etc/resolv.conf` is pointed at resolved's upstream
+   list (`/run/systemd/resolve/resolv.conf`), and resolved keeps running
+   (`powerdns_manage_resolved`, on whenever resolved is present).
+3. Installs and starts `postgresql-{{ postgresql_version }}`, its client and
+   `python3-psycopg2` (`tasks/postgres.yml`). The major comes from PGDG,
+   which `roles/postgres_repo` configures in the same play — Ubuntu 26.04's
+   archive has no `postgresql-17`.
+4. **ns_primary only** (`tasks/leader.yml`): points postgres at its own
    inventory address and the ports-contract port, opens replication access to
    every host in `ns_followers` (iterated, not indexed), then creates the
    `pdns` database/role/schema and the replication role if they don't exist
    yet.
-4. **ns_followers only** (`tasks/follower.yml`): if the local `pdns` database
+5. **ns_followers only** (`tasks/follower.yml`): if the local `pdns` database
    isn't reachable yet, stops postgres, wipes its data directory, and runs
    `pg_basebackup -R -C --slot=<this host>` against the leader to bootstrap
    streaming replication, then restarts postgres. This block is a one-time
@@ -45,14 +68,16 @@ regardless of leader/follower role.
    answering queries from the copy it already holds, which is why neither the
    converge nor an NS lookup notices. `roles/validate`'s `dns_replication`
    check reports that state; this is what stops it arising.
-5. **Both roles** (`tasks/pdns.yml`): stops/disables `systemd-resolved` (it
-   holds port 53), installs `pdns-server` + `pdns-backend-pgsql`, removes the
-   default bind-backend files, renders the postgres-backend config and
-   `pdns.conf`, starts/enables `pdns`, and verifies it can reach its database.
-6. **ns_primary only** (`tasks/zone.yml`): `pdnsutil create-zone
+6. **Both roles** (`tasks/pdns.yml`): removes the default bind-backend files,
+   renders the postgres-backend config and `pdns.conf`, starts/enables `pdns`,
+   and verifies it can reach its database.
+7. **ns_primary only** (`tasks/zone.yml`): `pdnsutil create-zone
    {{ cs_app_zone }} {{ powerdns_name }}` (rc 0 = created, rc 1 = already
    exists -- both are success).
-7. **ns_primary only, `dns_driver: powerdns`** (`tasks/lb_records.yml`):
+8. Flushes handlers, so a changed pdns or postgres configuration is applied
+   before the record writes — a failure there would otherwise drop the host
+   with its restart still pending.
+9. **ns_primary only, `dns_driver: powerdns`** (`tasks/lb_records.yml`):
    writes each az's load balancer records into `cs_app_zone` -- see
    [Load balancer records](#load-balancer-records) below.
 
@@ -200,36 +225,28 @@ pdnsutil directly, not through this role -- and the `dpkg-query` fallback,
 which only runs when `pdnsutil --version` fails or prints something
 unexpected. Versions after 5.0.2 are assumed to keep the absolute form.
 
-## KEY DIFFERENCE from v1: credentials are inventory-sourced, not generated
+## Credentials are inventory-sourced, never generated
 
-v1 generated the API key, webserver key, and db password on the leader on
-first converge, wrote them under `/root/.credentials/`, and every later
-converge (and the follower) `slurp`'d them back from that leader-local
-directory. This role **never generates or reads back a credential file**.
 `pdns_api_key`, `pdns_web_key`, and `pdns_db_password` are required inputs
-from the vaulted inventory (`inventories/<env>/group_vars/all/secrets.yml`,
-already present as of Wave 0 -- see the sample file's `PowerDNS` section).
-The role only *writes* them into `pdns.conf` / the postgres-backend config and
-asserts they are set; there is no `tasks/passwords.yml` equivalent, no
-`/root/.credentials`, and no `slurp`/`delegate_to` dance to move a
-leader-generated secret to other hosts. This removes an entire class of
-v1 "first converge race" concerns (e.g. a follower converging before the
-leader has ever generated a credential file).
+from the vaulted inventory (`inventories/<env>/group_vars/all/secrets.yml` --
+see the sample file's `PowerDNS` section). The role only *writes* them into
+`pdns.conf` / the postgres-backend config and asserts they are set; it never
+generates a credential or reads one back from a host, so there is no
+credential file on the leader and no `slurp`/`delegate_to` step to move a
+leader-generated secret to other hosts -- and no first-converge race in which
+a follower converges before the leader has generated anything.
 
-## The package-pin decision
+## Package source
 
-v1 shipped `files/package-pin` (an apt preference pinning `pdns-*` to
-`origin repo.powerdns.com`) that **no task ever copied anywhere** -- dead
-weight. This role installs `pdns-server` / `pdns-backend-pgsql` /
-`postgresql-{{ postgresql_version }}` straight from the Ubuntu 26.04 distro
-archive (`state: present`, same pattern `roles/common` uses for base
-packages) and does not add the upstream `repo.powerdns.com` apt repository at
-all. Simpler, no dead file, no second apt source/GPG key to manage, and
-`unattended-upgrades` (already installed by `common`) carries patch releases
-the same way it does for every other distro package in this repo. If a wave
-owner later needs a PowerDNS version newer than what 26.04 ships, wiring the
-upstream repo is a follow-up, not a silent gap -- flagged here rather than
-half-done.
+`pdns-server` and `pdns-backend-pgsql` come straight from the Ubuntu 26.04
+distro archive (`state: present`, the same pattern `roles/common` uses for
+base packages); the upstream `repo.powerdns.com` apt repository is not added.
+That means no second apt source or GPG key to manage, and
+`unattended-upgrades` (installed by `common`) carries patch releases the same
+way it does for every other distro package in this repo. Wiring the upstream
+repository is the change to make if a PowerDNS version newer than 26.04's is
+ever needed. `postgresql-{{ postgresql_version }}` is the exception: it comes
+from PGDG (`roles/postgres_repo`).
 
 ## Postgres: inline install, not `geerlingguy.postgresql`
 
@@ -241,79 +258,53 @@ on the follower side, a `pg_basebackup` bootstrap -- none of which
 install + `postgresql.conf` templating and then hand-writing the replication
 logic on top anyway (which is most of what this role does) is more moving
 parts for the same result than a small inline `apt` + `lineinfile` +
-`postgresql_pg_hba` sequence, matching v1's approach. `postgresql_version:
+`postgresql_pg_hba` sequence. `postgresql_version:
 17` (`playbooks/group_vars/all/versions.yml`) is the same global pin the
 controller's `geerlingguy.postgresql` instance uses -- both just mean "major
 version 17"; they are unrelated running instances on different hosts.
 
-## Deviations from v1
+## Design notes
 
-* **Credentials**: sourced from vaulted inventory, not generated/slurped (see
-  above) -- the single biggest behavioral change from v1.
-* **Package source**: distro archive instead of the (unused, now deleted)
-  `repo.powerdns.com` pin file.
-* **No install-state guards**: v1's `tasks/main.yml` branched on
-  `ansible_facts.services['postgresql.service']`/`['pdns.service']` before
-  even including its install tasks, and had a separate `apt: state=latest`
-  task gated on the same facts. This role always runs `state: present` +
-  re-templates config + `state: started, enabled: true`, convergently
-  (`docs/contracts.md` rule 3). The only "only do this once" gate left is the
-  `pg_basebackup` bootstrap, which is a data operation, not an install guard.
-* **Multiple followers, not just one**: v1 hardcoded
-  `groups['follower_nameservers'][0]` in two places (the leader's pg_hba
-  source, and the follower's replication slot name `ns2`). This role loops
-  `groups['ns_followers']` for pg_hba (`docs/contracts.md` rule 2 -- iterate,
-  never index `[0]`) and derives each follower's replication slot name from
-  its own `inventory_hostname`, so an environment with more than one follower
-  works without modification.
-* **`until`/`retries` actually retries**: v1's `postgresql_ping` checks set
-  `retries`/`delay` without `until`, which is a Two-key no-op in Ansible --
-  the task only ever runs once. This role adds `until:` on every such check.
-* **Config files are group-readable only, not world-readable**: v1's
-  `pdns.conf` and `pdns.local.gpgsql.conf` were written with the `template`
-  module's default mode, leaving the API key/webserver password/db password
-  world-readable. This role writes both `owner: root, group: pdns,
-  mode: "0640"`.
-* **`webserver-allow-from` is not `0.0.0.0/0`**: v1 opened the PowerDNS API to
-  the entire internet (relying entirely on the host firewall). This role
-  restricts it to the controller's inventory addresses
-  (`groups['controller']`'s `primary_ip` and `public_ip`), matching the
-  `cs_ports.pdns_api` contract comment ("controller -> primary nameserver").
-  It also binds `webserver-address` to the leader's `primary_ip` rather than
-  `0.0.0.0`, so the socket is not open on every interface for
-  `webserver-allow-from` to then reject.
-* **One unified `pdns.conf.j2`** instead of v1's two near-duplicate templates
-  (`pdns.conf.j2` / `pdns-follower.conf.j2`); the api/webserver block is
-  gated by `powerdns_is_leader` inside the one file.
-* **IPv6 dual-stack listener carried forward**: `powerdns_dns_address`
-  defaults to `"0.0.0.0, ::"` (v1 parity) so PowerDNS binds both address
-  families for DNS traffic.
-* **Replication auth is still `trust`-by-source-IP**, exactly as v1 had it --
-  this is a mechanism carried over verbatim, not hardened, per this wave's
-  brief ("keep the mechanism, modernizing only style"). Worth a security
-  follow-up if this role's scope is ever revisited.
-* **Var prefix**: `pdns_*` (v1) -> `powerdns_*` for every var this role
-  *defines* (`ansible-lint`'s `var-naming[no-role-prefix]` expects the
-  variable prefix to match the role directory name, `powerdns`). The three
-  vaulted secrets (`pdns_api_key`, `pdns_web_key`, `pdns_db_password`) are
-  **not** renamed -- they are inventory-owned inputs, not role-defined vars,
-  and the wave brief specifies those exact names.
-
-## Flagged for the manager
-
-* `powerdns_primary_host: "{{ groups['ns_primary'][0] }}"` (in
-  `vars/main.yml`) assumes exactly one `ns_primary` host, the same way
-  `vault_host: groups['controller'][0]` assumes exactly one controller.
-  Nothing in `roles/preflight` currently asserts `ns_primary`'s group size
-  the way the controller/one-node-per-az invariants are enforced elsewhere.
-  If that assumption should be a hard preflight check, that's a preflight
-  change, out of this role's file allowlist.
-* The base-schema restore path
-  (`/usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql`) is carried over
-  unchanged from v1's Debian/Ubuntu package layout assumption. Worth
-  confirming against the actual Ubuntu 26.04 `pdns-backend-pgsql` package the
-  first time this role converges for real (same spirit as a versions.yml
-  `VERIFY` marker, just not a version string).
+* **No install-state guards.** Every run applies `state: present`, re-templates
+  config and asserts `state: started, enabled: true`, convergently
+  (`docs/contracts.md` rule 3). The only "only do this once" gate is the
+  follower's `pg_basebackup` bootstrap, which is a data operation, not an
+  install guard.
+* **Any number of followers.** pg_hba loops over `groups['ns_followers']`
+  (`docs/contracts.md` rule 2 -- iterate, never index `[0]`), and each
+  follower's replication slot name is derived from its own
+  `inventory_hostname`.
+* **Retries really retry.** Every `postgresql_ping` check that sets
+  `retries`/`delay` also sets `until:` -- without it the task runs once.
+* **Config files are group-readable only.** `pdns.conf` and
+  `pdns.local.gpgsql.conf` carry the API key, webserver password and db
+  password, so both are written `owner: root, group: pdns, mode: "0640"`.
+* **The API is not open to the world.** `webserver-allow-from` is restricted
+  to the controller's inventory addresses (`groups['controller']`'s
+  `primary_ip` and `public_ip`), matching the `cs_ports.pdns_api` contract
+  ("controller -> primary nameserver"), and `webserver-address` binds the
+  leader's `primary_ip` rather than `0.0.0.0`, so the socket is not open on
+  every interface for `webserver-allow-from` to then reject.
+* **One `pdns.conf.j2`** for leader and followers; the api/webserver block is
+  gated by `powerdns_is_leader` inside it.
+* **Dual-stack DNS listener**: `powerdns_dns_address` defaults to
+  `"0.0.0.0, ::"`, so PowerDNS binds both address families.
+* **Replication auth is `trust` by source IP** (pg_hba entries per follower
+  address). It has not been hardened; worth a security follow-up.
+* **Var prefix**: every variable this role *defines* is `powerdns_*`
+  (`ansible-lint`'s `var-naming[no-role-prefix]`). The three vaulted secrets
+  (`pdns_api_key`, `pdns_web_key`, `pdns_db_password`) keep their `pdns_`
+  names: they are inventory-owned inputs, not role-defined vars.
+* **One leader.** `powerdns_primary_host: "{{ groups['ns_primary'][0] }}"`
+  (`vars/main.yml`) assumes exactly one `ns_primary` host, the same way
+  `vault_host` assumes one controller; `roles/preflight` asserts
+  `ns_primary` holds exactly one host whenever `dns_driver: powerdns`.
+* **The base schema** is restored from
+  `/usr/share/pdns-backend-pgsql/schema/schema.pgsql.sql`, the canonical path
+  in the `pdns-backend-pgsql` package
+  (`/usr/share/doc/pdns-backend-pgsql/schema.pgsql.sql` is only a symlink to
+  it). The load is guarded on the schema's `domains` table, not on the
+  database existing.
 
 ## Variables
 
@@ -326,11 +317,12 @@ version 17"; they are unrelated running instances on different hosts.
 | `powerdns_dns_address` | `"0.0.0.0, ::"` | Dual-stack DNS listener. |
 | `powerdns_web_address` | `"{{ primary_ip }}"` | Leader-only. Bound to the inventory address the controller dials, not `0.0.0.0`; `webserver-allow-from` restricts callers on top of that (see above). |
 | `powerdns_replication_user` | `repuser` | Postgres replication role name. |
+| `powerdns_manage_resolved` | true when `systemd-resolved` is present | Turn off resolved's stub listener and point `/etc/resolv.conf` at its upstream list, so pdns can bind port 53. Set false only if something else on the host already manages `/etc/resolv.conf` and has freed port 53. |
 | `powerdns_manage_zone` | `true` | Set `false` to skip `pdnsutil create-zone`. |
 | `powerdns_manage_lb_records` | `true` | Write each az's load balancer records into `cs_app_zone` (only with `dns_driver: powerdns`). Set it on the **nameservers** -- preflight and validate read it from ns_primary. |
 | `powerdns_lb_record_ttl` | `300` | TTL of the A, the wildcard CNAME and the marker. Part of convergence. |
 | `powerdns_lb_records_nodes` | `"{{ cs_new_nodes \| default([]) }}"` | The nodes whose records a run writes. Role-internal: `site.yml` and `add-region.yml` both get the right set from `cs_new_nodes`. |
-| `powerdns_enable_dnsupdate` | `true` | v1 parity; per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |
+| `powerdns_enable_dnsupdate` | `true` | Per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |
 | `powerdns_postgresql_data_dir` / `_main_dir` / `_conf` / `_hba_conf` | distro paths under `/var/lib/postgresql/{{ postgresql_version }}` and `/etc/postgresql/{{ postgresql_version }}/main` | |
 | `pdns_api_key` / `pdns_web_key` / `pdns_db_password` | **required, no default** | From the vaulted inventory. Asserted non-blank and not `CHANGEME`. |
 | `postgresql_version` | **required** (global, `versions.yml`) | Currently `17`. |

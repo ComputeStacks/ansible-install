@@ -13,8 +13,8 @@ metrics_evaluation_interval: 10s
 # Loopback-only, role-internal ports (analogous to vault_listen_port, see
 # roles/vault/README.md "Notes on the contracts") -- never firewalled, never
 # dialed cross-host. The nginx vhosts that expose these at cs_ports.
-# metrics_prometheus (3101) / cs_ports.metrics_loki (3102) are Wave 3G's
-# acme_web role; this is the interface it builds against.
+# metrics_prometheus (3101) / cs_ports.metrics_loki (3102) belong to the
+# acme_web role; these are the upstreams it proxies to.
 metrics_prometheus_internal_port: 9090
 # Container-network-internal only (prometheus -> alertmanager over the `ops`
 # docker network's embedded DNS, by container name) -- never bound to a host
@@ -25,8 +25,8 @@ metrics_alertmanager_port: 9093
 # Alertmanager webhook target -- the controller's alert_notifications API
 # (v1 parity).
 metrics_alert_endpoint: "https://{{ cs_portal_domain }}/api/system/alert_notifications"
-# Accept the controller's self-signed wildcard cert (acme_web/controller,
-# Wave 3G) unless/until it carries a CA-signed cert. v1 default; unchanged.
+# Accept the controller's self-signed wildcard cert (acme_web/controller)
+# unless/until it carries a CA-signed cert. v1 default; unchanged.
 metrics_alertmanager_tls_skip_verify: true
 
 # Static, non-per-AZ node-exporter scrape targets: infra hosts that run the

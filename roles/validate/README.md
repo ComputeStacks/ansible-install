@@ -1,10 +1,27 @@
 # validate
 
-**Owner: Wave 4J.** `hosts: all` (greenfield) / `controller:nodes` (attach).
+Read-only post-install assertions: checks that the control-plane graph is
+actually wired, from the hosts that use it, and fails the run where a broken
+leg would otherwise be silent.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Validate" | `all` |
+| `add-region.yml` | "Validate the new region" | `controller:nodes` |
+| `upgrade-docker.yml` (`include_role`, after each node's upgrade) | "Upgrade docker, one node at a time" | `node_upgrade_targets`, one node at a time (`serial: 1`) |
+| `unseal.yml` | not run | — |
+
+**Attach mode:** runs on the controller and the new node only, and asserts no
+unit set on an `existing_env` host (see [Attach mode](#attach-mode)).
+**Requires:** the rest of the run — it asserts what the earlier plays built
+(see [Requirements](#requirements) for collections and tools).
 
 ## Purpose
 
-The last play of both playbooks. It changes nothing — every task is read-only
+The last play of `site.yml` and `add-region.yml`, and the check that follows
+each node's upgrade in `upgrade-docker.yml`, where only the per-node checks
+apply (the play holds nodes alone, so the controller-only checks — `dns`,
+`pdns_api`, `containers` — do not run). It changes nothing — every task is read-only
 and `changed_when: false` — and asserts that the control-plane graph in
 docs/contracts.md is actually wired, on the real addresses and with the real
 credentials, from the hosts that use them.
@@ -52,10 +69,11 @@ environment can carry a permanent exclusion in its inventory.
 
 ## Why these checks are shaped the way they are
 
-**The agent probe expects HTTP 401.** cs-agent v3.3.0 has no unauthenticated
-route: every handler is wrapped in `requireCustomer`/`requireAdmin`, and a
-request without an `Authorization` header is answered 401 by `authenticate`
-(`httpapi/httpapi.go`). A 401 is therefore the strongest signal available —
+**The agent probe expects HTTP 401.** cs-agent 3.4.0 (the pinned
+`cs_agent_apt_version`) has no unauthenticated route: every handler is wrapped
+in `requireCustomer`/`requireAdmin`, and a request without an `Authorization`
+header is answered 401 by `authenticate` (`httpapi/httpapi.go` in
+ComputeStacks/node-agent). A 401 is therefore the strongest signal available —
 it proves the port is reachable *from the controller* and that cs-agent, not
 some other listener, is answering. Sending the real admin Bearer would prove
 nothing more and would put a cleartext credential into a health check. A TCP
@@ -223,8 +241,8 @@ is the `cs-docker-borg` image, whose borg is `borg_version` — versions.yml
 pins the image tag and that version together precisely so they cannot drift.
 A server on a different version corrupts repositories in ways that only
 surface at restore time. In attach mode this is the check that catches an
-existing v1 server whose distro borg does not match, which is why the plan
-calls it blocking; `validate_borg_version_compare: false` downgrades it to a
+existing v1 server whose distro borg does not match, which is why it is
+blocking by default; `validate_borg_version_compare: false` downgrades it to a
 warning.
 
 ## Attach mode
@@ -328,18 +346,3 @@ installs on every host; `python3-psycopg2` comes from
 `roles/powerdns/tasks/postgres.yml`, which runs on exactly the hosts
 `dns_replication` queries. `lb_domain_public` runs `dig` on the **control
 machine**, as roles/preflight already does, so it needs `dig` there too.
-
-## Deviations from v1 (`roles/validate`)
-
-* v1 checked only that a list of systemd units was running, per group, and
-  called `cstacks test` on the controller. It never checked a single
-  cross-host leg — not the agent, not the prometheus label contract, not
-  borg, not the portal from a node — which is exactly where a ComputeStacks
-  install goes wrong silently.
-* v1 asserted `cadvisor` on the controller, metrics and registry hosts, none
-  of which run it in v2 (or ran it usefully in v1).
-* v1's consul check is gone with consul.
-* `cstacks test` (`rake test_connection:all`) is not called here:
-  `controller_post_enroll` already runs it, and it exits 0 even when a leg
-  fails, so it is a report rather than an assertion. The legs it reports on
-  are asserted individually above.

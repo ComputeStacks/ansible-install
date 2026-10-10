@@ -5,9 +5,9 @@
 
 # `tasks_from:` is a parameter of include_role/import_role, NOT of the play's
 # `roles:` keyword — listing it there is silently ignored and main.yml runs
-# instead. playbooks/add-region.yml currently uses that form (Wave 4J owns
-# that file), which would run this whole greenfield converge against a live
-# v1 controller. Fail loudly instead.
+# instead, which would run this whole greenfield converge against a live v1
+# controller. playbooks/add-region.yml uses include_role; this guards any
+# calling play that gets it wrong. Fail loudly instead.
 - name: Refuse to run the greenfield converge on an existing controller
   ansible.builtin.assert:
     that:

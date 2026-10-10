@@ -1,6 +1,20 @@
 # controller
 
-**Owner: Wave 3G.** `hosts: controller`.
+The ComputeStacks controller host: the `cstacks` CLI, the environment file,
+the `portal` container, the application ssh keypair and the per-az tenant
+wildcard certificates — plus `tasks/attach_prep.yml`, attach mode's additive
+entry point for an existing controller.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Controller infrastructure" | `controller` |
+| `add-region.yml` (`tasks_from: attach_prep`) | "Controller prep (gated — pg_dump, append-only env, v2 cstacks, portal restart)" | `controller` (`existing_env: true`) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** `tasks/attach_prep.yml` only; `tasks/main.yml` refuses to run
+on an `existing_env` host. **Requires:** docker ("Docker hosts" play), then
+`vault`, `postgres_repo`, `geerlingguy.postgresql`, `geerlingguy.redis` and
+`acme_web` earlier in the same play.
 
 ## Purpose
 
@@ -11,13 +25,16 @@ certificate per availability zone — the certificate that az's load balancer
 serves.
 
 It does **not** own the manifest or the seeding step — `controller_seed`
-(Wave 4I) renders the manifest and calls `cstacks seed`. It does not own the
+renders the manifest and calls `cstacks seed`. It does not own the
 TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 
 ## What it does, in order (`tasks/main.yml`)
 
 1. Asserts the image is `repo` + a non-floating tag, that the immutable
-   secrets are present and long enough, that `postgres_password` is URL-safe,
+   secrets are present and long enough (they are never generated: a
+   generated `SECRET_KEY_BASE` would differ on a re-run against a wiped
+   environment file and destroy every encrypted column — docs/contracts.md
+   rule 8), that `postgres_password` is URL-safe,
    that every az's load balancer domain is a bare domain, and that the two
    spellings of the wildcard certificate root agree (see below).
 2. Creates the directory layout (below), plus one 0700 directory per per-az
@@ -36,6 +53,7 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 10. `cstacks upgrade` when the running container's image no longer matches the
    configured tag.
 11. Flushes handlers, then starts the portal if it is not already running.
+12. Seeds the default branding assets (see "Branding").
 
 ## Directory layout
 
@@ -43,11 +61,11 @@ TLS terminator either; `acme_web` runs before it in `playbooks/site.yml`.
 | --- | --- |
 | `/etc/computestacks` | Config root. |
 | `/etc/computestacks/certificates` | `docker/` holds the vault-issued client cert (`roles/vault`), mounted into the container as `/root/.docker`. |
-| `/etc/computestacks/.ssh` | **v2 change.** The application ed25519 keypair. v1 kept it in `/var/lib/computestacks/sshkeys`; it moved here because `roles/ssh_trust` reads `id_ed25519.pub` from this path to seed root's `authorized_keys` on every node and on the registry host. |
+| `/etc/computestacks/.ssh` | The application ed25519 keypair. `roles/ssh_trust` reads `id_ed25519.pub` from this path to seed root's `authorized_keys` on every node and on the registry host. (A v1-built controller keeps it in `/var/lib/computestacks/sshkeys`; see "Attach mode".) |
 | `/var/lib/computestacks` | State root. Holds the `.db_provisioned` sentinel and the docker-cert checksum. |
 | `/var/lib/computestacks/backups` | `cstacks database-backup` output. |
-| `/var/lib/computestacks/branding` | Mounted as `public/assets/custom`. Seeded per-file from the image's `public/custom` (see below); drop your own assets here and they are never overwritten. |
-| `/var/lib/computestacks/proxy_ips` | **v2 new.** `ProxyIpList`'s persistent store, mounted as `lib/proxy_ips`. |
+| `/var/lib/computestacks/branding` | Mounted as `public/assets/custom`. Seeded per-file from the image's `public/custom` (see "Branding"); drop your own assets here and they are never overwritten. |
+| `/var/lib/computestacks/proxy_ips` | `ProxyIpList`'s persistent store, mounted as `lib/proxy_ips`. |
 | `/var/lib/computestacks/.ssl_wildcard` | `cs_app_wildcard_dir`. Holds `sharedcert.pem` (cert **and** key in one file — the form haproxy wants) plus the `selfwildcard.conf` that produced it, for the default domain only. |
 | `/var/lib/computestacks/.ssl_wildcard/<domain>` | 0700. The same pair for one az whose `app_domain` is not `cs_app_zone`. One directory per az. |
 
@@ -141,38 +159,56 @@ Exits non-zero with a message on stderr if the container is not running.
 ### Container arguments
 
 Built once into shell arrays, so every subcommand launches the image the same
-way (v1 repeated the whole flag list in seven places and they had drifted).
+way.
 
 Mounts: `$CS_CERT_PATH/docker` → `/root/.docker`, `$CS_BRANDING_PATH` →
 `public/assets/custom`, `$CS_SSH_KEYS_PATH` → `lib/ssh`, `$CS_PROXY_IPS_PATH`
-→ `lib/proxy_ips`. **No consul mount** — consul is gone from the stack.
+→ `lib/proxy_ips`. There is no consul mount.
+
+## Branding
+
+The branding directory is seeded from the pinned controller image: whatever
+the image ships in `controller_image_branding_source` (default
+`/usr/src/app/public/custom` — the stylesheet, its map, the login image) is
+copied out with `docker cp` once the portal is up, and only for names the
+branding directory does not already have.
+
+This is not cosmetic. The production layout links
+`/assets/custom/application.css` unconditionally, and that path *is* the
+mount — so an empty branding directory masks whatever the image had there
+and the portal comes up unstyled, 404ing on its own stylesheet. Copying
+per-file rather than per-directory means an operator's own
+`logo-login.png` survives while the stylesheet is still filled in. Set
+`controller_seed_default_branding: false` to own the directory outright.
 
 ## Postgres
 
-`geerlingguy.postgresql` is applied by the play, not by this role. The play
-must set (Wave 4J owns the wiring; these are the values this role's
-`DATABASE_URL` assumes):
+`geerlingguy.postgresql` is applied by `playbooks/site.yml`'s "Controller
+infrastructure" play, not by this role. These are the values this role's
+`DATABASE_URL` assumes, as that play sets them (`postgresql_version` is the
+global pin in `versions.yml`, 17; the platform paths come from
+`playbooks/vars/Ubuntu-26.yml`):
 
 ```yaml
-postgresql_version: "{{ postgresql_version }}"        # versions.yml, 17
 postgresql_global_config_options:
+  # ... plus unix_socket_directories and log_directory
   - option: listen_addresses
-    value: '127.0.0.1'                                # geerlingguy defaults to '*'
+    value: 127.0.0.1                                  # geerlingguy defaults to '*'
 postgresql_databases:
-  - name: cloudportal
-    owner: computestacks
+  - name: "{{ controller_postgres_database | default('cloudportal') }}"
+    owner: "{{ controller_postgres_user | default('computestacks') }}"
 postgresql_users:
-  - name: computestacks
+  - name: "{{ controller_postgres_user | default('computestacks') }}"
     password: "{{ postgres_password }}"
     role_attr_flags: SUPERUSER
 ```
 
-geerlingguy's default `pg_hba` entries already match v1's: `peer` for local
-socket connections, `md5` for `127.0.0.1/32` — which is exactly what
-`DATABASE_URL` and `cstacks database-backup` respectively need.
+geerlingguy's default `pg_hba` entries — `peer` for local socket connections,
+`md5` for `127.0.0.1/32` — are exactly what `DATABASE_URL` and
+`cstacks database-backup` respectively need.
 
 **What geerlingguy does not create, and this role does** (`tasks/
-postgres.yml`): v1's peer-auth `root` SUPERUSER role and a `root` database.
+postgres.yml`): the peer-auth `root` SUPERUSER role and a `root` database.
 `pg_dump` with no `-d` connects to a database named after the connecting role,
 so without them `cstacks database-backup` fails — and under `set -e` that
 takes `cstacks upgrade` down with it, before it ever migrates.
@@ -186,9 +222,8 @@ application.
 Attach mode runs `tasks/attach_prep.yml` against an existing, v1-built
 controller; `tasks/main.yml` never runs there.
 
-> **Entry point, and a bug in the current `add-region.yml` (Wave 4J owns that
-> file).** `tasks_from:` is a parameter of `include_role` / `import_role`, not
-> of a play's `roles:` keyword. `playbooks/add-region.yml` currently says
+> **Entry point.** `tasks_from:` is a parameter of `include_role` /
+> `import_role`, not of a play's `roles:` keyword. Written as
 >
 > ```yaml
 >   roles:
@@ -196,12 +231,22 @@ controller; `tasks/main.yml` never runs there.
 >       tasks_from: attach_prep
 > ```
 >
-> which ansible silently ignores — it runs `tasks/main.yml`, the greenfield
-> converge, against a live controller (verified against ansible-core; the
-> `tasks_from` value just becomes an unused role variable). The correct form
-> is `include_role` with `tasks_from`, as in `tests/wave3g.yml`. Until that is
-> fixed, `tasks/main.yml`'s first task asserts `not existing_env` and fails
-> loudly with the corrected snippet rather than converging.
+> ansible silently ignores it and runs `tasks/main.yml`, the greenfield
+> converge, against a live controller (the `tasks_from` value just becomes an
+> unused role variable). `playbooks/add-region.yml` therefore calls it as a
+> task:
+>
+> ```yaml
+>   tasks:
+>     - name: Prepare the existing controller for a new region
+>       ansible.builtin.include_role:
+>         name: controller
+>         tasks_from: attach_prep
+> ```
+>
+> As a guard against any calling play that gets this wrong, `tasks/main.yml`'s
+> first task asserts `not existing_env` and fails loudly with the corrected
+> snippet rather than converging.
 
 Assert first, then act:
 
@@ -296,53 +341,10 @@ client certificate is read once at boot. Notified by the environment file, the
 `cstacks` script, the docker client certificate checksum, and attach mode's
 appends.
 
-The certificate watch is the fix for the issue Wave 1B flagged: `roles/vault`
-re-issues `/etc/computestacks/certificates/docker/cert.pem` as it nears
+The certificate watch exists because `roles/vault` re-issues `/etc/computestacks/certificates/docker/cert.pem` as it nears
 expiry, and nothing else would notice — the controller would keep dialing
 every node's dockerd with an expired client certificate until someone
 restarted the portal by hand.
-
-## Deviations from v1 (`roles/controller`, `roles/controller_postgres`)
-
-* **`SECRET_KEY_BASE` / `USER_AUTH_SECRET` are never generated.** v1 ran
-  `openssl rand -hex 64` when they were blank, which silently produced a
-  different key on a re-run against a wiped `/etc/default/computestacks` and
-  destroyed every encrypted column. Both are asserted inputs now
-  (docs/contracts.md rule 8).
-* **The wildcard certificates are generate-once, per domain.** v1
-  regenerated its single certificate on every run; under v2's convergent rule
-  that would rotate the load balancer shared certificate fleet-wide on every
-  converge. See below for why "per domain" is the other half of that.
-* **`bootstrap-app` is gone.** v1's generated `bootstrap.rake` embedded ruby
-  in a Jinja template and drifted from the controller's models. Seeding is now
-  `cstacks seed` → `rake bootstrap:apply[<manifest>]` against a versioned
-  schema.
-* **No consul mount, no `/root/.consul` directory, no consul token slurp.**
-* **The branding CDN downloads are gone.** v1 fetched `application.css`, its
-  map and a login image from the v1 CDN on every bootstrap — unpinned
-  third-party content pulled into the portal's asset path. The same files are
-  copied out of the pinned controller image instead (`controller_image_branding_source`,
-  default `/usr/src/app/public/custom`), once the portal is up and only for
-  names the branding directory does not already have.
-
-  This is not cosmetic. The production layout links
-  `/assets/custom/application.css` unconditionally, and that path *is* the
-  mount — so an empty branding directory masks whatever the image had there
-  and the portal comes up unstyled, 404ing on its own stylesheet. Copying
-  per-file rather than per-directory means an operator's own
-  `logo-login.png` survives while the stylesheet is still filled in. Set
-  `controller_seed_default_branding: false` to own the directory outright.
-* **`/computestacks-mnt` is not created here.** v1 created the registry data
-  root on the *controller*, where nothing uses it; `roles/registry` creates it
-  on the registry host, where the registry containers bind-mount it.
-* **No `tags: ['never', 'bootstrap', 'addnode']` gating.** The role is
-  convergent by default; attach mode is a separate task file rather than a tag.
-* **`cstacks` is `set -euo pipefail` and shellcheck-clean**, builds its docker
-  arguments once, and gained `stop`, `seed`, `runner` and `migrate`. `console`
-  and `test` no longer force `-it` when there is no terminal.
-* The cloudflare real-IP cron script is not ported: `ProxyIpList` in the
-  controller (9.7) now owns the Cloudflare and Bunny address lists, refreshes
-  them itself, and persists them in the `proxy_ips` mount.
 
 ## Requirements
 

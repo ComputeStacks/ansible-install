@@ -373,6 +373,8 @@ docs/
 * [`docs/install.md`](docs/install.md) — step-by-step greenfield install.
 * [`docs/attach-mode.md`](docs/attach-mode.md) — adding a region to an
   existing v1 environment.
+* [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what changed from
+  the v1 playbooks, role by role.
 * [`docs/acme-providers.md`](docs/acme-providers.md) — ACME challenge methods
   and the DNS-01 provider matrix.
 * [`docs/automation.md`](docs/automation.md) — driving these playbooks from

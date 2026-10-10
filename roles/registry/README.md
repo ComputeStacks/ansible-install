@@ -1,6 +1,16 @@
 # registry
 
-**Owner: Wave 3G.** `hosts: registry`.
+Prepares the container registry host's filesystem for the registry containers
+the controller creates over SSH.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Registry host" (after `acme_web`) | `registry` |
+| `add-region.yml`, `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** not run; attach mode does not touch the registry host.
+**Requires:** `geerlingguy.docker`, `docker_config` and `acme_web` on this host
+(earlier plays of `site.yml`).
 
 ## Purpose
 
@@ -10,8 +20,6 @@ container registry, the controller opens an SSH connection to this host and
 creates the container through DockerSSH
 (`app/models/container_registry.rb#docker_client`). Everything this role does
 is prepare the filesystem those containers bind-mount.
-
-There is no v1 counterpart — v1 left the registry host's contract unwritten.
 
 ## What it does
 
@@ -31,10 +39,10 @@ There is no v1 counterpart — v1 left the registry host's contract unwritten.
 | Root `authorized_keys` entry | `roles/ssh_trust` | The controller's **application** key, `/etc/computestacks/.ssh/id_ed25519.pub` (`roles/controller`), plus its root key. Control-plane edge #19. |
 | TLS certificate | `roles/acme_web` | `--install-cert` writes `fullchain.pem`/`privkey.pem` into `ssl/`, and its `--reloadcmd` hook refreshes them and restarts running registry containers on renewal. |
 | Firewall | `roles/firewall` | `cs_ports.tenant_https` plus `cs_ports.tenant_port_begin`–`tenant_port_end` (10000–50000), the range the controller allocates registry ports from. SSH from the controller rides the global ssh accept. |
-| Settings | manifest (`controller_seed`, Wave 4I) | `registry_node` (this host's IP), `registry_base_url` (`cs_registry_domain`), `registry_ssh_port` (string, default `"22"`), `cr_le` (`cs_registry_domain`), and the `updated_cr_cert` feature — which is what makes the controller mount `/opt/container_registry/ssl` and read `fullchain.pem`/`privkey.pem` rather than the two legacy certificate layouts. |
+| Settings | manifest (`controller_seed`) | `registry_node` (this host's IP), `registry_base_url` (`cs_registry_domain`), `registry_ssh_port` (string, default `"22"`), `cr_le` (`cs_registry_domain`), and the `updated_cr_cert` feature — which is what makes the controller mount `/opt/container_registry/ssl` and read `fullchain.pem`/`privkey.pem` rather than the two legacy certificate layouts. |
 | Registry image | the controller | Hard-coded as `cmptstks/registry:latest` in the controller source. It is not pinned or pre-pulled here: the provisioner does not choose it, and pulling it would only pre-warm a cache. |
 
-`validate` (Wave 4J) checks the controller → registry SSH path.
+`validate` checks the controller → registry SSH path (its `ssh` check).
 
 ## Variables
 

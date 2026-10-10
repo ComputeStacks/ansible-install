@@ -1,13 +1,21 @@
 # node_observability
 
-**Owner:** Wave 2D. **Hosts:** `nodes`.
-
 The node-side observability containers — `cadvisor` (container metrics, scraped
 by the metrics host) and `fluentd` (tenant logs, shipped to loki) — plus the
 container image preloads the controller expects to find on a node.
 
-`node-exporter` is **not** here: it is applied fleet-wide by a community role in
-the all-hosts play.
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Node base stack" | `nodes` |
+| `add-region.yml` | "New node base stack" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only. **Requires:** docker on the node
+(`geerlingguy.docker` and `docker_config`, site.yml's "Docker hosts" play);
+`community.docker`.
+
+`node-exporter` is **not** here: `roles/node_exporter` installs it on every
+host in the "Base system" play.
 
 ## Container names are a contract
 
@@ -20,9 +28,8 @@ alerts on every node. Do not rename them.
 
 Both units bake their pinned image tag into `ExecStart`, so bumping
 `cadvisor_image` / `fluentd_loki_image` in `versions.yml` re-renders the unit
-and the handler restarts the container — and *only* then. v1 restarted cadvisor
-on every converge and fluentd on every converge after the first, dropping
-buffered log lines each run.
+and the handler restarts the container — and *only* then, so a converge never
+drops fluentd's buffered log lines.
 
 `fluentd` gets `RestartSec=30`: every tenant container on the node logs through
 it, and the whole fleet restarts at once, so a crash loop must back off rather
@@ -61,11 +68,12 @@ from metrics addresses) rather than in the bind, and the bind stays permissive
 so both scrape paths work. Set `node_observability_cadvisor_listen_ip` to
 `{{ primary_ip }}` in an environment that never uses tailscale.
 
-**Cross-wave note for the firewall role:** with the tailnet scrape path in use,
-the node's accept for `cs_ports.cadvisor` (and `cs_ports.haproxy_stats`) needs
-the same treatment as the 8500 rule — an `iifname "tailscale0"` accept when the
-metrics host is tailnet-joined. An accept keyed only on the metrics host's
-`primary_ip`/`public_ip` drops a scrape that arrives over `tailscale0`.
+The `firewall` role's accepts for `cs_ports.cadvisor` (and
+`cs_ports.haproxy_stats`) therefore carry an `iifname "tailscale0"` accept
+alongside the metrics host's addresses whenever both ends are tailnet members:
+an accept keyed only on the metrics host's `primary_ip`/`public_ip` would drop
+a scrape that arrives over `tailscale0` (see `roles/firewall/README.md`,
+"Pairwise accepts").
 
 ## Loki endpoint (site-scoped)
 
@@ -83,14 +91,11 @@ never a gathered fact, per contracts.md rule 1) only when both are empty. All
 three maps are the frozen spellings from `playbooks/group_vars/all/sites.yml`,
 consumed here and re-derived nowhere; they reference `hostvars` and so are
 **local reads only** (contracts.md hard rule 10), always keyed by this node's
-own `cs_site`. There is no `node_observability_metrics_group` any more — those
-maps are built from a literal `groups['metrics']`, so the indirection named a
-group nobody read.
+own `cs_site`. The maps are built from a literal `groups['metrics']`.
 
 A **single-site inventory sets `site` nowhere**, every host lands in the site
-called `default`, each map holds one key, and the endpoint resolves to exactly
-what `cs_metrics_domain` / `groups['metrics'] | first` produced before sites
-existed.
+called `default`, each map holds one key, and the endpoint is that one metrics
+host's.
 
 `tasks/main.yml` asserts that exactly one metrics host declares this node's
 site. `preflight` already checks the whole inventory; the role-local backstop
@@ -118,12 +123,8 @@ world-readable unit file nor in a `--diff` run's output.
 
 `borg_image`, `bastion_image`, `xtrabackup24_image`, `xtrabackup80_image` — all
 pinned in `versions.yml`, pulled with `pull: not_present` so a converge only
-moves an image when the pin moves.
-
-v1's `preload_images.yml` had the two xtrabackup task names swapped against
-their tags ("Pull image xtrabackup 8" pulled `2.4`, and vice versa). Both were
-pulled, so nothing broke, but the intent was unreadable. v2 pulls by the pinned
-variable, so the tag and the name cannot drift apart.
+moves an image when the pin moves. Each is pulled by its pinned variable, so a
+task's name and the tag it pulls cannot drift apart.
 
 ## Variables
 
@@ -154,5 +155,4 @@ role never reads them directly.
 
 The cadvisor container is passed `-listen_ip` and `-port={{ cs_ports.cadvisor }}`
 so the address and port the metrics host scrapes come from the role variable and
-the ports contract rather than from cadvisor's compiled-in defaults (v1 relied on
-the defaults matching).
+the ports contract rather than from cadvisor's compiled-in defaults.

@@ -134,9 +134,8 @@ preflight_app_zone_labels: >-
   {{ ((cs_app_zone | default('')) | string).split('.') | length }}
 
 # Attach mode, decided by the CONTROLLER's flag and not by the host this role
-# happens to be running against — character for character the predicate
-# roles/ssh_trust/defaults/main.yml uses. `| first` is the single-controller
-# guarantee preflight asserts a few tasks earlier (docs/contracts.md rule 2).
+# happens to be running against. `| first` is the single-controller guarantee
+# preflight asserts a few tasks earlier (docs/contracts.md rule 2).
 preflight_attach_mode: >-
   {{ hostvars[groups['controller'] | first].existing_env | default(false) | bool }}
 

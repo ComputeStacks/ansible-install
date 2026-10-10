@@ -2,7 +2,7 @@
 # Curated from v1 roles/base/tasks/debian/packages.yml. Distro packages ride
 # unattended-upgrades (below) — nothing here is version-pinned.
 #
-# Dropped from v1's list (see README.md "Deviations from v1" for why):
+# Dropped from v1's list (see docs/migrating-from-v1.md, common, for why):
 #   linux-headers-amd64 (Debian-specific package name), apt-transport-https
 #   (no-op since APT 1.5+), gnupg-agent (merged into gnupg), pass (unrelated
 #   to server operations), nfs-common (NFS backend stripped from v2 — SSH
@@ -44,7 +44,7 @@ common_conflicting_packages:
 # Reboot the host when /var/run/reboot-required exists (e.g. a kernel update
 # pulled in by package install removed the running kernel's /lib/modules,
 # which then breaks dockerd's modprobe of br_netfilter/nf_nat/etc — see
-# README.md "Deviations from v1"). Set false to disable entirely; either way
+# README.md "Reboot right after package install"). Set false to disable entirely; either way
 # this NEVER fires on existing_env hosts, nor on a LIVE node (one with tenant
 # containers -- roles/node_upgrade detect_live), which only warns: its reboot
 # is taken by `make upgrade-docker` in a maintenance window.

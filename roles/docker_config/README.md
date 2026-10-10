@@ -1,6 +1,18 @@
 # docker_config
 
-**Owner: Wave 1B.**
+Owns `/etc/docker/daemon.json` and the `docker login` credentials on every
+docker host; the engine itself comes from `geerlingguy.docker`.
+
+| Runs in | Play | Hosts |
+| --- | --- | --- |
+| `site.yml` | "Docker hosts" | `controller:metrics:registry:nodes` |
+| `add-region.yml` | "New node docker" | `nodes` (the new node) |
+| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+
+**Attach mode:** new node only; never runs on an existing shared host.
+**Requires:** `geerlingguy.docker` earlier in the same play (skipped on a live
+node whose docker is deferred — this role still runs there and only reloads
+dockerd); `community.docker`.
 
 ## Purpose
 
@@ -10,7 +22,7 @@ registry and nodes — and the `docker login` credentials in
 by `geerlingguy.docker` (pinned in `requirements.yml`), and the node-only
 TCP/TLS listener lives in `roles/docker_tls`.
 
-Values ported from v1's `roles/docker`, one of them retuned:
+The daemon settings:
 
 ```json
 {
@@ -31,9 +43,9 @@ path returns early when live restore is enabled and containers are running — i
 leaves them alone rather than stopping them, so the budget is never spent. The
 value is here for the operator who sets `docker_config_live_restore: false`.
 
-v1 set 120. That number could never be honored: docker's packaged unit sets no
-`TimeoutStopSec`, so systemd's `DefaultTimeoutStopSec` of 90s is the real
-ceiling and would kill dockerd first. 60 fits inside it with headroom for the
+Why 60: docker's packaged unit sets no `TimeoutStopSec`, so systemd's
+`DefaultTimeoutStopSec` of 90s is the real ceiling and would kill dockerd
+first. 60 fits inside it with headroom for the
 daemon's own teardown. Anything past ~85 needs a `TimeoutStopSec` drop-in for
 `docker.service`, which this role does not own — `docker_tls` is node-only, so
 that would mean a new unit-file override on every docker host to serve a path
@@ -121,8 +133,9 @@ Two owners of one file is a config-flap, so the play must leave that var empty
     - docker_config
 ```
 
-Wave 4J wires this into `site.yml`/`add-region.yml` (this role does not edit
-either playbook). Other geerlingguy vars worth knowing:
+`playbooks/site.yml` ("Docker hosts") and `playbooks/add-region.yml` ("New
+node docker") set exactly these, plus the pinned `docker_packages` below.
+Other geerlingguy vars worth knowing:
 
 | geerlingguy var | Wanted value | Why |
 | --- | --- | --- |
@@ -140,41 +153,23 @@ either playbook). Other geerlingguy vars worth knowing:
 | `docker_config_dir` | `/etc/docker` | |
 | `docker_config_live_restore` | `true` | |
 | `docker_config_shutdown_timeout` | `60` | Seconds. Dormant while `live_restore` is on. Keep under ~85: systemd's 90s `DefaultTimeoutStopSec` kills dockerd first. |
-| `docker_config_registry_mirrors` | `[]` | v1 passed a `--registry-mirror` ExecStart flag; `daemon.json` is reloadable and keeps the node ExecStart override clean. |
+| `docker_config_registry_mirrors` | `[]` | In `daemon.json` rather than an ExecStart flag: it is reloadable, and keeps the node ExecStart override clean. |
 | `docker_config_extra_options` | `{}` | Merged last. **Only SIGHUP-reloadable options** — this role never restarts dockerd. Anything else needs a restart path added here first. |
 | `docker_config_registries` | `{{ cs_registry_logins }}` | The composed `{registry, username, password}` list; the operator-facing name is `docker_registries`. Defaults to `[]` when the composition file is absent, so the role still works standalone. |
 
-## ⚠ v1's post-install reboot (NOT ported)
+## No reboot here
 
-v1's `roles/docker/tasks/install.yml:63-82` rebooted every host right after
-installing docker, on this comment:
-
-> 2023-09: Docker is currently failing to start due to iptable/nftable issues.
-> A reboot seems to resolve this issue.
-
-It was added in commit `dd44c4e` ("Move our node agent into a container. Docker
-bugfix on debian 12") — i.e. it is a Debian 12 / bookworm-era workaround from
-the same run that installs the OS packages. The plausible mechanism is not
-docker-specific: the installer does a full apt upgrade earlier in the run, which
-can install a **new kernel** and remove the running kernel's
-`/lib/modules/$(uname -r)` tree; `modprobe` of `br_netfilter` / `nf_nat` /
-`ip_tables` then fails and dockerd aborts while setting up its iptables chains.
-A reboot into the new kernel fixes it. (The other candidate — iptables-nft
-alternative switching — does not normally need a reboot.)
-
-**Decision: v2 does not reboot.** It is a blunt instrument, it is fatal in
-attach mode (rebooting an existing production controller/metrics host), and the
-root cause belongs to whoever upgrades packages. Ubuntu 26.04 ships nftables
-with `iptables-nft` as the default alternative and docker-ce supports it
-directly, so the nft half of the theory does not apply.
-
-**Flagged for Wave 1A (`common`) / Wave 4J:** the kernel-upgrade hazard is real
-and unverified on 26.04. `common` should handle `reboot-if-required`
-(`/var/run/reboot-required`) *before* the docker play, on **new hosts only**
-(never on `existing_env: true` hosts), which removes the hazard properly. If a
-greenfield 26.04 converge is seen to fail with dockerd unable to create its
-iptables chains, that is this issue and the reboot-first fix is the answer — not
-a reboot bolted back onto this role.
+This role never reboots a host. A fresh package install can pull in a new
+kernel and remove the running kernel's `/lib/modules/$(uname -r)` tree;
+`modprobe` of `br_netfilter` / `nf_nat` / `ip_tables` then fails and dockerd
+aborts while setting up its iptables chains. That hazard is handled earlier,
+by `roles/common`'s reboot-if-required check right after package install —
+before docker is installed, never on an `existing_env` host and never on a
+live node (`roles/common/README.md`). Ubuntu 26.04 ships nftables with
+`iptables-nft` as the default alternative and docker-ce supports it directly,
+so no iptables-alternative switching is involved. If a greenfield converge is
+seen to fail with dockerd unable to create its iptables chains, look at that
+reboot check — not at a reboot bolted onto this role.
 
 ## Requirements
 

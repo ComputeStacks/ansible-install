@@ -11,6 +11,6 @@ loki_data_dir: /var/lib/loki
 # Loopback-only, role-internal port (analogous to vault_listen_port /
 # metrics_prometheus_internal_port -- see roles/vault/README.md "Notes on
 # the contracts"). Exposed to the controller/node fluentd shippers only via
-# the nginx vhost Wave 3G's acme_web role builds at cs_ports.metrics_loki
-# (3102); this is the interface it builds against.
+# the nginx vhost the acme_web role builds at cs_ports.metrics_loki (3102);
+# this is the upstream it proxies to.
 loki_internal_port: 3100
