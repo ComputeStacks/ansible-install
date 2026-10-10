@@ -2,7 +2,7 @@
 
 **Owner:** Wave 2D. **Hosts:** `nodes`.
 
-Installs the ComputeStacks node agent (cs-agent v3.3.0) from the upstream apt
+Installs the ComputeStacks node agent (cs-agent, pinned in `versions.yml`) from the upstream apt
 repository, renders `/etc/computestacks/agent.yml`, enrolls the node against
 the controller, and authorizes the node's borg key on the shared backup
 server.
@@ -142,7 +142,7 @@ containers.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `cs_agent_apt_version` | versions.yml (`3.3.0`) | Pinned apt package version. |
+| `cs_agent_apt_version` | versions.yml (`3.4.0`) | Pinned apt package version. |
 | `cs_agent_apt_repo` / `cs_agent_apt_key_url` | versions.yml | Repository and signing key. |
 | `cs_agent_listen_addr` | derived | Metadata front-door bind address (see above). |
 | `cs_agent_admin_token_hash` | `""` | Filled by enrollment; pre-seeded from the existing file. |

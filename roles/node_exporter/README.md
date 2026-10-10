@@ -41,7 +41,7 @@ length).
 | --- | --- | --- |
 | `node_exporter_package` | `prometheus-node-exporter` | Distro package name. |
 | `node_exporter_service` | `prometheus-node-exporter` | Unit name. |
-| `node_exporter_apt_version` | `""` (`versions.yml`) | Empty installs whatever the archive offers; set an exact apt version to pin. See the VERIFY note in `versions.yml`. |
+| `node_exporter_apt_version` | `versions.yml` | Exact apt version. Empty installs whatever the archive offers. |
 | `node_exporter_hold_package` | `true` | `apt-mark hold` equivalent. Released before each install, so a version change still rolls through on a rerun. |
 
 ## Deviations from v1 (`roles/node_exporter`)

@@ -39,16 +39,14 @@ anything else in the environment (RFC 1918, at least a `/28`, `/22` is the
 usual size).
 
 Nodes also need a **second, blank disk** for docker and containerd: a whole
-device with no partition table and no filesystem, sized for every image,
-container layer and volume the node will hold. Docker 29 keeps images and
-container writable layers in containerd's image store under
-`/var/lib/containerd`, not `/var/lib/docker`, so on a single disk they fill
-the root filesystem. `roles/node_storage` formats it XFS with project quotas,
-mounts it at `/var/lib/docker-data` and bind-mounts it over both directories
-before docker is installed. Name it with `docker_data_device` (below).
-Preflight refuses any device that is not provably blank — or already set up
-by this role — before any host is changed, and it never formats anything
-else.
+device with no partition table, no filesystem and nothing in fstab, sized for
+every image, container layer and volume the node will hold. The provisioner
+formats it and mounts it before docker is installed; you name it with
+`docker_data_device` (§4).
+
+[requirements.md](requirements.md) has the sizing per host, the node disk
+layout and what makes the provisioner refuse a disk, and the ports a provider
+firewall must allow.
 
 ## 2. Prepare the control machine
 
@@ -313,7 +311,8 @@ manifest, enrolls every node and runs the backfills. Watch for these
 checkpoints:
 
 1. **Preflight** — fails immediately on a missing node var, a duplicate `az`,
-   a short `secret_key_base` or a non-Ubuntu host. Nothing has been changed at
+   a short `secret_key_base`, a non-Ubuntu host or a node data disk that is
+   not blank. Nothing has been changed at
    that point.
 2. **Controller infrastructure** — vault initializes and issues the docker
    PKI. Nothing to do by hand: a converge unseals a sealed vault on its way

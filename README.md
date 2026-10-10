@@ -47,26 +47,28 @@ a `requirements.yml` bump.
 
 The `Makefile` is a thin wrapper around exactly these commands and the
 playbook runs below — `make deps`, `make site ENV=prod`,
-`make add-region ENV=prod`, `make validate ENV=prod`, `make lint`,
+`make add-region ENV=prod`, `make upgrade-docker ENV=prod`,
+`make validate ENV=prod`, `make lint`,
 `make check`. Every playbook target requires `ENV` (there is no default
 inventory) and honors `LIMIT=`, `ARGS=` and `VAULT=`; `make help` lists them.
 Nothing in this README depends on it.
 
 **Managed hosts.** Ubuntu 26.04 LTS, amd64, with root SSH from the control
-machine and a resolvable, unique, single-word hostname (`node101`, not
+machine and a unique, single-word hostname (`node101`, not
 `node101.example.com`). Nothing else — the playbooks install their own
 prerequisites. Hosts in an *existing* v1 environment are the exception: they
-are Debian, they are flagged `existing_env: true`, and attach mode only ever
+run Debian, they are flagged `existing_env: true`, and attach mode only ever
 adds to them.
 
-**Nodes need a second, blank disk** — a whole device, no partition table, no
-filesystem, sized for every image, container layer and volume the node will
-hold — named by `docker_data_device`. `roles/node_storage` formats it XFS
-with project quotas and bind-mounts it over `/var/lib/docker` and
-`/var/lib/containerd` before docker is installed; docker 29 keeps images and
-container layers under `/var/lib/containerd`, so a single disk fills `/`.
-Preflight refuses any device that is not provably blank (or already set up by
-this role) before any host is changed (docs/install.md §1).
+**Nodes need a second, blank disk**, named by `docker_data_device`.
+`roles/node_storage` formats it XFS with project quotas and puts both
+`/var/lib/docker` and `/var/lib/containerd` on it before docker is installed;
+docker 29 keeps images and container layers under `/var/lib/containerd`, so
+a node with one disk fills `/`. Preflight refuses any device it cannot prove
+is blank (or already set up by this role) before any host is changed.
+
+[`docs/requirements.md`](docs/requirements.md) has the full list: sizing per
+host, the node disk layout, the ports a provider firewall must allow, and DNS.
 
 **DNS.** The portal, metrics and registry domains must resolve to their hosts
 before the run, because the TLS certificates are issued during it. Every
@@ -184,7 +186,8 @@ ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 The play order is a contract, not a convenience (`docs/contracts.md`):
 
 ```
-preflight -> base system -> tailscale -> nameservers -> docker
+preflight -> base system -> tailscale -> nameservers
+  -> node data disk -> docker
   -> controller (vault, postgres, redis, nginx/acme, portal)
   -> node docker TLS -> metrics -> registry -> backup -> node base stack
   -> firewalls -> ssh trust
@@ -215,7 +218,7 @@ node on its own, and `--limit` — with the caveat below.
 ## Validating
 
 The last play asserts the things that otherwise fail silently: services and
-containers up, the controller reaching each node's agent, the prometheus
+containers up, each node's docker and containerd state on its data disk, the controller reaching each node's agent, the prometheus
 label contract answering the controller's own placement query, borg reachable
 from every node, the portal reachable from every node, root SSH from the
 controller, and the tenant zone resolving on every nameserver. Run it on its
@@ -338,20 +341,25 @@ is not a recoverable environment.
 
 ```
 ansible.cfg                     roles_path, collections_path, ssh settings
-Makefile                        thin wrapper: deps, site, add-region, validate, lint, check
+Makefile                        thin wrapper: deps, site, add-region, upgrade-docker, validate, lint, check
 requirements.yml                pinned galaxy roles and collections
 playbooks/site.yml              greenfield converge
 playbooks/add-region.yml        attach mode
+playbooks/upgrade-docker.yml    docker upgrades on the nodes, one at a time
+playbooks/unseal.yml            unseal the controller's vault and nothing else
 playbooks/group_vars/all/       versions.yml (pins) and ports.yml (the ports contract)
 playbooks/vars/                 platform vars a pinned galaxy role is missing
 inventories/example/            copy this -- two sites, the working reference
 roles/                          one README.md per role: what it owns and why
 tests/roles.yml                 per-role syntax harness
 tests/site_contract.yml         renders the frozen site variables on every host
+tests/*.yml                     pure filter and render tests run by `make check`
 tests/fixtures/single-site/     frozen single-site inventory: the regression baseline
 docs/
 ```
 
+* [`docs/requirements.md`](docs/requirements.md) — what every host must look
+  like before the first run, including the node disk layout.
 * [`docs/install.md`](docs/install.md) — step-by-step greenfield install.
 * [`docs/attach-mode.md`](docs/attach-mode.md) — adding a region to an
   existing v1 environment.
