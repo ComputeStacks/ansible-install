@@ -1,6 +1,6 @@
 ---
 # Pinned external dependencies. Bump deliberately; never float.
-# NOTE (wave owners): verify each pin still resolves with
+# When bumping, verify each pin still resolves with
 # `ansible-galaxy install -r requirements.yml` and adjust to the latest
 # release of the same major if a pin is unavailable.
 collections:

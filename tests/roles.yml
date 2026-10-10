@@ -6,14 +6,11 @@
 #
 # It exists for two things the two real playbooks cannot cover:
 #
-#   1. every role in isolation, so a role that no play happens to reach in a
-#      given wave still gets parsed;
+#   1. every role in isolation, so a role that no play happens to reach
+#      still gets parsed;
 #   2. every reusable task-file entry point (`tasks_from:`), including the
 #      ones only another role includes — a change that breaks one of those
 #      would otherwise only surface at converge time.
-#
-# It replaces the eight per-wave harnesses (tests/wave1a.yml … wave4i.yml)
-# that existed while site.yml was still a skeleton.
 #
 # `tests/group_vars` is a SYMLINK to `playbooks/group_vars`, and it has to be.
 #

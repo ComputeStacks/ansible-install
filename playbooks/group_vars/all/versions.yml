@@ -2,8 +2,8 @@
 # Every externally-sourced version, in one place. Nothing floats except the
 # controller minor tag, which is a deliberate rolling release channel.
 #
-# Items marked VERIFY must be confirmed by the owning wave before its DoD is
-# met (check the named source), then the marker removed.
+# Each pin notes the date and source it was verified against. After a bump,
+# `make check-pins` confirms every pin exists upstream.
 
 # Controller (rolling minor line — `cstacks upgrade` pulls latest patch)
 controller_image_repo: "ghcr.io/computestacks/controller"
@@ -59,7 +59,7 @@ xtrabackup24_image: "ghcr.io/computestacks/cs-docker-xtrabackup:2.4"
 xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
 
 # Metrics / logging stack (containers, exact tags).
-# Verified 2026-08-28 (wave E): the v2.53 LTS line went EOL 2025-07-31 and its
+# Verified 2026-08-28: the v2.53 LTS line went EOL 2025-07-31 and its
 # successor LTS (3.5) is also now past its 2026-07-31 support window --
 # Prometheus's currently-active LTS line is 3.13 (2026-07-01 to 2027-07-31),
 # latest patch v3.13.2 (docker hub prom/prometheus, confirmed present,
@@ -71,28 +71,28 @@ xtrabackup80_image: "ghcr.io/computestacks/cs-docker-xtrabackup:8.0"
 # new default web UI and default-on UTF-8 metric/label names, neither of
 # which this repo's config relies on.
 prometheus_image: "prom/prometheus:v3.13.2"
-# Verified 2026-08-28 (wave E): v0.34.0 is the latest stable tag on Docker Hub
+# Verified 2026-08-28: v0.34.0 is the latest stable tag on Docker Hub
 # (prom/alertmanager); alertmanager does not publish a separate LTS line.
 alertmanager_image: "prom/alertmanager:v0.34.0"
 loki_image: "grafana/loki:2.9.10"                  # fleet parity; controller queries Loki API v1
-# Verified 2026-08-28 (wave D): the tag exists on Docker Hub with a linux/amd64
+# Verified 2026-08-28: the tag exists on Docker Hub with a linux/amd64
 # manifest. The image's tags track the Loki release line, so this stays pinned
 # EQUAL to loki_image — bump the two together, or the node ships with a plugin
 # built against a different Loki than the one receiving it. (2.9.17 is the
-# newest patch of the 2.9 line; wave E owns moving the line as a pair.)
+# newest patch of the 2.9 line; move the two as a pair.)
 fluentd_loki_image: "grafana/fluent-plugin-loki:2.9.10"
-# Verified 2026-08-28 (wave D): `v0.54.0` does NOT exist upstream — that line is
+# Verified 2026-08-28: `v0.54.0` does NOT exist upstream — that line is
 # published unprefixed (`0.54.0`) and only later releases carry the `v`. Pinned
 # to the newest release of the current line, which publishes both spellings and
 # has a linux/amd64 manifest (index sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe).
 cadvisor_image: "ghcr.io/google/cadvisor:v0.60.5"
 
 # Infra containers
-# Verified 2026-08-28 (wave B): latest 1.x release line; hashicorp/vault:1.21.4
+# Verified 2026-08-28: latest 1.x release line; hashicorp/vault:1.21.4
 # exists on Docker Hub (linux/amd64). Vault 2.0 is out but untested here and
 # this PKI is retired by cs-agent Phase 4 — stay on 1.x. v1 floated `latest`.
 vault_image: "hashicorp/vault:1.21.4"
-# Verified 2026-08-28 (wave G): nginx's even minor numbers are the stable
+# Verified 2026-08-28: nginx's even minor numbers are the stable
 # line, odd ones are mainline. 1.28 has been superseded — the current stable
 # line is 1.30 and its newest patch on Docker Hub (library/nginx) is 1.30.4,
 # updated 2026-08-25. Pinned to the exact patch rather than the 1.30 alias so
@@ -109,7 +109,7 @@ nginx_image: "nginx:1.30.4"
 # `make upgrade-docker ENV=<env>` in a maintenance window
 # (playbooks/upgrade-docker.yml, roles/node_upgrade/README.md).
 #
-# Verified 2026-08-28 (wave 4J), against
+# Verified 2026-08-28, against
 # download.docker.com/linux/ubuntu/dists/: Docker DOES publish a `resolute`
 # suite, and `resolute` IS Ubuntu 26.04 (Resolute Raccoon) -- 25.10 is
 # `questing`, which the mirror carries as its own separate suite. So no
@@ -132,14 +132,14 @@ docker_apt_packages:
 # node_exporter is the distro package on every host (the plan keeps it that
 # way), installed and held by roles/node_exporter. Empty means "whatever
 # 26.04 currently ships, then held"; a value pins the apt version.
-# Verified 2026-08-28 (wave 4J): the Ubuntu 26.04 archive exists and its
+# Verified 2026-08-28: the Ubuntu 26.04 archive exists and its
 # universe component ships prometheus-node-exporter 1.10.2-1, so there is a
 # real version string to pin (contracts rule 4). The role releases the hold
 # before installing and allows a downgrade, so editing this rolls through.
 node_exporter_apt_version: "1.10.2-1"
 
 # Packages
-# Verified 2026-08-28 (wave 4J): Ubuntu 26.04 'resolute' ships PostgreSQL 18
+# Verified 2026-08-28: Ubuntu 26.04 'resolute' ships PostgreSQL 18
 # (its `postgresql` metapackage is 18+290ubuntu1) and carries NO postgresql-17
 # in resolute, resolute-updates or resolute-backports. 17 is the major the
 # controller's schema and CI are validated against, so the fleet takes it from
@@ -158,7 +158,7 @@ pgdg_key_url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
 pgdg_key_checksum: "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76"
 # acme.sh: pinned release, installed from the checksummed tarball below,
 # self-upgrade pinned off.
-# Verified 2026-08-28 (wave G): 3.1.4 is the latest upstream release
+# Verified 2026-08-28: 3.1.4 is the latest upstream release
 # (acmesh-official/acme.sh releases/latest). Note the tag carries NO leading
 # 'v' on the 3.x line, unlike the old v2.x tags -- the role downloads the
 # release tarball named by this string verbatim, so do not add one. The

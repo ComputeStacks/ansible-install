@@ -1,5 +1,5 @@
 ---
-# THE ports contract (frozen in Wave 0). Single source consumed by the
+# THE ports contract (docs/contracts.md rule 5). Single source consumed by the
 # firewall role, prometheus scrape/file_sd templates, nginx vhosts, agent.yml,
 # and the controller manifest. Derived from the control-plane graph in
 # docs/control-plane.md — change both together or neither.
