@@ -178,7 +178,7 @@ point and anything you add beside the NS records is occluded and never
 returned:
 
 ```
-<app_domain>.  300  IN  HTTPS  1 .
+<app_domain>.  14400  IN  HTTPS  1 .
 ```
 
 Keep the minimal ServiceMode form `1 .`; an `alpn=` parameter advertises

@@ -53,8 +53,9 @@ powerdns_manage_zone: true
 powerdns_manage_lb_records: true
 
 # TTL of all three records. Part of convergence: a record carrying another TTL
-# is rewritten.
-powerdns_lb_record_ttl: 300
+# is rewritten. Four hours: the records point at a node address that almost
+# never changes. Lower it ahead of a planned re-address or failover.
+powerdns_lb_record_ttl: 14400
 
 # The nodes whose records this run writes. site.yml: every node this repo is
 # building. add-region.yml: the new region's nodes (cs_new_nodes there too,

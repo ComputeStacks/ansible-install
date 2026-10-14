@@ -319,7 +319,7 @@ major"; they are unrelated running instances on different hosts.
 | `powerdns_manage_resolved` | true when `systemd-resolved` is present | Turn off resolved's stub listener and point `/etc/resolv.conf` at its upstream list, so pdns can bind port 53. Set false only if something else on the host already manages `/etc/resolv.conf` and has freed port 53. |
 | `powerdns_manage_zone` | `true` | Set `false` to skip `pdnsutil create-zone`. |
 | `powerdns_manage_lb_records` | `true` | Write each az's load balancer records into `cs_app_zone` (only with `dns_driver: powerdns`). Set it on the **nameservers** -- preflight and validate read it from ns_primary. |
-| `powerdns_lb_record_ttl` | `300` | TTL of the A, the wildcard CNAME and the marker. Part of convergence. |
+| `powerdns_lb_record_ttl` | `14400` | TTL of the A, the wildcard CNAME and the marker. Part of convergence. |
 | `powerdns_lb_records_nodes` | `"{{ cs_new_nodes \| default([]) }}"` | The nodes whose records a run writes. Role-internal: `site.yml` and `add-region.yml` both get the right set from `cs_new_nodes`. |
 | `powerdns_enable_dnsupdate` | `true` | Per-zone updates still require `tsig`/`allow-dnsupdate-from` zone metadata. |
 | `powerdns_postgresql_data_dir` / `_main_dir` / `_conf` / `_hba_conf` | distro paths under `/var/lib/postgresql/{{ postgresql_version }}` and `/etc/postgresql/{{ postgresql_version }}/main` | |

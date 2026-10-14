@@ -2,6 +2,10 @@
 
 ## October 14, 2026
 
+* **Load balancer records now default to a 4-hour TTL**
+  (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
+  TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to
+  keep the old value.
 * **Ubuntu's login clutter is gone.** Only the ComputeStacks banner and
   Ubuntu's "System restart required" notice print at login; the help links,
   sysinfo, ads, ESM/Pro notices and update counts are diverted out of

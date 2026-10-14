@@ -77,30 +77,30 @@
       - "usercontent.example.com.|3600|IN|SOA|ns1.example.com. hostmaster.usercontent.example.com. 7 10800 3600 604800 3600"
       - "usercontent.example.com.|3600|IN|NS|ns1.example.com."
       - "usercontent.example.com.|3600|IN|NS|ns2.example.com."
-      - "other.usercontent.example.com.|300|IN|A|192.0.2.200"
+      - "other.usercontent.example.com.|14400|IN|A|192.0.2.200"
       - "_acme-challenge.other.usercontent.example.com.|60|IN|TXT|\"token with spaces\""
     # lbt1's correct records, and the extra types at its apex the rules must
     # leave alone.
-    lbt1_a: "lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
-    lbt1_cname: "*.lb1.usercontent.example.com.|300|IN|CNAME|lb1.usercontent.example.com."
-    lbt1_marker: "_cs-lb.lb1.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
+    lbt1_a: "lb1.usercontent.example.com.|14400|IN|A|192.0.2.101"
+    lbt1_cname: "*.lb1.usercontent.example.com.|14400|IN|CNAME|lb1.usercontent.example.com."
+    lbt1_marker: "_cs-lb.lb1.usercontent.example.com.|14400|IN|TXT|\"owner=lbt1\""
     lbt1_apex_extras:
-      - "lb1.usercontent.example.com.|300|IN|AAAA|2001:db8::101"
-      - "lb1.usercontent.example.com.|300|IN|TXT|\"v=spf1 -all\""
-      - "lb1.usercontent.example.com.|300|IN|MX|10 mail.example.com."
+      - "lb1.usercontent.example.com.|14400|IN|AAAA|2001:db8::101"
+      - "lb1.usercontent.example.com.|14400|IN|TXT|\"v=spf1 -all\""
+      - "lb1.usercontent.example.com.|14400|IN|MX|10 mail.example.com."
     lbt1_create:
-      - {op: replace, name: lb1.usercontent.example.com., fqdn: lb1.usercontent.example.com., type: A, ttl: 300, contents: [192.0.2.101]}
+      - {op: replace, name: lb1.usercontent.example.com., fqdn: lb1.usercontent.example.com., type: A, ttl: 14400, contents: [192.0.2.101]}
       - op: replace
         name: "*.lb1.usercontent.example.com."
         fqdn: "*.lb1.usercontent.example.com."
         type: CNAME
-        ttl: 300
+        ttl: 14400
         contents: [lb1.usercontent.example.com.]
       - op: replace
         name: _cs-lb.lb1.usercontent.example.com.
         fqdn: _cs-lb.lb1.usercontent.example.com.
         type: TXT
-        ttl: 300
+        ttl: 14400
         contents: ['"owner=lbt1"']
     # The same three in the relative style (PowerDNS 4.x).
     lbt1_create_relative:
@@ -195,8 +195,8 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.99"
-          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+          - "lb1.usercontent.example.com.|14400|IN|A|192.0.2.99"
+          - "lb1.usercontent.example.com.|14400|IN|A|192.0.2.101"
         powerdns_lb_zone_listing: >-
           {{ (lbt_base + [lbt1_cname, lbt1_marker] + lbt1_apex_extras + powerdns_lbt_extra)
              | map('replace', '|', lbt_tab) | list }}
@@ -218,7 +218,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "lb1.usercontent.example.com.|300|IN|A|192.0.2.99"
+          - "lb1.usercontent.example.com.|14400|IN|A|192.0.2.99"
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -240,8 +240,8 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
-          - "*.lb1.usercontent.example.com.|300|IN|AAAA|2001:db8::101"
+          - "*.lb1.usercontent.example.com.|14400|IN|A|192.0.2.101"
+          - "*.lb1.usercontent.example.com.|14400|IN|AAAA|2001:db8::101"
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -268,7 +268,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+          - "*.lb1.usercontent.example.com.|14400|IN|A|192.0.2.101"
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -289,7 +289,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "*.lb1.usercontent.example.com.|300|IN|CNAME|lb9.usercontent.example.com."
+          - "*.lb1.usercontent.example.com.|14400|IN|CNAME|lb9.usercontent.example.com."
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -310,7 +310,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "_cs-lb.lb1.usercontent.example.com.|300|IN|TXT|\"owner=node9001\""
+          - "_cs-lb.lb1.usercontent.example.com.|14400|IN|TXT|\"owner=node9001\""
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -354,7 +354,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "lb1.usercontent.example.com.|300|IN|CNAME|Elsewhere.Example.NET"
+          - "lb1.usercontent.example.com.|14400|IN|CNAME|Elsewhere.Example.NET"
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_cname, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -387,13 +387,13 @@
           - powerdns_lb_ops | length == 3
           - >-
             powerdns_lb_ops[0] == {'op': 'replace', 'name': '@', 'fqdn': 'usercontent.example.com.',
-              'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10']}
+              'type': 'A', 'ttl': 14400, 'contents': ['203.0.113.10']}
           - >-
             powerdns_lb_ops[1] == {'op': 'replace', 'name': '*', 'fqdn': '*.usercontent.example.com.',
-              'type': 'CNAME', 'ttl': 300, 'contents': ['usercontent.example.com.']}
+              'type': 'CNAME', 'ttl': 14400, 'contents': ['usercontent.example.com.']}
           - >-
             powerdns_lb_ops[2] == {'op': 'replace', 'name': '_cs-lb', 'fqdn': '_cs-lb.usercontent.example.com.',
-              'type': 'TXT', 'ttl': 300, 'contents': ['"owner=node1001"']}
+              'type': 'TXT', 'ttl': 14400, 'contents': ['"owner=node1001"']}
           - powerdns_lb_conflicts == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true
@@ -426,9 +426,9 @@
       vars:
         powerdns_lb_records_nodes: [node2001, node1001]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|14400|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node1001\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -441,9 +441,9 @@
           - >-
             powerdns_lb_ops == [
               {'op': 'replace', 'name': 'usercontent.example.com.', 'fqdn': 'usercontent.example.com.',
-               'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10', '203.0.113.20']},
+               'type': 'A', 'ttl': 14400, 'contents': ['203.0.113.10', '203.0.113.20']},
               {'op': 'replace', 'name': '_cs-lb.usercontent.example.com.',
-               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 14400,
                'contents': ['"owner=node1001"', '"owner=node2001"']}]
           - powerdns_lb_stale == []
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
@@ -458,9 +458,9 @@
         # still answers on the name, so its address must survive.
         powerdns_lb_records_nodes: [node2001]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|14400|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node1001\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -481,11 +481,11 @@
       vars:
         powerdns_lb_records_nodes: [node1001, lbt4]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "usercontent.example.com.|300|IN|A|192.0.2.104"
-          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=lbt4\""
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "usercontent.example.com.|14400|IN|A|192.0.2.104"
+          - "*.usercontent.example.com.|14400|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node1001\""
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=lbt4\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -498,17 +498,17 @@
           - >-
             powerdns_lb_ops == [
               {'op': 'replace', 'name': 'moved.usercontent.example.com.',
-               'fqdn': 'moved.usercontent.example.com.', 'type': 'A', 'ttl': 300, 'contents': ['192.0.2.104']},
+               'fqdn': 'moved.usercontent.example.com.', 'type': 'A', 'ttl': 14400, 'contents': ['192.0.2.104']},
               {'op': 'replace', 'name': '*.moved.usercontent.example.com.',
-               'fqdn': '*.moved.usercontent.example.com.', 'type': 'CNAME', 'ttl': 300,
+               'fqdn': '*.moved.usercontent.example.com.', 'type': 'CNAME', 'ttl': 14400,
                'contents': ['moved.usercontent.example.com.']},
               {'op': 'replace', 'name': '_cs-lb.moved.usercontent.example.com.',
-               'fqdn': '_cs-lb.moved.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'fqdn': '_cs-lb.moved.usercontent.example.com.', 'type': 'TXT', 'ttl': 14400,
                'contents': ['"owner=lbt4"']},
               {'op': 'replace', 'name': 'usercontent.example.com.', 'fqdn': 'usercontent.example.com.',
-               'type': 'A', 'ttl': 300, 'contents': ['203.0.113.10']},
+               'type': 'A', 'ttl': 14400, 'contents': ['203.0.113.10']},
               {'op': 'replace', 'name': '_cs-lb.usercontent.example.com.',
-               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 300,
+               'fqdn': '_cs-lb.usercontent.example.com.', 'type': 'TXT', 'ttl': 14400,
                'contents': ['"owner=node1001"']}]
         fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }} {{ powerdns_lb_stale }}"
         quiet: true
@@ -520,11 +520,11 @@
       vars:
         powerdns_lb_records_nodes: [node1001, node2001]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "usercontent.example.com.|300|IN|A|203.0.113.20"
-          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node1001\""
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node3001\""
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "usercontent.example.com.|14400|IN|A|203.0.113.20"
+          - "*.usercontent.example.com.|14400|IN|CNAME|usercontent.example.com."
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node1001\""
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node3001\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -548,9 +548,9 @@
       vars:
         powerdns_lb_records_nodes: [node1001, node2001]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "usercontent.example.com.|300|IN|A|203.0.113.20"
-          - "usercontent.example.com.|300|IN|A|192.0.2.99"
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "usercontent.example.com.|14400|IN|A|203.0.113.20"
+          - "usercontent.example.com.|14400|IN|A|192.0.2.99"
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -570,9 +570,9 @@
       vars:
         powerdns_lb_records_nodes: [node1001, node2001]
         powerdns_lbt_extra:
-          - "usercontent.example.com.|300|IN|A|203.0.113.20"
-          - "usercontent.example.com.|300|IN|A|203.0.113.10"
-          - "*.usercontent.example.com.|300|IN|CNAME|usercontent.example.com."
+          - "usercontent.example.com.|14400|IN|A|203.0.113.20"
+          - "usercontent.example.com.|14400|IN|A|203.0.113.10"
+          - "*.usercontent.example.com.|14400|IN|CNAME|usercontent.example.com."
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -633,14 +633,14 @@
       vars:
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "old.usercontent.example.com.|300|IN|A|192.0.2.101"
-          - "*.old.usercontent.example.com.|300|IN|CNAME|old.usercontent.example.com."
-          - "_cs-lb.old.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
-          - "_cs-lb.far.usercontent.example.com.|300|IN|TXT|\"owner=not-in-this-inventory\""
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node2001\""
+          - "old.usercontent.example.com.|14400|IN|A|192.0.2.101"
+          - "*.old.usercontent.example.com.|14400|IN|CNAME|old.usercontent.example.com."
+          - "_cs-lb.old.usercontent.example.com.|14400|IN|TXT|\"owner=lbt1\""
+          - "_cs-lb.far.usercontent.example.com.|14400|IN|TXT|\"owner=not-in-this-inventory\""
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node2001\""
           # moved node of this inventory, but also a stranger: not ours, not stale
-          - "_cs-lb.mixed.usercontent.example.com.|300|IN|TXT|\"owner=lbt2\""
-          - "_cs-lb.mixed.usercontent.example.com.|300|IN|TXT|\"owner=stranger\""
+          - "_cs-lb.mixed.usercontent.example.com.|14400|IN|TXT|\"owner=lbt2\""
+          - "_cs-lb.mixed.usercontent.example.com.|14400|IN|TXT|\"owner=stranger\""
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_a, lbt1_cname, lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -661,7 +661,7 @@
       vars:
         powerdns_lb_records_nodes: [lbt3, lbt1]
         powerdns_lbt_extra:
-          - "_cs-lb.oldaz3.usercontent.example.com.|300|IN|TXT|\"owner=lbt3\""
+          - "_cs-lb.oldaz3.usercontent.example.com.|14400|IN|TXT|\"owner=lbt3\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         # list-all-zones may print trailing dots and a summary line.
         powerdns_lb_all_zones:
@@ -689,8 +689,8 @@
       vars:
         powerdns_lb_records_nodes: [lbt1, lbt2]
         powerdns_lbt_extra:
-          - "deep.lb2.usercontent.example.com.|300|IN|CNAME|somewhere.example.net."
-          - "_cs-lb.lb1.usercontent.example.com.|300|IN|CNAME|somewhere.example.net."
+          - "deep.lb2.usercontent.example.com.|14400|IN|CNAME|somewhere.example.net."
+          - "_cs-lb.lb1.usercontent.example.com.|14400|IN|CNAME|somewhere.example.net."
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -714,7 +714,7 @@
           - "lb1.usercontent.example.com.|3600|IN|NS|ns1.elsewhere.example.net."
           - "lb1.usercontent.example.com.|3600|IN|NS|ns2.elsewhere.example.net."
           # lbt1's old name: its new one is delegated, so it is not stale
-          - "_cs-lb.oldlb1.usercontent.example.com.|300|IN|TXT|\"owner=lbt1\""
+          - "_cs-lb.oldlb1.usercontent.example.com.|14400|IN|TXT|\"owner=lbt1\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -845,8 +845,8 @@
         powerdns_lb_name_style: relative
         powerdns_lb_records_nodes: [lbt1]
         powerdns_lbt_extra:
-          - "lb1.usercontent.example.com.|300|IN|CNAME|elsewhere.example.net."
-          - "*.lb1.usercontent.example.com.|300|IN|A|192.0.2.101"
+          - "lb1.usercontent.example.com.|14400|IN|CNAME|elsewhere.example.net."
+          - "*.lb1.usercontent.example.com.|14400|IN|A|192.0.2.101"
         powerdns_lb_zone_listing: "{{ (lbt_base + [lbt1_marker] + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
@@ -873,7 +873,7 @@
         powerdns_lb_name_style: relative
         powerdns_lb_records_nodes: [node1001]
         powerdns_lbt_extra:
-          - "_cs-lb.usercontent.example.com.|300|IN|TXT|\"owner=node3001\""
+          - "_cs-lb.usercontent.example.com.|14400|IN|TXT|\"owner=node3001\""
         powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
         powerdns_lb_all_zones: "{{ lbt_zones }}"
 
