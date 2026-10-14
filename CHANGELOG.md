@@ -27,6 +27,15 @@
   (`any_errors_fatal = True` in `ansible.cfg`) instead of being left behind;
   the validate plays still report every host. If you run ansible with your
   own `ansible.cfg`, copy the setting.
+* **`make firewall ENV=<env>` applies a firewall change on its own**
+  (`playbooks/firewall.yml`). After editing `firewall_allow_ssh_from`, a
+  host's `ssh_port`, extra allowed addresses or a peer's address, it runs
+  preflight's inventory checks and re-renders each host's firewall exactly as
+  `site.yml` or `add-region.yml` would, without the rest of the converge.
+  Existing shared hosts in an attach inventory still only receive node address
+  appends. `--limit` and `--check --diff` are supported. The README's
+  "Changing the firewall" covers restricting ssh without locking yourself out
+  and moving sshd to another port.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

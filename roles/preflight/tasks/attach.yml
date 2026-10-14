@@ -1,0 +1,55 @@
+---
+# The attach-mode inventory checks: add-region.yml runs them always, and
+# playbooks/firewall.yml when the inventory is an attach one (its controller
+# is `existing_env`). Per host and assert-only, like the rest of this role.
+# Kept out of main.yml because a greenfield inventory fails the first one by
+# design.
+#
+# An attach inventory is for extending an EXISTING environment. A shared host
+# that is not flagged would otherwise get whole-file renders built from a
+# partial view of the fleet (contracts rule 9) — the failure mode is a
+# prometheus config or firewall table that silently drops every region
+# this inventory does not list.
+- name: Assert every shared host is flagged as an existing environment
+  ansible.builtin.assert:
+    that:
+      - existing_env | default(false) | bool
+    fail_msg: >-
+      {{ inventory_hostname }} is in a shared-host group
+      ({{ group_names | intersect(['controller', 'metrics', 'backup', 'registry']) | join(', ') }})
+      but is not flagged `existing_env: true`. An attach inventory
+      (add-region.yml) only ever adds a region to an environment that
+      already exists. To build a whole environment, run playbooks/site.yml
+      instead.
+  when: group_names | intersect(['controller', 'metrics', 'backup', 'registry']) | length > 0
+
+- name: Assert the new nodes are not flagged as an existing environment
+  ansible.builtin.assert:
+    that:
+      - not (existing_env | default(false) | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} is in `nodes` and flagged
+      `existing_env: true`. Attach mode builds the new node from bare
+      metal; an already-provisioned node does not belong in this run.
+  when: "'nodes' in group_names"
+
+# Attach mode defaults tailscale OFF (docs/contracts.md §attach): the
+# existing controller and metrics host are not on a tailnet, and joining
+# them is an operator action taken BEFORE this playbook runs. Every
+# consumer of the pairwise derivations (firewall, metrics file_sd,
+# cs_agent, controller_seed) reads `tailscale_enabled | default(true)`,
+# so leaving it unset while an auth key is present would tell those roles
+# the fleet is on a tailnet that this playbook never joined.
+- name: Assert tailnet membership is explicit on every host
+  ansible.builtin.assert:
+    that:
+      - tailscale_enabled is defined
+    fail_msg: >-
+      `tailscale_authkey` is set, so every host in an attach run must
+      declare `tailscale_enabled` explicitly — {{ inventory_hostname }}
+      does not. Attach mode defaults tailscale OFF: the existing hosts are
+      not on a tailnet unless you joined them yourself first. Set
+      `tailscale_enabled: false` on the existing hosts (and on the new node
+      unless you really are extending a tailnet), or drop
+      `tailscale_authkey` from this inventory's secrets.
+  when: (tailscale_authkey | default('')) | length > 0

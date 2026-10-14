@@ -1,0 +1,99 @@
+---
+# Re-render and apply the host firewall, and nothing else.
+#
+#   make firewall ENV=<env>
+#   make firewall ENV=<env> ARGS='--check --diff'     # show the table diff first
+#   ansible-playbook -i inventories/<env> playbooks/firewall.yml --ask-vault-pass
+#
+# For an inventory change that only the firewall reads — `firewall_allow_ssh_from`,
+# `firewall_extra_allowed_ipv4` / `_ipv6`, `firewall_extra_input_rules`, a
+# host's `ssh_port`, a peer's `primary_ip` / `public_ip`, tailnet membership —
+# applied without a full site.yml or add-region.yml run. roles/firewall reads
+# inventory vars only (never facts), so what it renders here is exactly what
+# the next full converge would render.
+#
+# Each host is treated exactly as the playbook that built it treats it:
+#
+#   greenfield inventory   every host not flagged `existing_env` gets the whole
+#   (site.yml)             `inet cs_static` table re-rendered and applied, as in
+#                          site.yml's "Host firewalls" play.
+#   attach inventory       the nodes get the whole table, as in add-region.yml's
+#   (add-region.yml; its   "New node firewall" play. The existing controller,
+#   controller is          metrics and backup hosts get ONLY tasks/append.yml --
+#   `existing_env`)        the new node addresses added to whichever firewall
+#                          they run, never a re-render (docs/contracts.md
+#                          rule 9) -- and every other existing host is not
+#                          touched at all. So an ssh allowlist or ssh_port change
+#                          never reaches an existing_env host from here; that
+#                          host's firewall is not this repository's.
+#
+# Preflight runs first, as in the other entry points, with its network checks
+# (registries, load balancer DNS) and the node data disk probe turned off: none
+# of them bear on the firewall, and a firewall fix must not wait on an expired
+# registry token. The inventory assertions -- ssh_port, ansible_port, the node
+# vars, root connection -- all still run, and an attach inventory also gets
+# add-region.yml's attach-mode checks.
+#
+# `--limit` is safe and meaningful: every rule is rendered from inventory, so
+# a limited host's table still lists every peer. Limit to the hosts whose OWN
+# table changes -- a changed ssh allowlist or ssh_port on one host is that
+# host; a changed node address is every host that accepts from nodes (the
+# controller and the metrics host) as well as the node.
+#
+# `--check --diff` renders each table and shows the diff without installing it
+# or restarting cs-firewall.service. (On a v2-built existing_env host whose
+# /etc/nftables.d/cs-peers.nft does not exist yet -- one never attached to --
+# check mode cannot show the appends, because the file is only created for
+# real.)
+#
+# LOCKOUT. The new table is applied by restarting cs-firewall.service, and the
+# connection in progress survives it (`ct state established`); the NEXT one
+# does not. Before narrowing `firewall_allow_ssh_from`, make sure it still
+# covers the machine you run ansible from and every host that ssh's in at
+# runtime (the controller, to the nodes and the registry; the nodes, to the
+# backup server). Moving sshd itself is not done here -- see the README,
+# "Changing the firewall".
+
+- name: Preflight validation
+  hosts: all
+  gather_facts: true
+  vars:
+    preflight_verify_registries: false
+    preflight_check_app_domain_dns: false
+    preflight_check_node_storage: false
+  roles:
+    - preflight
+  tasks:
+    - name: Run the attach-mode inventory checks
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: attach
+      when: hostvars[groups['controller'] | first].existing_env | default(false) | bool
+
+# The whole table, on every host the playbook that built it renders one for.
+# Inventory only, so no facts are needed here (preflight gathered them anyway).
+- name: Host firewalls
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Render and apply the ComputeStacks nftables table
+      ansible.builtin.include_role:
+        name: firewall
+      when:
+        - not (existing_env | default(false) | bool)
+        - >-
+          'nodes' in group_names
+          or not (hostvars[groups['controller'] | first].existing_env | default(false) | bool)
+
+# add-region.yml's additive write set on the existing shared hosts, and the
+# same three groups: the new node addresses appended, nothing re-rendered.
+# Idempotent -- a re-run against an unchanged inventory changes nothing.
+- name: Existing shared hosts — new node address appends only
+  hosts: controller:metrics:backup
+  gather_facts: false
+  tasks:
+    - name: Append the new node addresses to this host's firewall
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: append
+      when: existing_env | default(false) | bool

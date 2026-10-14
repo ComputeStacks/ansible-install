@@ -11,11 +11,15 @@ additive append path for existing shared hosts in attach mode.
 | `add-region.yml` (`tasks_from: append`) | "Existing metrics host — prometheus file_sd fragments only" | `metrics` |
 | `add-region.yml` (`tasks_from: append`) | "Existing controller — firewall appends only" | `controller` |
 | `add-region.yml` (`tasks_from: append`) | "Existing backup server — account, repository path, firewall appends" | `backup` |
+| `firewall.yml` | "Host firewalls" | every host not `existing_env`; on an attach inventory, `nodes` only |
+| `firewall.yml` (`tasks_from: append`) | "Existing shared hosts — new node address appends only" | `controller`, `metrics`, `backup` that are `existing_env` |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** the nftables table is never rendered on an `existing_env`
 host; `tasks_from: append` adds the new node's addresses to whichever firewall
 the host already runs (see [attach mode](#attach-mode-existing_env-true)).
+`playbooks/firewall.yml` re-runs exactly these two paths on their own, for an
+inventory change only this role reads (README.md, "Changing the firewall").
 **Requires:** `community.general` (`modprobe`). Tailnet membership is read
 from inventory, so it does not depend on `tailscale` having run.
 

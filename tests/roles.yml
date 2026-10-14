@@ -96,9 +96,9 @@
     - postgres_repo
     - powerdns
 
-# The alternate entry points. Five of these are what add-region.yml calls;
-# the two vault ones are included by docker_tls rather than by a play, so
-# nothing else parses them.
+# The alternate entry points. Most are what add-region.yml (and firewall.yml)
+# calls; the two vault ones are included by docker_tls rather than by a play,
+# so nothing else parses them.
 - name: Reusable task-file entry points
   hosts: nodes
   gather_facts: false
@@ -132,6 +132,11 @@
       ansible.builtin.include_role:
         name: metrics
         tasks_from: file_sd
+
+    - name: Run the attach-mode inventory checks
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: attach
 
     - name: Append new node addresses to an existing host's firewall
       ansible.builtin.include_role:
