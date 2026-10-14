@@ -221,6 +221,7 @@ environment-wide; what splits off per az is the load balancer's domain.
 | Name | Lives in | Shape | Cross-host read |
 |---|---|---|---|
 | `app_domain` | the INVENTORY, as a node host var | optional; a bare lowercase domain | it is a plain host var — `hostvars[h].app_domain` is fine |
+| `public_ipv6` | the INVENTORY, as a node host var | optional; one IPv6 host address in canonical RFC 5952 form (roles/preflight); unset, null and empty all mean none | it is a plain host var — `hostvars[h].public_ipv6` is fine |
 | `cs_app_domain` | `playbooks/group_vars/all/app_domains.yml` | `app_domain \| default(cs_app_zone, true)` | **safe** — `hostvars[h].cs_app_domain` |
 | `cs_app_wildcard_dir` | `playbooks/group_vars/all/app_domains.yml` | `app_wildcard_dir \| default('/var/lib/computestacks/.ssl_wildcard')` | **safe** |
 | `cs_app_domains` | `roles/controller/vars/` **and** `roles/controller_seed/vars/` | sorted unique `cs_app_domain` over `cs_new_nodes` | **local only** |

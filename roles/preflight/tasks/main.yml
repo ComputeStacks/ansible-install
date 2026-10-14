@@ -76,6 +76,11 @@
     - not (hostvars[item].existing_env | default(false) | bool)
   run_once: true
 
+# Optional `public_ipv6` on nodes: one canonical IPv6 host address
+# (tasks/public_ipv6.yml).
+- name: Check every public_ipv6 that is set
+  ansible.builtin.include_tasks: public_ipv6.yml
+
 - name: Assert exactly one node per availability zone
   ansible.builtin.assert:
     that:

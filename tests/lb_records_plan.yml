@@ -64,6 +64,28 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # Nodes that set public_ipv6: lbt5 alone on its name, and lbt6/lbt7
+    # sharing one, only lbt6 with an IPv6 address.
+    - name: Add the nodes that set public_ipv6
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: nodes
+        app_domain: "{{ item.app_domain }}"
+        public_ip: "{{ item.public_ip }}"
+        public_ipv6: "{{ item.public_ipv6 }}"
+      loop:
+        - {name: lbt5, app_domain: v6.usercontent.example.com, public_ip: 192.0.2.105, public_ipv6: "2001:db8::105"}
+        - {name: lbt6, app_domain: pair6.usercontent.example.com, public_ip: 192.0.2.106, public_ipv6: "2001:db8::106"}
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Add a node sharing lbt6's name without public_ipv6
+      ansible.builtin.add_host:
+        name: lbt7
+        groups: nodes
+        app_domain: pair6.usercontent.example.com
+        public_ip: 192.0.2.107
+
 - name: Plan the load balancer records against canned zone listings
   hosts: localhost
   gather_facts: false
@@ -908,4 +930,164 @@
         that:
           - lbt_bad_style_failed_task | default('') == 'Check the pdnsutil name style'
         fail_msg: "{{ lbt_bad_style_failed_task | default('the plan accepted an unknown style') }}"
+        quiet: true
+
+    # ======================================================================
+    # AAAA: managed only for a name whose wanted owners set public_ipv6.
+    # (lbt1 sets none, so case 2 above already proves an AAAA at its apex is
+    # left alone.)
+    # ======================================================================
+    - name: "Case: AAAA, empty zone, a node with public_ipv6"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt5]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the AAAA is created right after the A"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | map(attribute='type') | list == ['A', 'AAAA', 'CNAME', 'TXT']
+          - powerdns_lb_ops[1] == lbt5_aaaa_op
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+      vars: &lbt5_vars
+        lbt5_aaaa_op:
+          op: replace
+          name: v6.usercontent.example.com.
+          fqdn: v6.usercontent.example.com.
+          type: AAAA
+          ttl: 14400
+          contents: ["2001:db8::105"]
+
+    - name: "Case: AAAA, already correct with our marker (upper case as listed)"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt5]
+        powerdns_lbt_extra: &lbt5_correct
+          - "v6.usercontent.example.com.|14400|IN|A|192.0.2.105"
+          - "v6.usercontent.example.com.|14400|IN|AAAA|2001:DB8::105"
+          - "*.v6.usercontent.example.com.|14400|IN|CNAME|v6.usercontent.example.com."
+          - "_cs-lb.v6.usercontent.example.com.|14400|IN|TXT|\"owner=lbt5\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a correct AAAA plans nothing"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: AAAA, wrong address and TTL with our marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt5]
+        powerdns_lbt_extra:
+          - "v6.usercontent.example.com.|14400|IN|A|192.0.2.105"
+          - "v6.usercontent.example.com.|300|IN|AAAA|2001:db8::99"
+          - "*.v6.usercontent.example.com.|14400|IN|CNAME|v6.usercontent.example.com."
+          - "_cs-lb.v6.usercontent.example.com.|14400|IN|TXT|\"owner=lbt5\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: our AAAA is replaced with exactly this node's public_ipv6"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == [lbt5_aaaa_op]
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+      vars: *lbt5_vars
+
+    - name: "Case: AAAA, matching hand-made records without a marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt5]
+        powerdns_lbt_extra: "{{ (powerdns_lbt5_correct | reject('search', '^_cs-lb') | list) }}"
+        powerdns_lbt5_correct: *lbt5_correct
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a matching unmarked AAAA is adopted -- marker only"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops | length == 1
+          - powerdns_lb_ops[0].type == 'TXT'
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: AAAA, a different hand-made AAAA without a marker"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt5]
+        powerdns_lbt_extra:
+          - "v6.usercontent.example.com.|14400|IN|A|192.0.2.105"
+          - "v6.usercontent.example.com.|14400|IN|AAAA|2001:db8::99"
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: an unmarked AAAA that differs is a conflict naming both addresses"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts | length == 1
+          - "'AAAA is 2001:db8::99, not 2001:db8::105' in powerdns_lb_conflicts[0]"
+          - "'v6.usercontent.example.com. AAAA 2001:db8::105' in powerdns_lb_conflicts[0]"
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: AAAA, two nodes on one name, one with public_ipv6"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt6, lbt7]
+        powerdns_lb_zone_listing: "{{ lbt_base | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: the A has both addresses and the AAAA only lbt6's"
+      ansible.builtin.assert:
+        that:
+          - (powerdns_lb_ops | selectattr('type', 'equalto', 'A') | first).contents == ['192.0.2.106', '192.0.2.107']
+          - (powerdns_lb_ops | selectattr('type', 'equalto', 'AAAA') | first).contents == ['2001:db8::106']
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
+        quiet: true
+
+    - name: "Case: AAAA, a node of the name not in this run keeps its address"
+      ansible.builtin.include_role:
+        name: powerdns
+        tasks_from: lb_records_plan
+      vars:
+        powerdns_lb_records_nodes: [lbt7]
+        powerdns_lbt_extra:
+          - "pair6.usercontent.example.com.|14400|IN|A|192.0.2.106"
+          - "pair6.usercontent.example.com.|14400|IN|A|192.0.2.107"
+          - "pair6.usercontent.example.com.|14400|IN|AAAA|2001:db8::106"
+          - "*.pair6.usercontent.example.com.|14400|IN|CNAME|pair6.usercontent.example.com."
+          - "_cs-lb.pair6.usercontent.example.com.|14400|IN|TXT|\"owner=lbt6\""
+          - "_cs-lb.pair6.usercontent.example.com.|14400|IN|TXT|\"owner=lbt7\""
+        powerdns_lb_zone_listing: "{{ (lbt_base + powerdns_lbt_extra) | map('replace', '|', lbt_tab) | list }}"
+        powerdns_lb_all_zones: "{{ lbt_zones }}"
+
+    - name: "Assert: a narrowed run keeps lbt6's AAAA"
+      ansible.builtin.assert:
+        that:
+          - powerdns_lb_ops == []
+          - powerdns_lb_conflicts == []
+        fail_msg: "{{ powerdns_lb_ops }} {{ powerdns_lb_conflicts }}"
         quiet: true

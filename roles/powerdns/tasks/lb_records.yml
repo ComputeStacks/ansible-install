@@ -2,6 +2,7 @@
 # ns_primary only. Writes each az's load balancer records into cs_app_zone:
 #
 #   <app_domain>.         A      <public_ip>
+#   <app_domain>.         AAAA   <public_ipv6>   (only when the node sets it)
 #   *.<app_domain>.       CNAME  <app_domain>.
 #   _cs-lb.<app_domain>.  TXT    "owner=<node inventory_hostname>"
 #

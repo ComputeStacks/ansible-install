@@ -35,6 +35,17 @@ nothing; the OS, data-disk, registry-login and controller-image checks skip
   A failed `run_once` task fails every host in the play, so one bad disk stops
   the whole run before any host is changed. A node built before the data-disk
   requirement has no such disk and is refused: it must be rebuilt.
+- **`public_ipv6`, where a node sets it** (`tasks/public_ipv6.yml`, every
+  node in `groups['nodes']`): one IPv6 host address in canonical RFC 5952
+  form -- lowercase, no leading zeros, the longest zero run compressed, no
+  prefix length or zone index -- and not unspecified, loopback, link-local,
+  multicast, site-local or IPv4-mapped. The check is the `cs_ipv6_problem`
+  filter (`filter_plugins/preflight_ipv6.py`, Python's `ipaddress`; no
+  extra collection or `netaddr` needed), which also says what is wrong and,
+  for a non-canonical address, what to write instead. Canonical form is
+  required because roles/powerdns, roles/validate and this role compare the
+  address as text against what PowerDNS and dig print. Unset, null and
+  empty all mean "no IPv6 address".
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
 - Exactly one host in `groups['controller']`, and — when
@@ -138,7 +149,11 @@ not the bundled PowerDNS, or `powerdns_manage_lb_records` is off, the operator
 publishes each new az's pair before the run (docs/install.md §3). Preflight
 resolves both publicly: the apex must include that node's `public_ip`, and
 `<preflight_app_domain_probe_label>.<cs_app_domain>` must be a CNAME to the
-apex. The failure message names the exact record to create.
+apex. The failure message names the exact record to create. It also resolves
+the apex AAAA and **warns** (does not fail) about any address that is not the
+`public_ipv6` of a node on that name: the controller rejects an apex address
+that is not one of the load balancer's public addresses, but one an operator
+added on the controller by hand is invisible from here.
 
 **Records roles/powerdns writes (`tasks/app_zone_delegation.yml`).** With
 `dns_driver: powerdns`, roles/powerdns writes the pair into the bundled tenant
@@ -259,7 +274,7 @@ again); this role still only reads it `run_once`.
 Consumed from elsewhere in the inventory (not owned by this role):
 `site` and the `cs_site` / `cs_site_metrics_hosts` / `cs_site_backup_hosts`
 derivations in `playbooks/group_vars/all/sites.yml`,
-`app_domain`, `cs_app_zone` and `cs_app_domain`
+`app_domain`, `public_ipv6`, `cs_app_zone` and `cs_app_domain`
 (`playbooks/group_vars/all/app_domains.yml`), `cs_new_nodes`,
 the retired `controller_wildcard_domain`, `dns_driver`, `powerdns_name` and
 `powerdns_manage_lb_records` (on the nameservers),

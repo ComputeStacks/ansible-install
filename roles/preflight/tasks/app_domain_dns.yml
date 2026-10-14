@@ -63,6 +63,63 @@
     label: "{{ hostvars[item.item].cs_app_domain }}"
   run_once: true
 
+# The controller holds an AAAA at the apex to the same rule as the A: it must
+# be one of the load balancer's public addresses (event 510806d5621c97d5), and
+# the only IPv6 address this provisioner gives a load balancer is the node's
+# `public_ipv6`. Warned about, not failed: an operator may have added the
+# address on the controller by hand, which this check cannot see.
+- name: Resolve each new az's load balancer domain's IPv6 addresses
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ hostvars[item].cs_app_domain }}"
+      - AAAA
+  loop: "{{ cs_new_nodes | sort }}"
+  loop_control:
+    label: "{{ hostvars[item].cs_app_domain }} ({{ item }})"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: preflight_app_domain_aaaa
+
+- name: Warn about IPv6 addresses on a load balancer domain that its nodes do not set
+  ansible.builtin.debug:
+    msg: >-
+      {{ hostvars[item.item].cs_app_domain }} (az
+      {{ hostvars[item.item].az | default('unknown') }}, node {{ item.item }})
+      has AAAA {{ preflight_aaaa_unknown | join(', ') }}, which is not the
+      `public_ipv6` of any node on this name. The controller will mark this
+      load balancer INVALID (event 510806d5621c97d5) unless the address is
+      one of its public addresses: set `public_ipv6` on {{ item.item }} to it
+      (roles/controller_seed then adds it), or remove the AAAA.
+  loop: "{{ preflight_app_domain_aaaa.results | default([]) }}"
+  loop_control:
+    label: "{{ hostvars[item.item].cs_app_domain }}"
+  when:
+    - item.rc | default(1) == 0
+    - preflight_aaaa_unknown | length > 0
+  vars:
+    # Nodes that share a name share its AAAA rrset. Plain inventory vars, safe
+    # to read across hosts (docs/contracts.md rule 10).
+    preflight_aaaa_known: >-
+      {{ groups['nodes'] | default([])
+         | map('extract', hostvars)
+         | selectattr('cs_app_domain', 'equalto', hostvars[item.item].cs_app_domain)
+         | map(attribute='public_ipv6', default='')
+         | map('default', '', true) | map('string') | map('lower')
+         | reject('equalto', '') | list }}
+    preflight_aaaa_unknown: >-
+      {{ item.stdout_lines | default([])
+         | map('trim') | map('lower')
+         | select('match', '^[0-9a-f.]*:[0-9a-f:.]*$')
+         | reject('in', preflight_aaaa_known) | list }}
+  run_once: true
+
 # The wildcard MUST be a CNAME to the apex. The controller proves it by asking
 # for a CNAME on a random label (ValidateDomainService#load_wildcard_cname!),
 # so an A record there answers nothing and the load balancer is marked invalid

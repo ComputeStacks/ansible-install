@@ -43,6 +43,25 @@
   check_mode: false
   register: validate_lb_public_a
 
+# AAAA too, because the controller holds every apex address to the same rule
+# as the A (event 510806d5621c97d5): it must be one of the load balancer's
+# public addresses. roles/powerdns writes this node's `public_ipv6` as the
+# AAAA when it is set, and roles/controller_seed adds it to the load balancer.
+- name: Resolve this az's load balancer domain's IPv6 addresses publicly
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "{{ cs_app_domain }}"
+      - AAAA
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: validate_lb_public_aaaa
+
 - name: Resolve this az's wildcard record publicly
   ansible.builtin.command:
     argv:
@@ -99,3 +118,60 @@
       target). {{ validate_lb_public_hint }}
     success_msg: "*.{{ cs_app_domain }} is publicly a CNAME to {{ cs_app_domain }}."
     quiet: true
+
+- name: Assert this az's load balancer domain resolves publicly to its public IPv6 address
+  ansible.builtin.assert:
+    that:
+      - validate_lb_public_aaaa.rc == 0
+      - public_ipv6 in (validate_lb_public_aaaa.stdout_lines | default([]))
+    fail_msg: >-
+      {{ cs_app_domain }} (az {{ az }})
+      {{ ('could not be looked up (dig exit ' ~ validate_lb_public_aaaa.rc ~ ')')
+         if validate_lb_public_aaaa.rc != 0
+         else ('has no AAAA record'
+               if (validate_lb_public_aaaa.stdout_lines | default([])) | length == 0
+               else ('has AAAA ' ~ (validate_lb_public_aaaa.stdout_lines | join(', ')))) }}
+      through public DNS from this control machine, but this run wrote
+      `{{ cs_app_domain }}. AAAA {{ public_ipv6 }}` into {{ cs_app_zone }} on
+      the bundled nameservers. {{ validate_lb_public_hint }}
+    success_msg: "{{ cs_app_domain }} resolves publicly to {{ public_ipv6 }}"
+    quiet: true
+  when: (public_ipv6 | default('', true) | string) | length > 0
+
+# A warning, not a failure: an AAAA this inventory does not know about may be
+# matched by an address an operator added to the load balancer by hand, which
+# this check cannot see. If it is not, the controller marks the load balancer
+# invalid.
+- name: Warn about IPv6 addresses on this az's apex that the inventory does not give it
+  ansible.builtin.debug:
+    msg: >-
+      {{ cs_app_domain }} (az {{ az }}) publicly has AAAA
+      {{ validate_lb_public_aaaa_unknown | join(', ') }}, which is not the
+      `public_ipv6` of any node on this name
+      {{ '(this node sets none)' if (public_ipv6 | default('', true) | string) | length == 0 else '(this node sets ' ~ public_ipv6 ~ ')' }}.
+      The controller accepts an apex address only if it is one of the load
+      balancer's public addresses, and marks the load balancer INVALID
+      otherwise (event 510806d5621c97d5) -- nothing then deploys into this
+      az. Set `public_ipv6` on the node to that address (roles/controller_seed
+      adds it to the load balancer on the next run), add it on the controller
+      by hand (admin UI, load balancer -> addresses, role public), or remove
+      the AAAA.
+  when:
+    - validate_lb_public_aaaa.rc == 0
+    - validate_lb_public_aaaa_unknown | length > 0
+  vars:
+    # Every node on this name, not just this one: nodes that share a name
+    # share its AAAA rrset. `cs_app_domain` and `public_ipv6` are plain
+    # inventory vars, safe to read across hosts (docs/contracts.md rule 10).
+    validate_lb_public_aaaa_known: >-
+      {{ groups['nodes'] | default([])
+         | map('extract', hostvars)
+         | selectattr('cs_app_domain', 'equalto', cs_app_domain)
+         | map(attribute='public_ipv6', default='')
+         | map('default', '', true) | map('string') | map('lower')
+         | reject('equalto', '') | list }}
+    validate_lb_public_aaaa_unknown: >-
+      {{ validate_lb_public_aaaa.stdout_lines | default([])
+         | map('trim') | map('lower')
+         | select('match', '^[0-9a-f.]*:[0-9a-f:.]*$')
+         | reject('in', validate_lb_public_aaaa_known) | list }}

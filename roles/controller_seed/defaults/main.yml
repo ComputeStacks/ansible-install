@@ -253,3 +253,8 @@ controller_seed_required_node_vars:
   - az
   - container_network
   - container_network_name
+
+# The nodes whose optional `public_ipv6` is added to their az's load balancer
+# as a `public` address (tasks/lb_public_ipv6.yml). Role-internal: the nodes
+# this run builds, like the manifest itself.
+controller_seed_lb_ipv6_nodes: "{{ cs_new_nodes | default([]) }}"

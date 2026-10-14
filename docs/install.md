@@ -100,11 +100,19 @@ exm-001.usercontent.example.com.    IN A     <that node's public ip>
 *.exm-001.usercontent.example.com.  IN CNAME exm-001.usercontent.example.com.
 ```
 
+and, only for an az with a public IPv6 address (the node's `public_ipv6`):
+
+```
+exm-001.usercontent.example.com.    IN AAAA  <that node's public_ipv6>
+```
+
 **With `dns_driver: powerdns` you do not create these.** `roles/powerdns`
 writes them on the primary nameserver, into `cs_app_zone` — the zone the
 bundled nameservers serve — right after the zone is created, together with an
 ownership marker, `_cs-lb.<app_domain>. TXT "owner=<node>"`. Every run
-converges the records it owns (address, CNAME target, TTL). A pair you already
+converges the records it owns (address, CNAME target, TTL), and writes the
+apex AAAA too for a node that sets `public_ipv6` — an AAAA there is otherwise
+left as it is. A pair you already
 made by hand that matches is adopted; anything else at those names — records
 that differ, or a marker naming some other node — fails the run before
 anything is written, and it never overwrites a name it cannot show is its
@@ -128,7 +136,13 @@ a wildcard A record answers nothing and the load balancer is marked
 record"). Two neighboring failures worth recognizing: a wildcard CNAME
 pointing anywhere other than the domain itself is `635285f7f2889009`, and an A
 record that is not one of that load balancer's own public addresses is
-`510806d5621c97d5`.
+`510806d5621c97d5`. That rule covers **AAAA records too**: every address at
+the apex must be one of the load balancer's public addresses, and the only
+IPv6 address the provisioner gives a load balancer is the node's
+`public_ipv6`. An AAAA at the apex with no matching `public_ipv6` is
+therefore an INVALID load balancer — set `public_ipv6`, or remove the AAAA.
+Preflight warns about such an AAAA on hand-made records; `roles/validate`
+does on records the provisioner writes.
 
 Until `domain_valid` is true the load balancer never becomes `active?` and
 nothing deploys into that region. Nothing in the run fails on it, because the
@@ -261,6 +275,13 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
   on IPv6 forwarding the first time it creates an IPv6 network, which
   withdraws the RA-learned default route about half an hour later; the fix
   needs the interface name and the playbook will not guess it.
+* **`public_ipv6`** on any node whose load balancer answers on IPv6 too: that
+  az's public IPv6 address, quoted, in canonical form (`"2001:db8:1::10"`;
+  preflight checks it). The seed adds it to the load balancer as a public
+  address, and with `dns_driver: powerdns` it is written as the apex AAAA of
+  `app_domain`. **Set it whenever `app_domain` has an AAAA**: the controller
+  requires every A and AAAA at the apex to be one of the load balancer's
+  public addresses, and marks the domain INVALID otherwise (see §3).
 * **`haproxy_stats_password`.** Optional, recommended: without it the
   controller's column default is used, which is the same on every install.
 * **A private controller image.** If `controller_image_repo` points at a

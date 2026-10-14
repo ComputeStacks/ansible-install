@@ -1,0 +1,26 @@
+---
+# Optional. When set, roles/controller_seed adds it to the az's load balancer
+# as a `public` address and roles/powerdns (when it manages the records)
+# publishes it as the apex AAAA. Both compare it as text against what
+# PowerDNS, dig and the controller print, so it has to be one host address in
+# canonical RFC 5952 form (filter_plugins/preflight_ipv6.py). Every node, not
+# just the new ones: roles/powerdns also reads it off nodes it does not build
+# when it converges a name they share. Unset, null and empty all mean "none".
+- name: Assert every public_ipv6 that is set is one canonical IPv6 host address
+  ansible.builtin.assert:
+    that:
+      - (hostvars[item].public_ipv6 | cs_ipv6_problem) | length == 0
+    fail_msg: >-
+      public_ipv6 on node '{{ item }}' is
+      {{ hostvars[item].public_ipv6 | string | to_json }}, which cannot be used:
+      {{ hostvars[item].public_ipv6 | cs_ipv6_problem }}. It is the load
+      balancer's public IPv6 address (the apex AAAA of its app_domain), a
+      single address such as 2001:db8::10, quoted in YAML ("2001:db8::10")
+      so no address is ever read as a number. Leave it unset for an
+      IPv4-only az.
+    success_msg: "{{ item }}: public_ipv6 {{ hostvars[item].public_ipv6 }}"
+  loop: "{{ groups['nodes'] | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: (hostvars[item].public_ipv6 | default('', true) | string) | length > 0
+  run_once: true

@@ -15,7 +15,8 @@
 #                              it from the installed version; unset means
 #                              'absolute', what every site.yml nameserver
 #                              (Ubuntu 26.04, 5.0.x) runs.
-#   cs_app_zone, groups['nodes'], hostvars[n].cs_app_domain / .public_ip
+#   cs_app_zone, groups['nodes'], hostvars[n].cs_app_domain / .public_ip /
+#   .public_ipv6 (optional; canonical form, asserted by roles/preflight)
 #
 # Outputs (facts):
 #   powerdns_lb_ops        ordered list of {op, name, fqdn, type, ttl, contents};
@@ -75,11 +76,15 @@
 #          wanted owners' addresses, a CNAME at the apex is deleted, every
 #          non-CNAME rrset at *.N. is deleted, the *.N. CNAME becomes exactly
 #          `N.`, the marker becomes exactly the wanted owner set, all at
-#          powerdns_lb_record_ttl. Other types at the apex (AAAA, HTTPS, TXT,
-#          MX, NS, SOA) are never touched.
+#          powerdns_lb_record_ttl. When any wanted owner sets public_ipv6,
+#          the apex AAAA rrset becomes exactly those owners' public_ipv6
+#          addresses too; when none does, the AAAA rrset is left alone, as
+#          every other type at the apex (HTTPS, TXT, MX, NS, SOA) always is.
+#          See "AAAA" below.
 #   no marker, and what IS there already matches (no apex CNAME, apex A
-#   absent or exactly O's addresses, *.N. absent or exactly `CNAME N.` with
-#   nothing else beside it)
+#   absent or exactly O's addresses, apex AAAA absent or exactly O's
+#   public_ipv6 addresses when any of O sets one, *.N. absent or exactly
+#   `CNAME N.` with nothing else beside it)
 #       -> ADOPT: write the marker, fill in whatever is missing, fix TTLs.
 #          "Nothing there at all" is the plain-create special case of this;
 #          a correct hand-made pair (every install before this task existed)
@@ -94,6 +99,14 @@
 # never reported stale. A marker naming any host this inventory does not know
 # is never stale -- it may be somebody else's. Stale names are reported, never
 # deleted.
+#
+# AAAA: managed only for a name whose wanted owners set public_ipv6. An AAAA
+# that nobody here asked for may be an operator's hand-made record, matched
+# by a load balancer address they added on the controller by hand -- deleting
+# it because the inventory is silent would take an az off IPv6, and the
+# marker cannot say whether this provisioner wrote it. The price: removing
+# public_ipv6 from a node leaves its AAAA published; delete it by hand
+# (README.md, "AAAA").
 #
 # Names: list-zone prints absolute names. The NAME argument of pdnsutil's
 # replace-rrset/delete-rrset is read differently by major version, and no one
@@ -136,6 +149,9 @@
           {%- set rname = f[0] | lower -%}
           {%- set rtype = f[3] | upper -%}
           {%- set rcontent = f[4] | trim -%}
+          {%- if rtype == 'AAAA' -%}
+            {%- set rcontent = rcontent | lower -%}
+          {%- endif -%}
           {%- if rtype == 'CNAME' -%}
             {%- set rcontent = rcontent | lower -%}
             {%- set rcontent = rcontent if rcontent.endswith('.') else rcontent ~ '.' -%}
@@ -214,11 +230,13 @@
       {%- set run_domains = nodes | map('extract', hostvars, 'cs_app_domain') | map('string') | map('lower') | unique | sort -%}
       {%- set out = namespace(ops=[], conflicts=[], skipped=[], stale=[]) -%}
       {%- for d in run_domains -%}
-        {%- set g = namespace(owners=[], ips=[], mark=[]) -%}
+        {%- set g = namespace(owners=[], ips=[], ips6=[], mark=[]) -%}
         {%- for n in nodes -%}
           {%- if (hostvars[n].cs_app_domain | string | lower) == d -%}
             {%- set g.owners = g.owners + [n] -%}
             {%- set g.ips = g.ips + [hostvars[n].public_ip | string] -%}
+            {%- set g.ips6 = g.ips6 + ([hostvars[n].public_ipv6 | string | lower]
+                                       if (hostvars[n].public_ipv6 | default('', true) | string) | length > 0 else []) -%}
             {%- set g.mark = g.mark + ['"owner=' ~ n ~ '"'] -%}
           {%- endif -%}
         {%- endfor -%}
@@ -252,6 +270,7 @@
             {%- set arg_mark = '_cs-lb' if apex == zfq else '_cs-lb.' ~ base -%}
           {%- endif -%}
           {%- set apex_a = recs | selectattr('name', 'equalto', apex) | selectattr('type', 'equalto', 'A') | list -%}
+          {%- set apex_aaaa = recs | selectattr('name', 'equalto', apex) | selectattr('type', 'equalto', 'AAAA') | list -%}
           {%- set apex_cname = recs | selectattr('name', 'equalto', apex) | selectattr('type', 'equalto', 'CNAME') | list -%}
           {%- set wild_all = recs | selectattr('name', 'equalto', wild) | list -%}
           {%- set wild_cname = wild_all | selectattr('type', 'equalto', 'CNAME') | list -%}
@@ -275,6 +294,8 @@
               {%- if h not in nodes and (hostvars[h].cs_app_domain | string | lower) == d -%}
                 {%- set g.owners = g.owners + [h] -%}
                 {%- set g.ips = g.ips + [hostvars[h].public_ip | string] -%}
+                {%- set g.ips6 = g.ips6 + ([hostvars[h].public_ipv6 | string | lower]
+                                           if (hostvars[h].public_ipv6 | default('', true) | string) | length > 0 else []) -%}
                 {%- set g.mark = g.mark + ['"owner=' ~ h ~ '"'] -%}
               {%- endif -%}
             {%- endfor -%}
@@ -283,6 +304,12 @@
           {%- set want_mark = g.mark | sort -%}
           {%- set a_have = apex_a | map(attribute='content') | sort -%}
           {%- set a_ok = a_have == ips and (apex_a | map(attribute='ttl') | unique | list) == [ttl] -%}
+          {#- AAAA only when a wanted owner sets public_ipv6; see "AAAA" above. -#}
+          {%- set ips6 = g.ips6 | unique | sort -%}
+          {%- set aaaa_managed = (ips6 | length) > 0 -%}
+          {%- set aaaa_have = apex_aaaa | map(attribute='content') | sort -%}
+          {%- set aaaa_ok = (not aaaa_managed)
+                            or (aaaa_have == ips6 and (apex_aaaa | map(attribute='ttl') | unique | list) == [ttl]) -%}
           {%- set wc_have = wild_cname | map(attribute='content') | sort -%}
           {%- set wc_ok = wc_have == [apex] and (wild_cname | map(attribute='ttl') | unique | list) == [ttl] -%}
           {%- set m_ok = m_have == want_mark and (mark_txt | map(attribute='ttl') | unique | list) == [ttl] -%}
@@ -318,6 +345,9 @@
               {%- if apex_a | length > 0 and a_have != ips -%}
                 {%- set why.l = why.l + [apex ~ ' A is ' ~ (a_have | join(', ')) ~ ', not ' ~ (ips | join(', '))] -%}
               {%- endif -%}
+              {%- if aaaa_managed and apex_aaaa | length > 0 and aaaa_have != ips6 -%}
+                {%- set why.l = why.l + [apex ~ ' AAAA is ' ~ (aaaa_have | join(', ')) ~ ', not ' ~ (ips6 | join(', '))] -%}
+              {%- endif -%}
               {%- if wild_other | length > 0 -%}
                 {%- set why.l = why.l + [wild ~ ' holds ' ~ (wild_other | map(attribute='type') | unique | join(', '))
                     ~ ' (only a CNAME belongs there)'] -%}
@@ -329,7 +359,9 @@
             {%- if why.l | length > 0 -%}
               {%- set out.conflicts = out.conflicts + [d ~ ': found records with no ' ~ mark ~ ' ownership marker'
                   ~ ' that differ from what this run would write (' ~ (why.l | join('; ')) ~ '). Wanted: `'
-                  ~ apex ~ ' A ' ~ (ips | join(', ')) ~ '` and `' ~ wild ~ ' CNAME ' ~ apex
+                  ~ apex ~ ' A ' ~ (ips | join(', ')) ~ '`'
+                  ~ ((', `' ~ apex ~ ' AAAA ' ~ (ips6 | join(', ')) ~ '`') if aaaa_managed else '')
+                  ~ ' and `' ~ wild ~ ' CNAME ' ~ apex
                   ~ '`. Nothing was written. If those records are stale, delete them by hand'
                   ~ ' (pdnsutil delete-rrset ' ~ zone ~ ' NAME TYPE, with NAME ' ~ arg_apex ~ ' or '
                   ~ arg_wild ~ ') and re-run; if another load balancer still answers on ' ~ d
@@ -346,6 +378,10 @@
               {%- if not a_ok -%}
                 {%- set out.ops = out.ops + [{'op': 'replace', 'name': arg_apex, 'fqdn': apex, 'type': 'A',
                                               'ttl': ttl, 'contents': ips}] -%}
+              {%- endif -%}
+              {%- if not aaaa_ok -%}
+                {%- set out.ops = out.ops + [{'op': 'replace', 'name': arg_apex, 'fqdn': apex, 'type': 'AAAA',
+                                              'ttl': ttl, 'contents': ips6}] -%}
               {%- endif -%}
               {%- for t in wild_other | map(attribute='type') | unique | sort -%}
                 {%- set out.ops = out.ops + [{'op': 'delete', 'name': arg_wild, 'fqdn': wild, 'type': t,
