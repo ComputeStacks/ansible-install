@@ -1,0 +1,10 @@
+---
+# PURE: no command, no host access. Reads node_kernel_uplink_networkctl
+# (registered by main.yml), uplink_interface and ansible_interfaces, and sets
+# node_kernel_uplink_ra. tests/node_kernel_uplink_ra.yml includes this file
+# with canned networkctl output.
+- name: Classify the uplink as networkd-managed, kernel-managed or missing
+  ansible.builtin.set_fact:
+    node_kernel_uplink_ra: >-
+      {{ node_kernel_uplink_networkctl
+         | node_kernel_uplink_ra(uplink_interface, ansible_interfaces | default(none)) }}

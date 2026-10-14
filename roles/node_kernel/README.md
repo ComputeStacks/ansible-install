@@ -1,7 +1,8 @@
 # node_kernel
 
 Kernel tuning for nodes: boot-time modules, conntrack sizing, container-density
-sysctls with BBR, and the IPv6 `accept_ra` fix on the uplink.
+sysctls with BBR, and keeping IPv6 router advertisements accepted on the
+uplink once docker turns forwarding on.
 
 | Runs in | Play | Hosts |
 | --- | --- | --- |
@@ -32,15 +33,56 @@ preloads belong to `node_observability` and docker configuration to
 - When the node has a global IPv6 address (checked via this host's own
   facts — acceptable per docs/contracts.md, since this is a per-host file,
   not a shared template) **and** an `uplink_interface` inventory var is set,
-  writes `/etc/sysctl.d/61-cs-node-ipv6.conf` forcing
-  `net.ipv6.conf.<uplink_interface>.accept_ra = 2` — otherwise Docker
-  setting `net.ipv6.conf.all.forwarding=1` on IPv6 network creation silently
-  withdraws the RA-learned default route ~30 minutes later. If
+  keeps router advertisements accepted on that interface (below). If
   `uplink_interface` is not set on a node that has a global IPv6 address,
   the role emits a `debug` note (not a failure) rather than guessing the
-  interface name from facts.
-- Module loading and the sysctl reload are handler-driven: they fire only
-  when the owned file actually changes (docs/contracts.md rule 3).
+  interface name from facts. If it names an interface the host does not
+  have, the role fails the host.
+- Module loading, the sysctl reload and the networkd reload are
+  handler-driven: they fire only when the owned file actually changes
+  (docs/contracts.md rule 3).
+
+### IPv6 router advertisements on the uplink
+
+Docker sets `net.ipv6.conf.all.forwarding=1` when it creates an IPv6-enabled
+network. A forwarding host ignores router advertisements unless told
+otherwise, so the RA-learned default route expires about 30 minutes later.
+Which fix applies depends on who handles RAs on the uplink, and the role asks
+`networkctl --json=short status <uplink_interface>`:
+
+- **systemd-networkd manages the link** (netplan's default renderer on
+  Ubuntu server). networkd forces the kernel's `accept_ra` to 0 on every link
+  it manages and processes RAs itself, in userspace, so an `accept_ra`
+  sysctl is undone at the next boot or link reconfigure. The role writes
+  `/etc/systemd/network/<network file>.d/60-cs-node-accept-ra.conf` with
+  `[Network] IPv6AcceptRA=yes`, where `<network file>` is the `.network`
+  file networkd reports for the link (for netplan,
+  `10-netplan-<netplan id>.network`, generated into `/run/systemd/network`).
+  The setting is explicit because networkd turns RA off by default whenever
+  it considers IPv6 forwarding enabled (`systemd.network(5)`,
+  `IPv6AcceptRA=`); explicitly enabled, it keeps accepting RAs regardless.
+  The drop-in lives in `/etc` and is keyed by the file's name, so
+  `netplan generate` / `netplan apply` regenerating `/run/systemd/network`
+  leaves it in force, and the operator's netplan YAML is never edited. (A
+  netplan `accept-ra: true` override was rejected: it has to repeat the
+  operator's netplan id to merge, and applying it means `netplan apply`.)
+  A change runs `networkctl reload`, which reconfigures only the uplink, in
+  place, without setting it down. The role also removes
+  `/etc/sysctl.d/61-cs-node-ipv6.conf` there (written by earlier versions of
+  this role), so a later `sysctl --system` cannot set `accept_ra=2` and have
+  the kernel process RAs alongside networkd.
+- **Anything else** (ifupdown, NetworkManager, a link networkd leaves
+  unmanaged, no networkd at all). The kernel handles RAs, so the role writes
+  `/etc/sysctl.d/61-cs-node-ipv6.conf` with
+  `net.ipv6.conf.<uplink_interface>.accept_ra = 2` (accept RAs even while
+  forwarding) and reloads sysctl.
+
+networkd never touches the forwarding sysctls docker sets: netplan renders
+no `IPv6Forwarding=`, and with it unset in both the `.network` file and
+`networkd.conf` networkd leaves the sysctl alone. If the netplan id of the
+uplink changes later, the old drop-in is left behind, inert; the next
+converge writes the new one. The decision is
+`filter_plugins/node_kernel.py`, tested by `tests/node_kernel_uplink_ra.yml`.
 
 ## Variables
 
@@ -48,7 +90,8 @@ preloads belong to `node_observability` and docker configuration to
 |---|---|---|
 | `node_kernel_conntrack_hashsize` | `"250000"` | nf_conntrack module hashsize (module option, not sysctl). |
 | `node_kernel_sysctls` | see `defaults/main.yml` | Full sysctl key/value map written to `60-cs-node.conf`. |
+| `node_kernel_accept_ra_dropin` | `60-cs-node-accept-ra.conf` | Name of the networkd drop-in that sets `IPv6AcceptRA=yes` on the uplink. |
 
 Consumed, not owned: `uplink_interface` (host var, no default — when unset,
-the accept_ra fix is skipped with a documented note, never guessed from
+the router advertisement fix is skipped with a documented note, never guessed from
 facts).

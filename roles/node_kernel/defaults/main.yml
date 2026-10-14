@@ -28,3 +28,8 @@ node_kernel_sysctls:
   # BBR — new in v2, not present in v1.
   net.core.default_qdisc: "fq"
   net.ipv4.tcp_congestion_control: "bbr"
+
+# File name of the drop-in written next to the uplink's .network file
+# (/etc/systemd/network/<file>.network.d/) when systemd-networkd manages the
+# uplink. See README.md, "IPv6 router advertisements on the uplink".
+node_kernel_accept_ra_dropin: 60-cs-node-accept-ra.conf

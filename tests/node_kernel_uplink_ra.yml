@@ -1,0 +1,147 @@
+---
+# Does roles/node_kernel pick the right IPv6 router advertisement fix for the
+# uplink? -- a networkd drop-in where systemd-networkd manages the link (it
+# forces the kernel's accept_ra to 0 there), the accept_ra=2 sysctl where it
+# does not, and a refusal when uplink_interface names no interface.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/node_kernel_uplink_ra.yml
+#
+# PURE: this includes ONLY tasks/uplink_ra.yml (no command, no host access)
+# and feeds it canned `networkctl --json=short status <if>` results in the
+# shape systemd 257+ prints for one link (the link object itself; the
+# {"Interfaces": [...]} list form of `networkctl --json=short list` is
+# accepted too). Covered: a netplan link, configured; a netplan id that is
+# not the interface name; the list form; a managed link in state `failed`;
+# an unmanaged link; a managed state with no NetworkFile; networkd not
+# running (rc 1); networkctl not installed (rc 2, no output); output that is
+# not JSON; a missing interface; interface facts not gathered.
+
+- name: Uplink IPv6 router advertisement fix selection
+  hosts: localhost
+  gather_facts: false
+  vars:
+    uplink_interface: eth0
+    ansible_interfaces: "{{ nkr_interfaces }}"
+    nkr_interfaces: [lo, eth0, docker0]
+    nkr_cases:
+      - name: netplan link, configured
+        result:
+          rc: 0
+          stdout: '{"Index":2,"Name":"eth0","AdministrativeState":"configured","NetworkFile":"/run/systemd/network/10-netplan-eth0.network"}'
+        want: networkd
+        file: 10-netplan-eth0.network
+      - name: netplan id differs from the interface name
+        result:
+          rc: 0
+          stdout: '{"Index":2,"Name":"eth0","AdministrativeState":"configured","NetworkFile":"/run/systemd/network/10-netplan-uplink.network"}'
+        want: networkd
+        file: 10-netplan-uplink.network
+      - name: list form
+        result:
+          rc: 0
+          stdout: >-
+            {"Interfaces":[{"Name":"lo","AdministrativeState":"unmanaged"},
+            {"Name":"eth0","AdministrativeState":"configuring",
+            "NetworkFile":"/etc/systemd/network/20-wan.network"}]}
+        want: networkd
+        file: 20-wan.network
+      - name: managed but failed
+        result:
+          rc: 0
+          stdout: '{"Name":"eth0","AdministrativeState":"failed","NetworkFile":"/run/systemd/network/10-netplan-eth0.network"}'
+        want: networkd
+        file: 10-netplan-eth0.network
+      - name: unmanaged link
+        result:
+          rc: 0
+          stdout: '{"Name":"eth0","AdministrativeState":"unmanaged"}'
+        want: sysctl
+        file: ""
+      - name: managed state without a network file
+        result:
+          rc: 0
+          stdout: '{"Name":"eth0","AdministrativeState":"configured"}'
+        want: sysctl
+        file: ""
+      - name: networkd not running
+        result:
+          rc: 1
+          stdout: ""
+          stderr: "Failed to query link: Unit dbus-org.freedesktop.network1.service not found."
+        want: sysctl
+        file: ""
+      - name: networkctl not installed
+        result:
+          rc: 2
+          msg: "[Errno 2] No such file or directory: b'networkctl'"
+        want: sysctl
+        file: ""
+      - name: output is not JSON
+        result:
+          rc: 0
+          stdout: "● 2: eth0"
+        want: sysctl
+        file: ""
+  tasks:
+    - name: "Case: {{ item.name }}"
+      ansible.builtin.include_role:
+        name: node_kernel
+        tasks_from: uplink_ra
+      vars:
+        node_kernel_uplink_networkctl: "{{ item.result }}"
+      loop: "{{ nkr_cases }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # include_role in a loop sets the fact once per case; re-derive each
+    # answer through the filter (now loaded) to assert them all.
+    - name: "Assert: every case picks the expected fix"
+      ansible.builtin.assert:
+        that:
+          - nkr_got.mode == item.want
+          - nkr_got.network_file == item.file
+          - nkr_got.reason | length > 0
+        fail_msg: "{{ item.name }}: want {{ item.want }} {{ item.file }}, got {{ nkr_got }}"
+        quiet: true
+      vars:
+        nkr_got: "{{ item.result | node_kernel_uplink_ra('eth0', nkr_interfaces) }}"
+      loop: "{{ nkr_cases }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "Case: the last include left the fact set for the last case"
+      ansible.builtin.assert:
+        that:
+          - node_kernel_uplink_ra.mode == 'sysctl'
+        quiet: true
+
+    - name: "Case: a missing interface (uplink_interface eth1)"
+      ansible.builtin.set_fact:
+        uplink_interface: eth1
+
+    - name: "Case: a missing interface"
+      ansible.builtin.include_role:
+        name: node_kernel
+        tasks_from: uplink_ra
+      vars:
+        node_kernel_uplink_networkctl:
+          rc: 1
+          stderr: 'Interface "eth1" not found.'
+
+    - name: "Assert: a missing interface is refused, naming the ones that exist"
+      ansible.builtin.assert:
+        that:
+          - node_kernel_uplink_ra.mode == 'missing'
+          - "'eth1' in node_kernel_uplink_ra.reason"
+          - "'docker0, eth0, lo' in node_kernel_uplink_ra.reason"
+        quiet: true
+
+    - name: "Case: interface facts not gathered still decides from networkctl"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (nkr_cases[0].result | node_kernel_uplink_ra('eth0', none)).mode
+            == 'networkd'
+          - >-
+            ({'rc': 1} | node_kernel_uplink_ra('eth0', none)).mode == 'sysctl'
+        quiet: true

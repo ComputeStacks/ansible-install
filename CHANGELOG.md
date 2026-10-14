@@ -2,6 +2,16 @@
 
 ## October 14, 2026
 
+* **IPv6 router advertisements now survive a reboot on netplan nodes.**
+  systemd-networkd resets the kernel's `accept_ra` to 0 on links it manages,
+  so the `accept_ra = 2` sysctl on `uplink_interface` was undone at boot.
+  Where networkd manages the uplink, `node_kernel` now writes an
+  `IPv6AcceptRA=yes` drop-in next to the uplink's `.network` file
+  (`/etc/systemd/network/<file>.network.d/60-cs-node-accept-ra.conf`),
+  removes `/etc/sysctl.d/61-cs-node-ipv6.conf`, and runs `networkctl reload`.
+  The operator's netplan YAML is not edited. Uplinks networkd does not manage
+  keep the sysctl. An `uplink_interface` the host does not have now fails the
+  node instead of writing a sysctl for it.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

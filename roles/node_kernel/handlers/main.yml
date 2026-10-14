@@ -6,3 +6,9 @@
 - name: Reload sysctl
   ansible.builtin.command: sysctl --system
   changed_when: false
+
+# Re-reads .network files and drop-ins; only links whose configuration
+# changed are reconfigured, in place (the link is not set down).
+- name: Reload systemd-networkd
+  ansible.builtin.command: networkctl reload
+  changed_when: true
