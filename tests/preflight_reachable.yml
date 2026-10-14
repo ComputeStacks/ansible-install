@@ -1,0 +1,125 @@
+---
+# Does roles/preflight's reachability check name every targeted host that did
+# not answer, and only those? -- the check that stops a run which would
+# otherwise carry on without an unreachable host, proven without a host.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/preflight_reachable.yml
+#
+# PURE: this includes ONLY tasks/reachable_assert.yml (an assert, no
+# connection) and calls the role's filter plugin
+# (filter_plugins/preflight.py). It never includes tasks/reachable.yml, whose
+# ping is the only part that talks to a host. The ping results below are the
+# shapes ansible registers: a pong; `unreachable: true` with ssh's message
+# (kept in the play by `ignore_unreachable`); a module failure turned into
+# `failed: false` by `failed_when: false`, which therefore has no `ping` key;
+# and no result at all, which is what a host ansible removed from the play
+# before the ping ran looks like.
+#
+# The one `fatal: ... did not answer` in the output is expected: it is the
+# assert's failure path, caught by `rescue:`.
+
+- name: Preflight reachability verdict
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    prt_pong: {changed: false, ping: pong}
+    prt_unreachable:
+      unreachable: true
+      changed: false
+      msg: >-
+        Failed to connect to the host via ssh: ssh: connect to host
+        192.0.2.30 port 2222: Connection timed out
+    prt_no_python:
+      changed: false
+      failed: false
+      failed_when_result: false
+      module_stderr: "/bin/sh: 1: /usr/bin/python3: not found"
+      msg: MODULE FAILURE
+    prt_hostvars:
+      controller.example.com: {ansible_host: 192.0.2.10, preflight_reachable_ping: "{{ prt_pong }}"}
+      node101.example.com: {ansible_host: 192.0.2.20, ansible_port: 22, preflight_reachable_ping: "{{ prt_pong }}"}
+      backup.example.com: {ansible_host: 192.0.2.30, ansible_port: 2222, preflight_reachable_ping: "{{ prt_unreachable }}"}
+      metrics.example.com: {ansible_host: 192.0.2.40, preflight_reachable_ping: "{{ prt_no_python }}"}
+      registry.example.com: {ansible_host: 192.0.2.50}
+    prt_all: [controller.example.com, node101.example.com, backup.example.com, metrics.example.com, registry.example.com]
+    prt_good: [controller.example.com, node101.example.com]
+    prt_bad: [backup.example.com, metrics.example.com, registry.example.com]
+  tasks:
+    # ======================================================================
+    # Through tasks/reachable_assert.yml, as every entry point runs it
+    # (first, so the role -- and with it the filter plugin -- is loaded)
+    # ======================================================================
+    - name: "Case: every host answered, through reachable_assert.yml"
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: reachable_assert
+      vars:
+        preflight_reachable_hosts: "{{ prt_good }}"
+        preflight_reachable_hostvars: "{{ prt_hostvars }}"
+
+    - name: "Case: three hosts did not answer, through reachable_assert.yml"
+      block:
+        - name: Assert over the whole fleet
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: reachable_assert
+          vars:
+            preflight_reachable_hosts: "{{ prt_all }}"
+            preflight_reachable_hostvars: "{{ prt_hostvars }}"
+
+        - name: The assert did not fail
+          ansible.builtin.fail:
+            msg: reachable_assert.yml passed with three hosts that did not answer
+      rescue:
+        - name: "Assert: the failure names each host, its address and the hint"
+          ansible.builtin.assert:
+            that:
+              - "'3 of 5 targeted host(s) did not answer' in prt_msg"
+              - "'backup.example.com at 192.0.2.30:2222' in prt_msg"
+              - "'metrics.example.com at 192.0.2.40 (no ansible_port)' in prt_msg"
+              - "'registry.example.com at 192.0.2.50' in prt_msg"
+              - "'controller.example.com' not in prt_msg"
+              - "'Nothing was changed on any host' in prt_msg"
+              - "'ansible_host' in prt_msg"
+            fail_msg: "{{ prt_msg }}"
+            quiet: true
+          vars:
+            prt_msg: "{{ ansible_failed_result.msg | default('') }}"
+
+    # ======================================================================
+    # The filter
+    # ======================================================================
+    - name: "Assert: every host that answered is left out, every other one named in order"
+      ansible.builtin.assert:
+        that:
+          - (prt_found | map(attribute='host') | list) == prt_bad
+          - prt_found[0].address == '192.0.2.30'
+          - prt_found[0].port == 2222
+          - "prt_found[0].reason is match('unreachable: Failed to connect to the host via ssh')"
+          - "'port 2222: Connection timed out' in prt_found[0].reason"
+          - prt_found[1].port is none
+          - "prt_found[1].reason == 'ping failed: MODULE FAILURE /bin/sh: 1: /usr/bin/python3: not found'"
+          - prt_found[2].reason is match('no ping result')
+        fail_msg: "{{ prt_found | to_json }}"
+        quiet: true
+      vars:
+        prt_found: "{{ prt_all | preflight_unreachable(prt_hostvars) }}"
+
+    - name: "Assert: all answered, nothing named"
+      ansible.builtin.assert:
+        that:
+          - (prt_good | preflight_unreachable(prt_hostvars)) == []
+          - ([] | preflight_unreachable(prt_hostvars)) == []
+        quiet: true
+
+    - name: "Assert: a host hostvars does not know at all is named, by its own name"
+      ansible.builtin.assert:
+        that:
+          - prt_found | length == 1
+          - prt_found[0].host == 'ghost.example.com'
+          - prt_found[0].address == 'ghost.example.com'
+        fail_msg: "{{ prt_found | to_json }}"
+        quiet: true
+      vars:
+        prt_found: "{{ ['ghost.example.com'] | preflight_unreachable(prt_hostvars) }}"

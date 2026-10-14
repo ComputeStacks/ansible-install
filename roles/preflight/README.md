@@ -8,17 +8,48 @@ to a host.
 
 | Runs in | Play | Hosts |
 | --- | --- | --- |
+| `site.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | `all` |
 | `site.yml` | "Preflight validation" | `all` |
+| `add-region.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | `all` |
 | `add-region.yml` | "Preflight validation and attach-mode inventory checks" | `all` |
-| `upgrade-docker.yml`, `unseal.yml` | not run | — |
+| `upgrade-docker.yml` | "Every targeted node is reachable" (`tasks_from: reachable`) | `node_upgrade_targets` |
+| `unseal.yml` | not run | — |
 
-Both plays run it first, with `gather_facts: true`.
+The reachability play runs first in each playbook, with `gather_facts:
+false`; the preflight play follows with `gather_facts: true` and
+`any_errors_fatal: true`, so a host failing any check stops every host.
 
 **Attach mode:** runs on every host, existing ones included, and changes
 nothing; the OS, data-disk, registry-login and controller-image checks skip
 `existing_env` hosts, and the delegation check is skipped in attach mode.
 **Requires:** — (it includes `roles/node_storage`'s read-only `probe` and pure
 `classify` task files itself).
+
+## Reachability (`tasks/reachable.yml`)
+
+Ansible does not stop for an unreachable host. It prints `UNREACHABLE`,
+removes the host from the play, carries on with the others, and every later
+play that targets it matches nothing and is skipped — so a run that cannot
+reach the backup server at fact gathering builds everything else and fails
+much later, somewhere unrelated, or not at all. `tasks/reachable.yml` pings
+every targeted host, keeping each one in the play whatever happens
+(`ignore_unreachable`, `failed_when: false`, and `any_errors_fatal: false`
+on the ping alone), then ONE `run_once` assert (`tasks/reachable_assert.yml`)
+fails the run if any host did not return `pong`. The message names every such
+host with its `ansible_host`, `ansible_port` and ssh's own error, and says what
+to check: the address, `ansible_port` / `ssh_port`, any firewall in between.
+
+The verdict is the `preflight_unreachable` filter
+(`filter_plugins/preflight.py`). It walks `ansible_play_hosts_all`, so a host
+ansible dropped before the ping ran — it has no result at all — is named too.
+`tests/preflight_reachable.yml` proves it against canned ping results.
+
+The include carries the `always` tag, so `--tags validate` runs it too.
+
+After preflight, `ansible.cfg` sets `any_errors_fatal = True` for every play:
+a host that fails or becomes unreachable later in the run stops every host
+rather than being dropped. The two validate plays turn it off, since they
+change nothing.
 
 ## What it asserts
 
@@ -222,6 +253,7 @@ not earn.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `preflight_reachable_hosts` / `preflight_reachable_hostvars` | `ansible_play_hosts_all` / `hostvars` | What `tasks/reachable_assert.yml` judges. Set only by `tests/preflight_reachable.yml`, to feed it canned ping results. |
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
 | `preflight_storage_refused_nodes` | derived | Nodes whose `node_storage_state` fact is `refuse`. A plain fact, so the cross-host read is safe (docs/contracts.md rule 10). |
 | `preflight_site_hint` | see `defaults/main.yml` | What a `site` is and where to set it, as an operator-facing sentence. Shared by all three site assertions. |

@@ -1,0 +1,28 @@
+---
+# Can ansible reach and run a module on every targeted host? Run as the
+# FIRST play of every entry point (site.yml, add-region.yml,
+# upgrade-docker.yml), with `gather_facts: false`, before anything else
+# connects.
+#
+# Why this exists: an unreachable host is not an error ansible stops for.
+# It prints UNREACHABLE, removes that host from the play and carries on with
+# the rest, and every later play targeting it then matches nothing and is
+# skipped, so a run can lose a host from fact gathering onward and only
+# fail much later on a step that needed it. This file turns that into one
+# failure, before any host is changed, naming every host that did not answer
+# and why.
+#
+# The ping keeps every host in the play whatever happens to it
+# (`ignore_unreachable`, `failed_when: false`), and explicitly NOT
+# any_errors_fatal: ansible.cfg makes every task fatal by default, and a
+# fatal ping would stop the play on the first unreachable host with
+# ansible's own message, before the assert below could list them all.
+- name: Connect to every targeted host
+  ansible.builtin.ping:
+  register: preflight_reachable_ping
+  ignore_unreachable: true
+  failed_when: false
+  any_errors_fatal: false
+
+- name: Assert every targeted host answered
+  ansible.builtin.import_tasks: reachable_assert.yml

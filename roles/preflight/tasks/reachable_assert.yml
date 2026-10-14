@@ -1,0 +1,35 @@
+---
+# The verdict half of tasks/reachable.yml, separate so
+# tests/preflight_reachable.yml can feed it canned ping results. Reads
+# `preflight_reachable_hosts` (default: ansible_play_hosts_all, every host
+# the play targeted, including any ansible has already dropped) and
+# `preflight_reachable_hostvars` (default: hostvars).
+#
+# `run_once`: a failed run_once task fails every host in the play, so the
+# whole run stops here, whichever host ansible happened to evaluate it on.
+- name: Assert every targeted host answered the ping
+  ansible.builtin.assert:
+    that:
+      - preflight_reachable_failed | length == 0
+    fail_msg: >-
+      {{ preflight_reachable_failed | length }} of
+      {{ (preflight_reachable_hosts | default(ansible_play_hosts_all)) | length }}
+      targeted host(s) did not answer:
+      {% for f in preflight_reachable_failed %}{{ f.host }} at
+      {{ f.address }}{{ ':' ~ f.port if f.port else ' (no ansible_port)' }}
+      -- {{ f.reason }}{{ '; ' if not loop.last else '' }}{% endfor %}.
+      Nothing was changed on any host. Check, for each one, that its
+      `ansible_host` is the address you can ssh to from here, that
+      `ansible_port` (and `ssh_port`) is the port its sshd listens on, that no
+      firewall or security group between here and the host drops that port,
+      and that `ssh -p <port> root@<address>` works by hand. In site.yml and
+      add-region.yml, do not --limit the host away instead: the plays that
+      target it would be skipped and the run could end green without it.
+    success_msg: >-
+      all {{ (preflight_reachable_hosts | default(ansible_play_hosts_all)) | length }}
+      targeted host(s) answered
+  vars:
+    preflight_reachable_failed: >-
+      {{ (preflight_reachable_hosts | default(ansible_play_hosts_all))
+         | preflight_unreachable(preflight_reachable_hostvars | default(hostvars)) }}
+  run_once: true

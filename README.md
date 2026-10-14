@@ -196,7 +196,7 @@ ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 The play order is a contract, not a convenience (`docs/contracts.md`):
 
 ```
-preflight -> base system -> tailscale -> nameservers
+reachability -> preflight -> base system -> tailscale -> nameservers
   -> node data disk -> docker
   -> controller (vault, postgres, redis, nginx/acme, portal)
   -> node docker TLS -> metrics -> registry -> backup -> node base stack

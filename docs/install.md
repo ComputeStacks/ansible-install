@@ -310,7 +310,8 @@ certificates, loads the controller schema, seeds it from the rendered
 manifest, enrolls every node and runs the backfills. Watch for these
 checkpoints:
 
-1. **Preflight** — fails immediately on a missing node var, a duplicate `az`,
+1. **Preflight** — fails immediately on a host ansible cannot reach (naming
+   every one, with its address, port and ssh's error), a missing node var, a duplicate `az`,
    a short `secret_key_base`, a non-Ubuntu host or a node data disk that is
    not blank. Nothing has been changed at
    that point.
