@@ -162,6 +162,11 @@ preflight_wildcard_domain_overrides: >-
      | rejectattr('controller_wildcard_domain', 'equalto', cs_app_zone | default(''))
      | map(attribute='inventory_hostname') | list | sort }}
 
+# The container data disk probe and its run-wide assert. Off only for a run
+# that never touches docker or the disk -- playbooks/firewall.yml -- so a node
+# built before the data-disk requirement can still have its firewall changed.
+preflight_check_node_storage: true
+
 # Nodes whose container data disk roles/node_storage refused (classify.yml
 # sets `node_storage_state` as a plain fact on each node it probes). A fact,
 # not a hostvars-built variable, so reading it across hosts is safe

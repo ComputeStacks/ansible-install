@@ -12,6 +12,11 @@ Two entry points:
 | `playbooks/site.yml` | A whole environment, from bare Ubuntu 26.04 hosts. |
 | `playbooks/add-region.yml` | A new region/AZ/node attached to an environment that already exists. |
 
+and three narrow ones for an environment already built:
+`playbooks/upgrade-docker.yml` (see [Upgrades](#upgrades)),
+`playbooks/firewall.yml` (see [Changing the firewall](#changing-the-firewall))
+and `playbooks/unseal.yml`.
+
 Both are convergent for host configuration, images and package versions:
 re-running reconciles them rather than skipping work it thinks is already
 done. Everything externally sourced is pinned in
@@ -241,6 +246,64 @@ ansible-playbook -i inventories/prod playbooks/site.yml --tags validate
 See [`roles/validate/README.md`](roles/validate/README.md) for the full check
 list, what each failure means, and how to skip one.
 
+## Changing the firewall
+
+Every host's firewall is rendered from inventory alone (the ports contract,
+group membership, `primary_ip` / `public_ip`, tailnet membership and the
+`firewall_*` variables in [`roles/firewall/README.md`](roles/firewall/README.md)),
+so a change to any of them is applied by re-rendering the firewall and nothing
+else:
+
+```bash
+make firewall ENV=prod ARGS='--check --diff'   # show each table's diff first
+make firewall ENV=prod                          # apply it
+make firewall ENV=prod LIMIT=node1001           # one host
+```
+
+`playbooks/firewall.yml` runs preflight's inventory checks (not its registry,
+DNS or data disk checks), then re-renders and applies the `inet cs_static`
+table on each host exactly as the playbook that built it would: every host on
+a greenfield inventory; on an attach inventory, the nodes only, with the
+existing controller, metrics and backup hosts receiving the same additive node
+address appends as `add-region.yml` and every other `existing_env` host left
+alone. A firewall this repository did not render is never rewritten from here.
+
+`--limit` is safe: a limited host's table still lists every peer. Limit to the
+hosts whose own table changes. A node's changed address is accepted by the
+controller and the metrics host as well, so include them.
+
+**Restricting ssh.** `firewall_allow_ssh_from` (empty means anywhere) is a list
+of addresses or CIDRs, set in `group_vars` or per host. The table is applied
+by restarting `cs-firewall.service`; the connection ansible is using survives
+that, the next one does not. Before narrowing it, make sure the list still
+covers:
+
+* the machine you run ansible from;
+* on the nodes and the registry, the controller (volumes, haproxy
+  certificate deploys, load balancer reloads, `DockerSSH`);
+* on the backup server, every node (borg runs over ssh).
+
+Anything you lock out has to be recovered from the host's console.
+
+**Moving sshd to another port.** `ssh_port` tells the firewall (and the rest
+of the repository) which port sshd listens on; it does not move sshd, and
+preflight requires `ansible_port` to match it. Opening the new port before
+anything dials it takes two runs:
+
+1. Make sshd listen on both the old and the new port, by hand.
+2. Add `firewall_extra_input_rules: ["tcp dport <new> accept"]` to the host
+   and run `make firewall ENV=prod LIMIT=<host>`. The new port is open; ansible
+   still dials the old one.
+3. Set the host's `ssh_port` and `ansible_port` to the new port, remove the
+   extra rule, and run it again. Ansible now dials the new port, and the old
+   one closes.
+4. Remove the old port from sshd.
+
+`ssh_port` has other consumers — ssh trust, the controller's settings and
+Node rows, the nodes' backup connection — and `firewall.yml` changes none of
+them; a full `site.yml` run does, subject to what the bootstrap manifest
+rewrites (see [`roles/controller_seed/README.md`](roles/controller_seed/README.md)).
+
 ## Adding a region
 
 For a v2 environment, add the node to the same inventory and re-run
@@ -351,11 +414,12 @@ is not a recoverable environment.
 
 ```
 ansible.cfg                     roles_path, collections_path, ssh settings
-Makefile                        thin wrapper: deps, site, add-region, upgrade-docker, validate, lint, check
+Makefile                        thin wrapper: deps, site, add-region, upgrade-docker, firewall, validate, lint, check
 requirements.yml                pinned galaxy roles and collections
 playbooks/site.yml              greenfield converge
 playbooks/add-region.yml        attach mode
 playbooks/upgrade-docker.yml    docker upgrades on the nodes, one at a time
+playbooks/firewall.yml          re-render and apply the host firewalls and nothing else
 playbooks/unseal.yml            unseal the controller's vault and nothing else
 playbooks/group_vars/all/       versions.yml (pins) and ports.yml (the ports contract)
 playbooks/vars/                 platform vars a pinned galaxy role is missing

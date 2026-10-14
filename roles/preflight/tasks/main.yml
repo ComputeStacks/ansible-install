@@ -577,6 +577,7 @@
 # nodes (v1-built) are never probed and never asserted.
 - name: Probe and classify each new node's container data disk
   when:
+    - preflight_check_node_storage | bool
     - "'nodes' in group_names"
     - not (existing_env | default(false) | bool)
   vars:
@@ -606,6 +607,7 @@
       (docs/install.md); a node built before that requirement has none and
       must be rebuilt.
     success_msg: "every new node's container data disk is usable"
+  when: preflight_check_node_storage | bool
   run_once: true
 
 # DNS before the registry: both are network checks, but this one fails on an
@@ -638,7 +640,9 @@
       {{ cs_app_zone }} on {{ groups['ns_primary'][0] }}) rather than checked
       here, and are validated at the end of the run (roles/validate: `dns` on
       every nameserver, `lb_domain_public` through public resolution).
-  when: preflight_lb_records_managed | bool
+  when:
+    - preflight_check_app_domain_dns | bool
+    - preflight_lb_records_managed | bool
   run_once: true
 
 # Skipped in attach mode: add-region.yml adds names to a zone that is already

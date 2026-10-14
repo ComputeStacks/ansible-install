@@ -8,6 +8,7 @@
 #   make site ENV=prod
 #   make add-region ENV=prod
 #   make upgrade-docker ENV=prod
+#   make firewall ENV=prod
 #   make validate ENV=prod
 #   make lint check
 #
@@ -64,7 +65,7 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region upgrade-docker validate add-region-validate lint check check-pins
+.PHONY: help deps site add-region upgrade-docker firewall validate add-region-validate lint check check-pins
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
@@ -72,6 +73,8 @@ help:
 	@echo "add-region ENV=<name>             attach a region to an existing environment"
 	@echo "upgrade-docker ENV=<name>         roll docker to its pins on the nodes, one at a"
 	@echo "                                  time, in a maintenance window (LIMIT=<node> resumes one)"
+	@echo "firewall ENV=<name>               re-render and apply the host firewalls only"
+	@echo "                                  (ARGS='--check --diff' shows the change first)"
 	@echo "validate ENV=<name>               re-run the post-install checks only"
 	@echo "add-region-validate ENV=<name>    the same, for an attached region (add-region.yml)"
 	@echo "lint                              ansible-lint, production profile"
@@ -116,6 +119,16 @@ upgrade-docker:
 	$(require_env)
 	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/upgrade-docker.yml
 
+# The host firewalls and nothing else (playbooks/firewall.yml), after an
+# inventory change only the firewall reads -- firewall_allow_ssh_from, a
+# host's ssh_port, extra allowed addresses. Works on a greenfield and an
+# attach inventory alike, treating each host as the playbook that built it
+# does. LIMIT is safe here: the firewall renders from inventory alone, so a
+# limited host's table still lists every peer.
+firewall:
+	$(require_env)
+	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/firewall.yml
+
 # Every check in roles/validate carries the `validate` tag (plus its own
 # name), so this runs the assertions without re-running the converge.
 # `make validate ENV=prod ARGS='--skip-tags borg'` narrows it further.
@@ -151,6 +164,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/site.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/add-region.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/upgrade-docker.yml
+	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/firewall.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example tests/roles.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i tests/fixtures/single-site playbooks/site.yml
 	@$(ANSIBLE_INVENTORY) -i inventories/example --graph | grep -q '@region_' || { \
