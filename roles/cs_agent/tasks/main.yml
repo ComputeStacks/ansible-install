@@ -50,6 +50,11 @@
          else "no backup server in site '" ~ cs_site ~ "' — backups will be disabled on this node" }}
     quiet: true
 
+# Preflight runs the same pure check fleet-wide before any host changes; this
+# is the backstop for a `--tags`/`--limit` run that skipped it.
+- name: Check the backup export settings
+  ansible.builtin.include_tasks: export_check.yml
+
 - name: Install the cs-agent package from the ComputeStacks apt repository
   ansible.builtin.include_tasks: install.yml
 

@@ -1,0 +1,259 @@
+---
+# Does roles/cs_agent render the backup export block (backups.export.*) only
+# when a bucket is set, render every key when it is, and refuse a config
+# cs-agent would only log about at startup?
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
+#
+# (run by `make check`). PURE: it includes only tasks/export_check.yml (a
+# filter call, no command) and renders templates/agent.yml.j2 with a lookup;
+# nothing is written and no host is contacted. Every value here is a
+# placeholder (example.com, "EXAMPLE..." keys).
+#
+# Runs on ONE node: the template reads node inventory vars (primary_ip,
+# cs_site, the backup host map) exactly as a converge would.
+#
+# The `noqa: var-naming[no-role-prefix]` marks are for s3_export_access_key /
+# s3_export_secret_key: secrets-file names the role consumes, not role vars.
+#
+# The one `fatal: ... the backup export settings are invalid` in the output
+# is expected: it is the refusal path of export_check.yml, caught by
+# `rescue:`.
+
+- name: Backup export settings and agent.yml rendering
+  hosts: nodes[0]
+  gather_facts: false
+  vars:
+    cae_template: "{{ playbook_dir }}/../roles/cs_agent/templates/agent.yml.j2"
+    # Every export variable set away from its default, and credentials with a
+    # quote and a backslash to prove the render still parses.
+    cae_full: &cae_full
+      cs_agent_s3_export_bucket: exports-example
+      cs_agent_s3_export_endpoint: https://s3.example.com
+      cs_agent_s3_export_region: example-1
+      cs_agent_s3_export_prefix: "node-exports/"
+      cs_agent_s3_export_force_path_style: true
+      cs_agent_s3_export_workers: 2
+      cs_agent_s3_export_tar_filter: "zstd"
+      cs_agent_s3_export_timeout_sec: 7200
+      cs_agent_s3_export_part_size_mb: 128
+      cs_agent_s3_export_concurrency: 8
+      cs_agent_s3_export_sse: ""
+      cs_agent_s3_export_default_ttl_sec: 3600
+      cs_agent_s3_export_max_ttl_sec: 7200
+      s3_export_access_key: "EXAMPLEACCESSKEY"
+      s3_export_secret_key: 'EXAMPLE/secret"with\quote'
+    cae_full_expected:
+      workers: 2
+      tar_filter: zstd
+      timeout_sec: 7200
+      s3:
+        endpoint: https://s3.example.com
+        region: example-1
+        bucket: exports-example
+        prefix: node-exports/
+        access_key: EXAMPLEACCESSKEY
+        secret_key: 'EXAMPLE/secret"with\quote'
+        force_path_style: true
+        part_size_mb: 128
+        concurrency: 8
+        sse: ""
+        default_ttl_sec: 3600
+        max_ttl_sec: 7200
+    # A valid settings dict as export_check.yml builds it, for the filter cases.
+    cae_ok:
+      bucket: exports-example
+      endpoint: https://s3.example.com
+      region: us-east-1
+      prefix: exports/
+      access_key_set: true
+      secret_key_set: true
+      force_path_style: false
+      workers: 1
+      tar_filter: gzip
+      timeout_sec: 14400
+      part_size_mb: 64
+      concurrency: 4
+      sse: AES256
+      default_ttl_sec: 43200
+      max_ttl_sec: 86400
+  tasks:
+    # `public: true` keeps the role's defaults visible to the renders below,
+    # which is also the "nothing set" case: the shipped defaults must pass.
+    - name: "Case: defaults (no bucket), through export_check.yml"
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+        public: true
+
+    - name: "Assert: export off, no problems, no export block rendered"
+      vars:
+        cae_doc: "{{ lookup('ansible.builtin.template', cae_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_export_problems == []
+          - not (cs_agent_s3_export_enabled | bool)
+          - "'export' not in cae_doc.backups"
+        fail_msg: "{{ cs_agent_export_problems }} / {{ cae_doc.backups }}"
+        quiet: true
+
+    - name: "Assert: credentials alone do not turn export on"
+      vars:
+        s3_export_access_key: EXAMPLEACCESSKEY
+        s3_export_secret_key: EXAMPLESECRET
+        cae_doc: "{{ lookup('ansible.builtin.template', cae_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - "'export' not in cae_doc.backups"
+        quiet: true
+
+    - name: "Assert: the shipped defaults are cs-agent's own (config/config.go)"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_s3_export_workers == 1
+          - cs_agent_s3_export_tar_filter == 'gzip'
+          - cs_agent_s3_export_timeout_sec == 14400
+          - cs_agent_s3_export_endpoint == ''
+          - cs_agent_s3_export_region == 'us-east-1'
+          - cs_agent_s3_export_bucket == ''
+          - cs_agent_s3_export_prefix == 'exports/'
+          - not cs_agent_s3_export_force_path_style
+          - cs_agent_s3_export_part_size_mb == 64
+          - cs_agent_s3_export_concurrency == 4
+          - cs_agent_s3_export_sse == 'AES256'
+          - cs_agent_s3_export_default_ttl_sec == 43200
+          - cs_agent_s3_export_max_ttl_sec == 86400
+          - cs_agent_upstream_tasks_retention_sec == 604800
+        quiet: true
+
+    - name: "Case: every export variable set"  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+      vars: *cae_full
+
+    - name: "Assert: valid, and the export block renders every key"
+      vars:
+        <<: *cae_full
+        cae_doc: "{{ lookup('ansible.builtin.template', cae_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_export_problems == []
+          - cae_doc.backups.export == cae_full_expected
+        fail_msg: "{{ cs_agent_export_problems }} / {{ cae_doc.backups.export | default('no export block') }}"
+        quiet: true
+
+    - name: "Assert: bucket, endpoint and keys alone render cs-agent's defaults for the rest"
+      vars:
+        cs_agent_s3_export_bucket: exports-example
+        cs_agent_s3_export_endpoint: https://s3.example.com
+        s3_export_access_key: EXAMPLEACCESSKEY
+        s3_export_secret_key: EXAMPLESECRET
+        cae_doc: "{{ lookup('ansible.builtin.template', cae_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - cae_doc.backups.export.workers == 1
+          - cae_doc.backups.export.tar_filter == 'gzip'
+          - cae_doc.backups.export.timeout_sec == 14400
+          - cae_doc.backups.export.s3.region == 'us-east-1'
+          - cae_doc.backups.export.s3.prefix == 'exports/'
+          - cae_doc.backups.export.s3.force_path_style == false
+          - cae_doc.backups.export.s3.part_size_mb == 64
+          - cae_doc.backups.export.s3.concurrency == 4
+          - cae_doc.backups.export.s3.sse == 'AES256'
+          - cae_doc.backups.export.s3.default_ttl_sec == 43200
+          - cae_doc.backups.export.s3.max_ttl_sec == 86400
+        fail_msg: "{{ cae_doc.backups.export | default('no export block') | to_json }}"
+        quiet: true
+
+    - name: "Case: bucket set without credentials, recorded rather than failed"
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+      vars:
+        cs_agent_s3_export_bucket: exports-example
+        cs_agent_export_check_fail: false
+
+    - name: "Assert: both missing keys reported"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_export_problems | length == 2
+          - cs_agent_export_problems | select('search', 's3_export_access_key') | list | length == 1
+          - cs_agent_export_problems | select('search', 's3_export_secret_key') | list | length == 1
+        fail_msg: "{{ cs_agent_export_problems }}"
+        quiet: true
+
+    - name: "Case: an invalid config fails the host (cs_agent_export_check_fail defaults true)"
+      block:
+        - name: Check a config whose default TTL exceeds its max  # noqa: var-naming[no-role-prefix]
+          ansible.builtin.include_role:
+            name: cs_agent
+            tasks_from: export_check
+          vars:
+            cs_agent_s3_export_bucket: exports-example
+            cs_agent_s3_export_default_ttl_sec: 90000
+            s3_export_access_key: EXAMPLEACCESSKEY
+            s3_export_secret_key: EXAMPLESECRET
+
+        - name: Reaching this task means the refusal did not fail the host
+          ansible.builtin.fail:
+            msg: export_check.yml accepted a default TTL above the max
+      rescue:
+        - name: "Assert: it was the TTL rule that refused it"
+          ansible.builtin.assert:
+            that:
+              - cs_agent_export_problems | length == 1
+              - cs_agent_export_problems[0] is search('default_ttl_sec')
+            fail_msg: "{{ cs_agent_export_problems }}"
+            quiet: true
+
+    # ======================================================================
+    # The filter alone, one rule per case
+    # ======================================================================
+    - name: "Filter: valid configs"
+      ansible.builtin.assert:
+        that:
+          - cae_ok | cs_agent_export_problems(604800) == []
+          # Empty endpoint is real AWS; empty sse sends no header.
+          - >-
+              cae_ok | combine({'endpoint': '', 'sse': ''}) | cs_agent_export_problems(604800) == []
+          # Numbers templated to strings are accepted.
+          - >-
+              cae_ok | combine({'workers': '2', 'max_ttl_sec': '86400'}) | cs_agent_export_problems(604800) == []
+          - >-
+              cae_ok | combine({'access_key_set': 'True', 'secret_key_set': 'True'}) | cs_agent_export_problems(604800) == []
+          # No bucket: off, nothing else checked.
+          - >-
+              cae_ok | combine({'bucket': '', 'region': '', 'workers': 0}) | cs_agent_export_problems(604800) == []
+          - >-
+              cae_ok | combine({'bucket': '   '}) | cs_agent_export_problems(604800) == []
+        quiet: true
+
+    - name: "Filter: each rule refuses its own case"
+      ansible.builtin.assert:
+        that:
+          - >-
+              (cae_ok | combine(item.patch) | cs_agent_export_problems(item.retention | default(604800))) | length == 1
+          - >-
+              (cae_ok | combine(item.patch) | cs_agent_export_problems(item.retention | default(604800)))[0] is search(item.match)
+        fail_msg: "{{ item.patch }} -> {{ cae_ok | combine(item.patch) | cs_agent_export_problems(item.retention | default(604800)) }}"
+        quiet: true
+      loop:
+        - {patch: {region: ''}, match: 'region is empty'}
+        - {patch: {access_key_set: false}, match: 's3_export_access_key'}
+        - {patch: {secret_key_set: 'False'}, match: 's3_export_secret_key'}
+        - {patch: {endpoint: 'http://s3.example.com'}, match: 'https://'}
+        - {patch: {endpoint: 's3.example.com'}, match: 'https://'}
+        - {patch: {sse: 'aes256'}, match: 'cs_agent_s3_export_sse'}
+        - {patch: {workers: 0}, match: 'workers'}
+        - {patch: {workers: true}, match: 'workers'}
+        - {patch: {timeout_sec: -1}, match: 'timeout_sec'}
+        - {patch: {timeout_sec: '1h'}, match: 'timeout_sec'}
+        - {patch: {part_size_mb: 4}, match: 'part_size_mb'}
+        - {patch: {concurrency: 1.5}, match: 'concurrency'}
+        - {patch: {default_ttl_sec: 0}, match: 'default_ttl_sec'}
+        - {patch: {default_ttl_sec: 86401}, match: 'must not exceed'}
+        - {patch: {default_ttl_sec: 3600, max_ttl_sec: 604800}, match: 'task-row retention'}
+        - {patch: {}, retention: 86400, match: 'task-row retention'}
+      loop_control:
+        label: "{{ item.patch }}"

@@ -257,6 +257,17 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
   tailnet, a remote region's control-plane traffic is cleartext — a supported
   choice, but an explicit one.
 * **Ubuntu Pro.** Set `ubuntu_pro_token` for livepatch.
+* **Backup export to S3** ("download backup"). Set `cs_agent_s3_export_bucket`,
+  `cs_agent_s3_export_endpoint` (omit for AWS), `cs_agent_s3_export_region`,
+  and `s3_export_access_key` / `s3_export_secret_key` in `secrets.yml`; every
+  other `cs_agent_s3_export_*` knob defaults to cs-agent's own value. They are
+  read per node, so a region that exports to its own endpoint sets them in
+  `group_vars/region_<name>.yml` (vault that file if it holds the keys) or in
+  a node's `host_vars`. Unset, export stays off. The exported archive is
+  plaintext: keep the bucket private with an object-expiry lifecycle rule.
+  `inventories/example/group_vars/all/main.yml` lists every knob, and
+  [roles/cs_agent/README.md](../roles/cs_agent/README.md#backup-export-to-s3)
+  what preflight checks.
 * **`uplink_interface`** on any node with a global IPv6 address. Docker turns
   on IPv6 forwarding the first time it creates an IPv6 network, which
   withdraws the RA-learned default route about half an hour later; the fix

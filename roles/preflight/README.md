@@ -18,7 +18,7 @@ Both plays run it first, with `gather_facts: true`.
 nothing; the OS, data-disk, registry-login and controller-image checks skip
 `existing_env` hosts, and the delegation check is skipped in attach mode.
 **Requires:** — (it includes `roles/node_storage`'s read-only `probe` and pure
-`classify` task files itself).
+`classify` task files, and `roles/cs_agent`'s pure `export_check`, itself).
 
 ## What it asserts
 
@@ -35,6 +35,11 @@ nothing; the OS, data-disk, registry-login and controller-image checks skip
   A failed `run_once` task fails every host in the play, so one bad disk stops
   the whole run before any host is changed. A node built before the data-disk
   requirement has no such disk and is refused: it must be rebuilt.
+- **Backup export to S3.** Each new node runs `roles/cs_agent`'s pure
+  `export_check` with `cs_agent_export_check_fail: false`, and ONE `run_once`
+  assert fails the run if any node's settings were refused, listing every
+  node and its problems. Nodes with no `cs_agent_s3_export_bucket` (export
+  off) always pass. The rules are in `roles/cs_agent/README.md`.
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
 - Exactly one host in `groups['controller']`, and — when

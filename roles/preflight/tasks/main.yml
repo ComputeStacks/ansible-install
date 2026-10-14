@@ -608,6 +608,35 @@
     success_msg: "every new node's container data disk is usable"
   run_once: true
 
+# Backup export to S3 (roles/cs_agent/README.md). The cs_agent role's own
+# pure check, so preflight and the converge cannot disagree. Like the data
+# disk above: record per node, then assert once over every node so a bad
+# setting in one region stops the whole run before anything changes, and the
+# message lists every node at once. Settable per region/host, hence per node.
+- name: Check each new node's backup export settings
+  ansible.builtin.include_role:
+    name: cs_agent
+    tasks_from: export_check
+  vars:
+    cs_agent_export_check_fail: false
+  when:
+    - "'nodes' in group_names"
+    - not (existing_env | default(false) | bool)
+
+- name: Assert no node's backup export settings are invalid
+  ansible.builtin.assert:
+    that:
+      - (preflight_export_bad_nodes | length) == 0
+    fail_msg: >-
+      The backup export settings are invalid on
+      {{ preflight_export_bad_nodes | length }} node(s), and nothing was
+      changed on any host:
+      {% for n in preflight_export_bad_nodes %}{{ n }}:
+      {{ hostvars[n].cs_agent_export_problems | join(' ') }}{{ ' ' if not loop.last else '' }}{% endfor %}
+      See roles/cs_agent/README.md, "Backup export to S3".
+    success_msg: "every new node's backup export settings are valid (or export is off)"
+  run_once: true
+
 # DNS before the registry: both are network checks, but this one fails on an
 # operator step that has to be fixed outside this repository (and outside this
 # run), so it is the more useful thing to learn first.

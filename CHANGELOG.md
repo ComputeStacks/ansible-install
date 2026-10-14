@@ -2,6 +2,15 @@
 
 ## October 14, 2026
 
+* **Backup export to S3 is fully configurable.** Every `backups.export.*` key
+  cs-agent reads now has an inventory variable (`cs_agent_s3_export_*`,
+  defaulting to cs-agent's own values; credentials stay
+  `s3_export_access_key` / `s3_export_secret_key` in the vaulted secrets), and
+  they can be set per region or per node. Export is still off until
+  `cs_agent_s3_export_bucket` is set — but once it is, preflight now fails the
+  run on a missing region or key, a non-https endpoint, a bad number, or a
+  `max_ttl_sec` that outlives the agent's 7-day task retention, where a
+  missing key used to switch export off silently.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to
