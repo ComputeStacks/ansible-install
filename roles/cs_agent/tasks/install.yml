@@ -40,15 +40,39 @@
     group: root
     mode: "0644"
 
-- name: Configure the ComputeStacks apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [signed-by={{ cs_agent_keyring }}] {{ cs_agent_apt_repo }}
-      {{ cs_agent_apt_suite }} {{ cs_agent_apt_component }}
-    filename: "{{ cs_agent_apt_sources_filename }}"
+# Earlier versions of this role wrote the source as a one-line .list file
+# (ansible.builtin.apt_repository). Removed first, so a host converged by
+# that version never carries the repository twice. The key stays where it
+# was: both forms point Signed-By at the same dearmored keyring.
+- name: Remove the one-line ComputeStacks apt source written by earlier versions
+  ansible.builtin.file:
+    path: "/etc/apt/sources.list.d/{{ cs_agent_apt_sources_filename }}.list"
+    state: absent
+
+# ansible.builtin.deb822_repository parses and writes the .sources file with
+# python-debian, on the target host.
+- name: Install the apt tooling deb822_repository needs
+  ansible.builtin.apt:
+    name: python3-debian
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
+- name: Configure the ComputeStacks apt repository
+  ansible.builtin.deb822_repository:
+    name: "{{ cs_agent_apt_sources_filename }}"
+    types: [deb]
+    # uris/suites are list-typed: passed as lists so a value is never
+    # comma-split into two sources.
+    uris: ["{{ cs_agent_apt_repo }}"]
+    suites: ["{{ cs_agent_apt_suite }}"]
+    components: ["{{ cs_agent_apt_component }}"]
+    signed_by: "{{ cs_agent_keyring }}"
+    enabled: true
+    state: present
+
+# No separate cache refresh: the pinned install below always runs with
+# update_cache, which picks up the new source.
 - name: Gather installed package facts
   ansible.builtin.package_facts:
     manager: apt

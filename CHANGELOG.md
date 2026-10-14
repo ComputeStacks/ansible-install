@@ -2,6 +2,22 @@
 
 ## October 14, 2026
 
+* **geerlingguy.docker 8.0.0 and ansible.posix 2.2.2** (were 7.4.7 and
+  1.6.2); run `make deps`. The docker role now writes its source as deb822
+  (`/etc/apt/sources.list.d/docker.sources`) and deletes the `docker.list`
+  7.x wrote, on the next converge of each docker host (a live node whose
+  docker is deferred keeps its `docker.list` until then). The
+  `docker_apt_repository` override no longer exists; the commented example
+  in `group_vars/all/main.yml` is now `docker_add_repo: false`. ansible.posix
+  2.2.1 fixed a symlink privilege escalation in `authorized_key`.
+* **The cs-agent apt source is a deb822 file**,
+  `/etc/apt/sources.list.d/computestacks.sources`. The next converge of a
+  node deletes the old `computestacks.list`, so the repository is never
+  listed twice; the signing key stays at
+  `/etc/apt/keyrings/computestacks.gpg`.
+* **Facts are read through `ansible_facts`** rather than the top-level
+  `ansible_*` variables ansible-core is deprecating, in preflight and
+  node_kernel. No behavior change.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

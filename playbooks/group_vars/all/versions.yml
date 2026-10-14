@@ -110,9 +110,9 @@ nginx_image: "nginx:1.30.4"
 # Verified 2026-08-28, against
 # download.docker.com/linux/ubuntu/dists/: Docker DOES publish a `resolute`
 # suite, and `resolute` IS Ubuntu 26.04 (Resolute Raccoon) -- 25.10 is
-# `questing`, which the mirror carries as its own separate suite. So no
-# `docker_apt_repository` override is needed: geerlingguy.docker builds that
-# line from `ansible_distribution_release`, which is `resolute` on 26.04.
+# `questing`, which the mirror carries as its own separate suite. So nothing
+# needs overriding: geerlingguy.docker takes the suite from
+# `ansible_facts['distribution_release']`, which is `resolute` on 26.04.
 #
 # Pinned to the newest version each package had in
 # dists/resolute/stable/binary-amd64 on 2026-08-28. Every package carries its

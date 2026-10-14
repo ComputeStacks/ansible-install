@@ -343,11 +343,13 @@ Two package sources need explaining, and both fail loudly rather than
 silently:
 
 * **Docker's apt repository** is keyed on the release codename, which
-  `geerlingguy.docker` derives from `ansible_distribution_release`. On 26.04
-  that is `resolute`, and `download.docker.com/linux/ubuntu/dists/resolute/`
-  exists, so nothing needs overriding. The `docker_apt_repository` example
-  commented in `group_vars/all/main.yml` is there only for a future release
-  Docker has not published a suite for; if you ever set it, change the pinned
+  `geerlingguy.docker` takes from `ansible_facts['distribution_release']`.
+  On 26.04 that is `resolute`, and
+  `download.docker.com/linux/ubuntu/dists/resolute/` exists, so nothing
+  needs overriding. The role has no suite override; the
+  `docker_add_repo: false` example commented in `group_vars/all/main.yml` is
+  there only for a future release Docker has not published a suite for, with
+  the source then written by hand. If you ever do that, change the pinned
   versions in `versions.yml` with it, because those version strings name the
   `resolute` suite.
 * **PostgreSQL is pinned at major 18 and comes from PGDG, not the Ubuntu

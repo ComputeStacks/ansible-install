@@ -76,13 +76,15 @@ acme_account_email: admin@example.com
 # validate_tls_verify: true    # false while the portal is self-signed
 
 # Docker's apt repository is keyed on the release codename, and
-# geerlingguy.docker derives it from `ansible_distribution_release`. On
-# Ubuntu 26.04 that is `resolute`, which download.docker.com publishes, so
-# this override is NOT needed here -- it exists only for a future release
-# Docker has not shipped a suite for yet. Setting it also means the pinned
-# versions in versions.yml (`...~ubuntu.26.04~resolute`) no longer exist in
-# the suite you point at, so change both together:
-# docker_apt_repository: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu <codename> stable"
+# geerlingguy.docker (8.x) takes it from the host's
+# `ansible_facts['distribution_release']`, with no override. On Ubuntu 26.04
+# that is `resolute`, which download.docker.com publishes, so nothing needs
+# setting here. For a future release Docker has not shipped a suite for yet,
+# switch the role's repository off and write
+# /etc/apt/sources.list.d/docker.sources yourself; the pinned versions in
+# versions.yml (`...~ubuntu.26.04~resolute`) name the `resolute` suite, so
+# change them with it:
+# docker_add_repo: false
 
 # Attach mode (add-region.yml): set on EXISTING shared hosts in the inventory.
 # existing_env: true

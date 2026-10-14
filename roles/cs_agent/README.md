@@ -23,9 +23,10 @@ controller), `backup_server` (`~cstacks/.ssh` on this site's backup host).
 ## What it does
 
 1. **apt.** Fetches `computestacks.gpg.asc`, dearmors it to
-   `/etc/apt/keyrings/computestacks.gpg`, writes
-   `/etc/apt/sources.list.d/computestacks.list`
-   (`deb [signed-by=…] <repo> stable main`), installs
+   `/etc/apt/keyrings/computestacks.gpg`, writes the deb822 source
+   `/etc/apt/sources.list.d/computestacks.sources` (`<repo>`, suite `stable`,
+   component `main`, `Signed-By` that keyring) and deletes the one-line
+   `computestacks.list` an earlier version of this role wrote, installs
    `cs-agent={{ cs_agent_apt_version }}` and holds the package. The hold is
    released immediately before each install so a version bump in
    `versions.yml` still rolls through (convergent — contracts.md rule 3).
