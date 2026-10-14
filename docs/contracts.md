@@ -70,8 +70,9 @@ hosts and backup hosts; unset everywhere means the single site called
    host dials or the firewall opens. Loopback-only role-internal ports (e.g.
    vault 8200) may live in role defaults. No literal port numbers in
    templates. The one per-host port is sshd's: the `ssh_port` host var, with
-   `cs_ports.ssh` as its default, read off the host that listens on it. [control-plane.md](control-plane.md) is the graph the ports
-   are derived from; change both together.
+   `cs_ports.ssh` as its default, read off the host that listens on it.
+   [control-plane.md](control-plane.md) is the graph the ports are derived
+   from; change both together.
 6. **Public repo hygiene.** No real hostnames, IPs or credentials in tracked
    files — RFC 5737/1918 addresses and `example.com` names only. Real
    inventories and notes live in gitignored paths.

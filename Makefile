@@ -166,11 +166,14 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/ssh_port.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/ssh_port.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
-	@echo "       node data disk classification formats only a provably blank disk"
+	@echo "       node data disk classification formats only a provably blank disk,"
+	@echo "       every ssh port consumer reads the listening host's own ssh_port"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
 # requirements.yml) is looked up at its source -- apt indexes, registries,

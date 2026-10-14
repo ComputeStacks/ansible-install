@@ -6,8 +6,8 @@
 #
 # `ssh` is the DEFAULT sshd port. A host whose sshd listens elsewhere says so
 # with the `ssh_port` inventory host var, and every consumer reads that host's
-# own value: its firewall, the controller's Node row and ssh config, the
-# registry setting, a node's borg connection and validate. Read it as
+# own value: its firewall, the controller's Node row and (greenfield only) ssh
+# config, the registry setting, a node's borg connection and validate. Read it as
 # `hostvars[h].ssh_port | default(cs_ports.ssh)`, never as a derived group var
 # (docs/contracts.md hard rule 10). ansible's own connection port is
 # `ansible_port`, set separately (inventories/example/group_vars/all/main.yml).

@@ -440,6 +440,28 @@
   when: hostvars[item].ssh_port is defined
   run_once: true
 
+# The firewall opens `ssh_port`; ansible connects on `ansible_port`. Set only
+# the second (the usual ansible habit) and the run carries on over its open
+# connection until the next new one, or the next reboot, finds the port
+# closed. Hosts that set no ansible_port are not checked: ansible's own
+# default, or an ssh_config entry, is outside the inventory.
+- name: Assert every ansible_port that is set matches the host's ssh_port
+  ansible.builtin.assert:
+    that:
+      - (hostvars[item].ansible_port | int) == (hostvars[item].ssh_port | default(cs_ports.ssh) | int)
+    fail_msg: >-
+      {{ item }} connects on ansible_port {{ hostvars[item].ansible_port }} but
+      its ssh_port is {{ hostvars[item].ssh_port | default(cs_ports.ssh) }}, and
+      ssh_port is the port its firewall opens. Set the 'ssh_port' host var for
+      {{ item }} to the port its sshd listens on (the example inventory derives
+      ansible_port from it).
+    success_msg: "{{ item }}: ansible_port matches ssh_port"
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: hostvars[item].ansible_port is defined
+  run_once: true
+
 - name: Assert secret_key_base is present, long enough, and not the placeholder
   ansible.builtin.assert:
     that:

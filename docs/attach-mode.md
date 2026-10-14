@@ -122,7 +122,11 @@ exactly as a greenfield node does ([requirements.md](requirements.md#node-disk-l
 
 **Give every host whose sshd is not on 22 its `ssh_port`** — existing and new
 alike. The new node's firewall opens it, the controller's Node row for the new
-node carries it, and the new node's backups dial the backup host's. Nothing
+node carries it, and the new node's backups dial the backup host's. The
+controller's `/root/.ssh/config` is not re-rendered in attach mode, so it gets
+no block for the new node; the portal dials nodes on the Node row's port and
+does not need one, but add a block by hand if you ssh there from the
+controller. Nothing
 edits `sshd_config`: move the new node's sshd yourself before the run, and
 keep `ansible_port` in step (the example inventory derives it from
 `ssh_port`).

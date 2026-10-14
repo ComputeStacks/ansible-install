@@ -12,17 +12,17 @@ manifest variable, never by value.
 
 | # | From → To | Address | Port / proto | Credential | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1 | operator → all hosts | `ansible_host` | `ssh` | operator key | The ansible transport itself. |
+| 1 | operator → all hosts | `ansible_host` | `ssh` (the dialed host's `ssh_port`) | operator key | The ansible transport itself. |
 | 2 | controller → node dockerd | `primary_ip` | `docker_tls` TLS | vault-issued PKI client cert | Heartbeat and every container operation. |
 | 3 | controller → cs-agent | `agent_host` if set, else `primary_ip` | `agent_http` HTTP | per-node admin Bearer | Admin API. **Cleartext** — see below. |
-| 4 | controller → node, root ssh | `primary_ip` | `ssh` | controller app + root keys | Volumes, haproxy certificate deploy, LB reload. |
+| 4 | controller → node, root ssh | `primary_ip` | `ssh` (the dialed host's `ssh_port`) | controller app + root keys | Volumes, haproxy certificate deploy, LB reload. |
 | 5 | node → controller (enrollment) | portal domain | `controller_https` | `NODE_ENROLLMENT_TOKEN` | v2 does not use this leg — see below. |
 | 6 | node → controller (LB config fetch) | `https://<Setting.hostname>` | `controller_https` | none (signed URL path) | The node curls this after the controller triggers it over #4. |
 | 7 | node haproxy → controller (ACME backend) | `regions[].acme_server` | `controller_acme_backend` HTTP | none | Tenant HTTP-01 challenges proxied back to the portal. |
 | 8 | container → cs-agent | `metadata.internal` = `primary_ip` | `agent_http` HTTP | tenant Bearer | The agent must be reachable on `primary_ip`. |
 | 9 | prometheus (metrics host) → node exporters | node address, pairwise-derived | `node_exporter` / `cadvisor` / `haproxy_stats` | none | **Cleartext, unauthenticated.** `haproxy_stats` must equal the port in `load_balancer.stats_bind`. |
 | 10 | controller → prometheus / loki (read) | metrics host | `metrics_prometheus` / `metrics_loki` TLS | basic auth | The `MetricClient` / `LogClient` endpoints — nginx vhosts, **not** 443. |
-| 11 | node → backup server | backup host | `ssh` | per-node borg key, `cstacks` user | `borg serve` plus the mkdir/rm shell. |
+| 11 | node → backup server | backup host | `ssh` (the dialed host's `ssh_port`) | per-node borg key, `cstacks` user | `borg serve` plus the mkdir/rm shell. |
 | 12 | node / agent → package and image repos | public | 443 | none | Package and image pulls. |
 | 13 | internet → node haproxy (tenant ingress) | node public | `tenant_http` / `tenant_https` + `tenant_port_begin`–`tenant_port_end` tcp/udp | — | Published container ports. |
 | 14 | node fluentd → loki (write) | metrics host | `metrics_loki` TLS | basic auth | Container log shipping. |
@@ -30,7 +30,7 @@ manifest variable, never by value.
 | 16 | controller → pdns API | primary nameserver | `pdns_api` HTTP | pdns API key | Zone management. |
 | 17 | ns follower ↔ primary | ns hosts | `postgres` | pg replication | powerdns database replication. |
 | 18 | internet → registry | registry public | 443 + `tenant_port_begin`–`tenant_port_end` | registry auth | Tenant registries. |
-| 19 | controller → registry | registry host | `ssh` | controller app key | `DockerSSH` container management. |
+| 19 | controller → registry | registry host | `ssh` (the dialed host's `ssh_port`) | controller app key | `DockerSSH` container management. |
 
 Every port named above resolves through `cs_ports` in `ports.yml`. No role or
 template writes a literal port number (`docs/contracts.md` rule 5), and the

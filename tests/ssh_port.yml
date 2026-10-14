@@ -1,0 +1,85 @@
+---
+# Does every consumer of sshd's port read the port of the host that listens
+# on it? A wrong port in the firewall locks the host out the moment the rules
+# load, so the firewall render is the case that matters most.
+#
+#   ansible-playbook -c local -i inventories/example tests/ssh_port.yml
+#
+# (run by `make check`). inventories/example sets `ssh_port: 2222` on node3001
+# and backup2 and leaves every other host on the default, so both branches of
+# each lookup are exercised. Renders only; nothing is written.
+- name: Render each host's firewall and check its ssh accept
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Load roles/firewall's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/firewall/defaults/main.yml"
+
+    - name: Assert the firewall opens this host's own ssh port and no other
+      vars:
+        ssh_port_test_lines: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').split('\n')
+             | select('search', 'comment "ssh"') | list }}
+        ssh_port_test_want: "{{ ssh_port | default(cs_ports.ssh) | string }}"
+      ansible.builtin.assert:
+        that:
+          - ssh_port_test_lines | length > 0
+          - ssh_port_test_lines | reject('search', 'tcp dport ' ~ ssh_port_test_want ~ ' accept') | list | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s firewall ssh rules do not open its ssh_port
+          {{ ssh_port_test_want }}: {{ ssh_port_test_lines }}
+        quiet: true
+
+- name: Render the controller-side consumers
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Load roles/controller_seed's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/controller_seed/defaults/main.yml"
+
+    - name: Assert the controller's ssh config uses each node's own port
+      vars:
+        ssh_port_test_config: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/ssh_trust/templates/ssh_config.j2') }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('Host ' ~ hostvars[item].hostname ~ '\n  User root\n  HostName ' ~ hostvars[item].primary_ip
+             ~ '\n  Port ' ~ (hostvars[item].ssh_port | default(cs_ports.ssh))) in ssh_port_test_config
+        fail_msg: "{{ item }}'s Host block does not carry its ssh_port"
+        quiet: true
+      loop: "{{ groups['nodes'] }}"
+
+    - name: Assert registry_ssh_port is the registry host's own
+      ansible.builtin.assert:
+        that:
+          - (controller_seed_registry_ssh_port | int)
+            == (hostvars[groups['registry'] | first].ssh_port | default(cs_ports.ssh) | int)
+        quiet: true
+      when: groups['registry'] | default([]) | length > 0
+
+- name: Render each node's backup port
+  hosts: nodes
+  gather_facts: false
+  tasks:
+    - name: Load roles/cs_agent's defaults and roles/validate's vars and defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/{{ item }}/main.yml"
+      loop:
+        - cs_agent/defaults
+        - validate/vars
+        - validate/defaults
+
+    - name: Assert the agent and validate dial the site backup host's ssh_port
+      vars:
+        ssh_port_test_want: "{{ hostvars[cs_site_backup_hosts[cs_site]].ssh_port | default(cs_ports.ssh) | int }}"
+      ansible.builtin.assert:
+        that:
+          - (cs_agent_backup_ssh_port | int) == (ssh_port_test_want | int)
+          - (validate_borg_ssh_port | int) == (ssh_port_test_want | int)
+        quiet: true
+      when: cs_site in cs_site_backup_hosts

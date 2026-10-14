@@ -124,7 +124,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | `controller_http` (80) | tcp | anywhere — ACME HTTP-01 webroot (`acme_web` runs here) | — |
 | `tenant_https` (443) | tcp | anywhere | 18 |
 | `tenant_port_begin`–`tenant_port_end` | tcp | anywhere | 18 |
-| `ssh` (22) | tcp | covered by the global ssh accept (controller `DockerSSH`) | 19 |
+| `ssh` (22, or the host's `ssh_port`) | tcp | covered by the global ssh accept (controller `DockerSSH`) | 19 |
 
 ### nameservers
 
