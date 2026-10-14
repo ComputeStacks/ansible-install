@@ -12,12 +12,23 @@ collections:
     version: "==4.6.1"
   - name: community.postgresql
     version: "==3.14.1"
+  # Verified 2026-10-14 against galaxy.ansible.com and the collection's
+  # CHANGELOG.rst: 2.2.2 is the newest release (requires ansible-core >= 2.16).
+  # Only `mount` and `authorized_key` are used here; neither has a breaking
+  # change since 1.6.2, and 2.2.1 fixed a symlink privilege escalation in
+  # authorized_key.
   - name: ansible.posix
-    version: "==1.6.2"
+    version: "==2.2.2"
 
 roles:
+  # Verified 2026-10-14 against galaxy.ansible.com and the GitHub tags of
+  # geerlingguy/ansible-role-docker: 8.0.0 is the newest release. It writes
+  # the Docker source as deb822 (/etc/apt/sources.list.d/docker.sources, key
+  # at /etc/apt/keyrings/docker.asc) and itself deletes the docker.list that
+  # 7.x wrote, and it drops the `docker_apt_repository` override (there is no
+  # longer a suite override; see inventories/example/group_vars/all/main.yml).
   - name: geerlingguy.docker
-    version: "7.4.7"
+    version: "8.0.0"
   - name: geerlingguy.postgresql
     version: "4.0.0"
   - name: geerlingguy.redis

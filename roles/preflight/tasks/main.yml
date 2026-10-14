@@ -12,9 +12,9 @@
 - name: Assert the connection is root
   ansible.builtin.assert:
     that:
-      - ansible_user_id == 'root'
+      - ansible_facts['user_id'] == 'root'
     fail_msg: >-
-      Connected to {{ inventory_hostname }} as '{{ ansible_user_id }}', not
+      Connected to {{ inventory_hostname }} as '{{ ansible_facts['user_id'] }}', not
       root. The playbooks use no privilege escalation, so every task that
       writes to the host would fail. {{ preflight_root_connection_hint }}
     success_msg: "{{ inventory_hostname }}: connected as root"
@@ -22,13 +22,13 @@
 - name: Assert Ubuntu 26.04 amd64 (skipped on existing_env hosts, which are Debian)
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_version == '26.04'
-      - ansible_architecture == 'x86_64'
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] == '26.04'
+      - ansible_facts['architecture'] == 'x86_64'
     fail_msg: >-
       {{ inventory_hostname }} must be running Ubuntu 26.04 LTS (amd64/x86_64);
-      found {{ ansible_distribution }} {{ ansible_distribution_version }}
-      {{ ansible_architecture }}. Reinstall this host with Ubuntu 26.04 LTS
+      found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+      {{ ansible_facts['architecture'] }}. Reinstall this host with Ubuntu 26.04 LTS
       server (amd64), or, if this host is part of a pre-existing v1
       (Debian) environment being attached to, set 'existing_env: true' on it
       in the inventory.

@@ -13,7 +13,8 @@ cs_agent_keyring_asc: "{{ cs_agent_keyring_dir }}/computestacks.asc"
 cs_agent_keyring: "{{ cs_agent_keyring_dir }}/computestacks.gpg"
 cs_agent_apt_suite: stable
 cs_agent_apt_component: main
-# Basename of the sources.list.d file (ansible appends .list).
+# Basename of the sources.list.d file: <name>.sources (deb822). Earlier
+# versions wrote <name>.list, which tasks/install.yml removes.
 cs_agent_apt_sources_filename: computestacks
 
 # --- paths -----------------------------------------------------------------

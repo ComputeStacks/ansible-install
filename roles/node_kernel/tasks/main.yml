@@ -34,7 +34,7 @@
 - name: Determine whether this node has a global IPv6 address
   ansible.builtin.set_fact:
     node_kernel_has_global_ipv6: >-
-      {{ (ansible_all_ipv6_addresses | default([]) | reject('match', '^fe80') | list | length) > 0 }}
+      {{ (ansible_facts['all_ipv6_addresses'] | default([]) | reject('match', '^fe80') | list | length) > 0 }}
 
 - name: Configure IPv6 accept_ra=2 on the uplink interface
   ansible.builtin.copy:
