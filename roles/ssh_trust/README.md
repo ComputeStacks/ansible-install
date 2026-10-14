@@ -61,7 +61,8 @@ elsewhere.
 
 Consumed, not owned: `groups['controller']`, `groups['nodes']`,
 `groups['registry']`, `hostname`/`primary_ip` (node inventory vars),
-`existing_env`, `cs_ports.ssh` (`playbooks/group_vars/all/ports.yml`).
+`existing_env`, each node's `ssh_port` (else `cs_ports.ssh`,
+`playbooks/group_vars/all/ports.yml`).
 
 ## Scope
 

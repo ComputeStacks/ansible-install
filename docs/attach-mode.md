@@ -65,7 +65,7 @@ one in the new node's `site` — see below):
 | --- | --- | --- |
 | `backup_host_path` | `/mnt` | Where repositories live on that server. |
 | `backup_borg_remote_path` | `/usr/bin/borg` | v2's default is `/opt/computestacks/bin/borg`, which does not exist there — every backup on the new node would fail with "command not found". |
-| `backup_ssh_port` | that server's sshd port | Defaults to `cs_ports.ssh` (22). A server whose sshd listens elsewhere needs it, or every backup on the new node fails to connect. |
+| `ssh_port` (on the backup host) | that server's sshd port | Defaults to `cs_ports.ssh` (22). A server whose sshd listens elsewhere needs it, or every backup on the new node fails to connect. `backup_ssh_port` still overrides it, for a port that differs from sshd's own (a forward in between). |
 | `backups_key` (secrets) | the environment's existing value | The borg passphrase. A new one makes the node's repositories unreadable alongside everyone else's. |
 
 **Everything else in the inventory must describe the environment that
@@ -119,6 +119,13 @@ the controller, not from their inventory entries.
 
 **The new node needs a second, blank disk named by `docker_data_device`,**
 exactly as a greenfield node does ([requirements.md](requirements.md#node-disk-layout)).
+
+**Give every host whose sshd is not on 22 its `ssh_port`** — existing and new
+alike. The new node's firewall opens it, the controller's Node row for the new
+node carries it, and the new node's backups dial the backup host's. Nothing
+edits `sshd_config`: move the new node's sshd yourself before the run, and
+keep `ansible_port` in step (the example inventory derives it from
+`ssh_port`).
 
 **Flag every existing shared host** — controller, metrics, backup, registry,
 nameservers:

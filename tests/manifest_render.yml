@@ -169,6 +169,30 @@
           {{ (manifest_render_content | from_yaml).keys() | list | sort | join(', ') }}
         quiet: true
 
+    # Each node's Node row carries ITS OWN sshd port: the controller dials
+    # nodes on Node.ssh_port, so a node with an `ssh_port` host var rendered
+    # with the default is a node the controller can never reach.
+    - name: Assert every node's ssh_port is that node's own
+      ansible.builtin.assert:
+        that:
+          - item.ssh_port == manifest_render_node_ssh_ports[item.hostname]
+        fail_msg: >-
+          Node {{ item.hostname }} rendered ssh_port {{ item.ssh_port }}, but its
+          inventory says {{ manifest_render_node_ssh_ports[item.hostname] }}.
+        quiet: true
+      loop: >-
+        {{ (manifest_render_content | from_yaml).locations
+           | map(attribute='regions') | flatten
+           | map(attribute='nodes') | flatten }}
+      loop_control:
+        label: "{{ item.hostname }}"
+      vars:
+        manifest_render_node_ssh_ports: >-
+          {{ dict(groups['nodes'] | map('extract', hostvars, 'hostname')
+                  | zip(groups['nodes'] | map('extract', hostvars)
+                        | map(attribute='ssh_port', default=cs_ports.ssh)
+                        | map('int'))) }}
+
     # Split, so the default callback prints one manifest line per output line
     # instead of a single string full of \n escapes. Printing the document IS
     # the point of the play — see the secrets note in the header.

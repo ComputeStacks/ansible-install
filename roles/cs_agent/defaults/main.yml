@@ -125,9 +125,11 @@ cs_agent_backup_host_path: "{{ backup_host_path | default('/var/lib/computestack
 # backup_borg_remote_path (v1 servers use the distro borg at /usr/bin/borg;
 # the v2 default is the wrapper the backup_server role installs).
 cs_agent_borg_remote_path: "{{ backup_borg_remote_path | default(borg_binary_path) }}"
-# sshd port ON the backup server. An existing server may not listen on
-# cs_ports.ssh; set backup_ssh_port to describe it, like the two above.
-cs_agent_backup_ssh_port: "{{ backup_ssh_port | default(cs_ports.ssh) }}"
+# sshd port ON the backup server: that server's own `ssh_port` host var, else
+# cs_ports.ssh. `backup_ssh_port` still overrides both, for a server reached on
+# a different port than its sshd's (a NAT or forward in between). Unguarded
+# for the same reason as cs_agent_backup_ssh_host above.
+cs_agent_backup_ssh_port: "{{ backup_ssh_port | default(hostvars[cs_site_backup_hosts[cs_site]].ssh_port | default(cs_ports.ssh)) }}"
 # NOT `compress` — the upstream sample's key is a bug, the code reads
 # backups.borg.compression (config/config.go).
 cs_agent_borg_compression: "zstd,3"

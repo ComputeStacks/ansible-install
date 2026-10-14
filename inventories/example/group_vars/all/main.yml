@@ -13,6 +13,15 @@
 # reloads (docs/control-plane.md row 4), and roles/validate asserts it.
 ansible_user: root
 
+# sshd's port, per host: set `ssh_port` on any host whose sshd does not listen
+# on 22 (hosts.yml). The playbooks open that port in the host's own firewall
+# and give it to everything that dials the host -- the controller (Node rows,
+# its ssh config, the registry setting) and a node's borg connection to its
+# backup server. Moving sshd itself is yours to do before the run; nothing
+# here edits sshd_config. ansible connects on `ansible_port`, which this line
+# keeps in step with it:
+ansible_port: "{{ ssh_port | default(22) }}"
+
 # Portal / domains
 cs_portal_domain: portal.example.com
 cs_registry_domain: cr.example.com

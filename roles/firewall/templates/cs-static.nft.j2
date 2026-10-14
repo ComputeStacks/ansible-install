@@ -29,6 +29,7 @@
 # haproxy stats) exactly as it applies to 8500. Mixed fleets have both paths at
 # once, so both rules stay.
 {% set ports = cs_ports %}
+{% set ssh_port_self = ssh_port | default(ports.ssh) %}
 {% set tailnet_self = inventory_hostname in (firewall_tailnet_hosts | default([])) %}
 {% macro peer_addresses(host) %}{{ [hostvars[host].primary_ip | default(''), hostvars[host].public_ip | default('')] | reject('equalto', '') | unique | join(' ') }}{% endmacro %}
 {#
@@ -76,10 +77,10 @@ table inet {{ firewall_table }} {
         # --- every host --------------------------------------------------
 {% if firewall_allow_ssh_from | length > 0 %}
 {% for address in firewall_allow_ssh_from %}
-        {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} tcp dport {{ ports.ssh }} accept    comment "ssh"
+        {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} tcp dport {{ ssh_port_self }} accept    comment "ssh"
 {% endfor %}
 {% else %}
-        tcp dport {{ ports.ssh }} accept    comment "ssh"
+        tcp dport {{ ssh_port_self }} accept    comment "ssh"
 {% endif %}
 {% if tailnet_self %}
         udp dport {{ firewall_tailscale_udp_port }} accept    comment "tailscale direct peer connections"

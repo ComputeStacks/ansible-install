@@ -192,7 +192,7 @@ locations:
             primary_ip: {{ hostvars[host].primary_ip | to_json }}
             public_ip: {{ hostvars[host].public_ip | to_json }}
             active: true
-            ssh_port: {{ controller_seed_node_ssh_port | int }}
+            ssh_port: {{ hostvars[host].ssh_port | default(controller_seed_node_ssh_port) | int }}
             port_begin: {{ controller_seed_node_port_begin | int }}
             port_end: {{ controller_seed_node_port_end | int }}
 {% if controller_tailnet and node_tailnet %}

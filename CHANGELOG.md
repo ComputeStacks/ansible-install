@@ -1,5 +1,19 @@
 # Changelog
 
+## October 14, 2026
+
+* **`ssh_port` is back as a per-host inventory var**, as in v1. A host whose
+  sshd is not on 22 sets it, and the host's own firewall opens that port; the
+  controller's Node rows, its ssh config and the `registry_ssh_port` setting
+  carry it; nodes dial their backup server on the backup host's value; and
+  `validate` checks on it. Until now port 22 was assumed everywhere, so a node
+  with sshd elsewhere locked itself out when its firewall loaded. Moving sshd
+  is still the operator's job, and `ansible_port` is set separately (the
+  example inventory derives it from `ssh_port`). `backup_ssh_port` still
+  overrides the backup port.
+
+***
+
 ## October 10, 2026
 
 * **PostgreSQL 18** on the controller and the nameservers

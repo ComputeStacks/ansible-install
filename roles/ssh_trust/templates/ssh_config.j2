@@ -5,7 +5,7 @@
 Host {{ hostvars[n].hostname }}
   User root
   HostName {{ hostvars[n].primary_ip }}
-  Port {{ cs_ports.ssh }}
+  Port {{ hostvars[n].ssh_port | default(cs_ports.ssh) }}
 
 {% endfor -%}
 Host *

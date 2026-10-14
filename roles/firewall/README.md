@@ -86,7 +86,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | — | any | `ct state established,related` (and `invalid` dropped) | — |
 | icmp / icmpv6 sane types | icmp | anywhere | — |
 | 546 | udp | `fe80::/64` destination (DHCPv6/SLAAC client) | — |
-| `ssh` (22) | tcp | anywhere, or `firewall_allow_ssh_from` | 1, 4, 11, 19 |
+| `ssh` (22, or the host's `ssh_port`) | tcp | anywhere, or `firewall_allow_ssh_from` | 1, 4, 11, 19 |
 | `node_exporter` (9100) | tcp | metrics addresses **+ `iifname tailscale0`** when both this host and the metrics host are tailnet members | 9 |
 | 41641 | udp | anywhere — only when this host is on the tailnet | — (peer WireGuard) |
 | `100.64.0.0/10`, `fd7a:115c:a1e0::/48` | any | **dropped** unless it arrives on `tailscale0` — only when this host is on the tailnet | — (anti-spoof) |

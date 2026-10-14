@@ -60,7 +60,11 @@ controller_seed_registry_hosts: "{{ groups['registry'] | default([]) }}"
 # (docs/contracts.md rule 2).
 controller_seed_registry_node: >-
   {{ ((controller_seed_registry_hosts | map('extract', hostvars, 'primary_ip') | list) + ['']) | first }}
-controller_seed_registry_ssh_port: "{{ cs_ports.ssh }}"
+# The registry host's own `ssh_port`, else cs_ports.ssh; '' -> the default
+# when there is no registry host (the setting is omitted then anyway).
+controller_seed_registry_ssh_port: >-
+  {{ (((controller_seed_registry_hosts | map('extract', hostvars) | list) + [{}])
+      | first).ssh_port | default(cs_ports.ssh) }}
 # Setting.cr_le: the domain the controller orders the container registry's
 # ACME certificate for. v1's bootstrap.rake wrote cs_portal_domain here, which
 # is a copy/paste bug -- see README.md.
@@ -142,6 +146,8 @@ controller_seed_ulimit_nofile_soft: 2500
 controller_seed_ulimit_nofile_hard: 3000
 
 # --- nodes ----------------------------------------------------------------
+# The fallback for a node that sets no `ssh_port` host var; the manifest
+# reads each node's own value first.
 controller_seed_node_ssh_port: "{{ cs_ports.ssh }}"
 # Must match the published-port range the node firewall opens.
 controller_seed_node_port_begin: "{{ cs_ports.tenant_port_begin }}"

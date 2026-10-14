@@ -16,7 +16,7 @@
       - -o
       - "ConnectTimeout={{ validate_ssh_timeout }}"
       - -p
-      - "{{ cs_ports.ssh }}"
+      - "{{ ssh_port | default(cs_ports.ssh) }}"
       - "root@{{ primary_ip }}"
       - "true"
   delegate_to: "{{ validate_controller_host }}"

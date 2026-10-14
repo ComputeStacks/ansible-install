@@ -419,6 +419,27 @@
   when: hostvars[item].hostname is defined
   run_once: true
 
+# `ssh_port` is optional per host (playbooks/group_vars/all/ports.yml). It
+# lands in the firewall, the controller's Node rows and settings, and a
+# node's borg connection, so a typo locks the host out or breaks backups
+# rather than failing anything here.
+- name: Assert every ssh_port that is set is a port number
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].ssh_port | string is match('^[0-9]+$')
+      - (hostvars[item].ssh_port | int) >= 1
+      - (hostvars[item].ssh_port | int) <= 65535
+    fail_msg: >-
+      ssh_port '{{ hostvars[item].ssh_port }}' for host '{{ item }}' is not a
+      port number (1-65535). It is the port that host's sshd listens on; fix
+      the 'ssh_port' host var for {{ item }} in the inventory.
+    success_msg: "{{ item }}: ssh_port {{ hostvars[item].ssh_port }}"
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    label: "{{ item }}"
+  when: hostvars[item].ssh_port is defined
+  run_once: true
+
 - name: Assert secret_key_base is present, long enough, and not the placeholder
   ansible.builtin.assert:
     that:
