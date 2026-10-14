@@ -32,8 +32,8 @@ other role here.
 The package binds `:9100` on all interfaces, and that is deliberate: the
 scrape address is a property of the *metrics host*, not of the target
 (docs/contracts.md §Tailscale address derivation — prometheus dials a node's
-tailnet address whenever the metrics host is tailnet-joined, and its
-`primary_ip` otherwise). A single-address bind would refuse one of those two
+tailnet address whenever it and the node both route over the tailnet, and
+its `primary_ip` otherwise). A single-address bind would refuse one of those two
 paths. Access control is `roles/firewall`'s input chain, exactly as for
 cadvisor (`roles/node_observability/README.md` documents the same reasoning at
 length).

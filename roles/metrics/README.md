@@ -119,7 +119,8 @@ own. The maps around it — `cs_site_metrics_hosts`, `cs_site_metrics_domains`
 
 Per docs/contracts.md's "Tailscale address derivation" (PAIRWISE, never
 per-node): the scrape address for a node is its **tailscale IP only if BOTH
-this metrics host and that node are tailnet-joined**; otherwise
+this metrics host and that node route control-plane traffic over the
+tailnet** (members, neither with `tailscale_access_only: true`); otherwise
 `primary_ip`. `tasks/file_sd.yml` computes this per target as:
 
 ```
@@ -128,7 +129,9 @@ metrics_scrape_address = (hostvars[node].tailscale_ip
                                     | default(hostvars[node].primary_ip)))
                           if (((tailscale_authkey | default('')) | length > 0)
                               and (tailscale_enabled | default(true))          # this host
-                              and (hostvars[node].tailscale_enabled | default(true)))  # target node
+                              and not (tailscale_access_only | default(false) | bool)
+                              and (hostvars[node].tailscale_enabled | default(true))  # target node
+                              and not (hostvars[node].tailscale_access_only | default(false) | bool))
                           else hostvars[node].primary_ip
 ```
 
@@ -251,7 +254,8 @@ name on the certificate.
 
 Consumed, not owned: `cs_ports.*`, `prometheus_image` / `alertmanager_image`
 (`versions.yml`), `cs_portal_domain`, `tailscale_authkey` /
-`tailscale_enabled` (global secret + per-host opt-out), `hostname` /
+`tailscale_enabled` / `tailscale_access_only` (global secret + per-host
+opt-out and access-only mode), `hostname` /
 `primary_ip` / `az` on every node (inventory, preflight-asserted), and the
 site contract `cs_site` / `cs_new_nodes` (`playbooks/group_vars/all/
 sites.yml`, spellings frozen — this role re-derives neither).

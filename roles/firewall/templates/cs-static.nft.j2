@@ -22,7 +22,8 @@
 #
 # Every source-restricted accept below is emitted TWICE where it has to be: once
 # per peer address (the LAN / public path) and once as `iifname "tailscale0"`
-# when this host and that peer are BOTH tailnet members. That second rule is not
+# when this host and that peer are BOTH tailnet members routing control-plane
+# traffic over it (neither has `tailscale_access_only: true`). That second rule is not
 # optional — a peer that is tailnet-joined dials this host's tailnet address, so
 # the packet arrives on tailscale0 with a 100.64.0.0/10 source that no
 # address-keyed rule matches. It applies to the exporter scrapes (9100 / 8080 /
@@ -31,13 +32,14 @@
 {% set ports = cs_ports %}
 {% set ssh_port_self = ssh_port | default(ports.ssh) %}
 {% set tailnet_self = inventory_hostname in (firewall_tailnet_hosts | default([])) %}
+{% set tailnet_routed_self = inventory_hostname in (firewall_tailnet_routed_hosts | default([])) %}
 {% macro peer_addresses(host) %}{{ [hostvars[host].primary_ip | default(''), hostvars[host].public_ip | default('')] | reject('equalto', '') | unique | join(' ') }}{% endmacro %}
 {#
   accept_from(hosts, rule) — the pairwise accept helper. DO NOT reduce it to the
-  address half: see the header note above. `tailnet_self` and the membership of
-  each peer are pure-inventory predicates (tailscale_authkey set +
-  tailscale_enabled), so this stays correct under --limit where other hosts have
-  no facts.
+  address half: see the header note above. `tailnet_routed_self` and the
+  routing membership of each peer are pure-inventory predicates
+  (tailscale_authkey set + tailscale_enabled + not tailscale_access_only), so
+  this stays correct under --limit where other hosts have no facts.
 #}
 {% macro accept_from(hosts, rule) %}
 {% for host in hosts | sort %}
@@ -45,7 +47,7 @@
         {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} {{ rule }}    comment "{{ host }}"
 {% endfor %}
 {% endfor %}
-{% if tailnet_self and (hosts | select('in', firewall_tailnet_hosts | default([])) | list | length) > 0 %}
+{% if tailnet_routed_self and (hosts | select('in', firewall_tailnet_routed_hosts | default([])) | list | length) > 0 %}
         iifname "{{ firewall_tailscale_interface }}" {{ rule }}    comment "over the tailnet"
 {% endif %}
 {% endmacro %}
@@ -122,7 +124,7 @@ table inet {{ firewall_table }} {
 {{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.docker_tls ~ ' accept') }}
         # controller -> cs-agent admin API. NEVER public: the admin Bearer is
         # sent in cleartext over this port.
-{% if tailnet_self and (groups['controller'] | default([]) | select('in', firewall_tailnet_hosts | default([])) | list | length) > 0 %}
+{% if tailnet_routed_self and (groups['controller'] | default([]) | select('in', firewall_tailnet_routed_hosts | default([])) | list | length) > 0 %}
         # Both this node and the controller are on the tailnet, so the
         # controller dials the tailnet address (manifest node.agent_host) and
         # nothing off-tailnet may reach the port.

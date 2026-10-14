@@ -29,7 +29,7 @@
 --------------------------------------------------------------------------- #}
 {% set controller_host = groups['controller'] | first %}
 {% set controller_ts = hostvars[controller_host].tailscale_ip | default(hostvars[controller_host].ansible_local.computestacks.tailscale_ip | default('')) %}
-{% set controller_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[controller_host].tailscale_enabled | default(true)) and (controller_ts | length > 0) %}
+{% set controller_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[controller_host].tailscale_enabled | default(true)) and not (hostvars[controller_host].tailscale_access_only | default(false) | bool) and (controller_ts | length > 0) %}
 {% set include_globals = (not (existing_env | default(false) | bool)) or (controller_seed_full_manifest | bool) %}
 {# Attach mode links the default user group to the regions THIS apply creates
    and no others, full manifest or not: `all` would also link every existing
@@ -163,7 +163,7 @@ locations:
 {% for host in (cs_new_nodes | sort) %}
 {% if hostvars[host].region == location %}
 {% set node_ts = hostvars[host].tailscale_ip | default(hostvars[host].ansible_local.computestacks.tailscale_ip | default('')) %}
-{% set node_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[host].tailscale_enabled | default(true)) and (node_ts | length > 0) %}
+{% set node_tailnet = ((tailscale_authkey | default('')) | length > 0) and (hostvars[host].tailscale_enabled | default(true)) and not (hostvars[host].tailscale_access_only | default(false) | bool) and (node_ts | length > 0) %}
 {% set acme_address = hostvars[host].controller_acme_address | default(controller_ts if (controller_tailnet and node_tailnet) else hostvars[controller_host].primary_ip) %}
       - name: {{ hostvars[host].az | to_json }}
         active: true

@@ -47,7 +47,8 @@
 
 # Tailscale pairwise derivation (docs/contracts.md "Tailscale address
 # derivation"): the scrape address for a node is its tailscale IP ONLY if
-# BOTH this metrics host and that node are tailnet-joined; otherwise
+# BOTH this metrics host and that node route control-plane traffic over the
+# tailnet (members, neither with `tailscale_access_only: true`); otherwise
 # primary_ip. The address VALUE uses the blessed facts expression from
 # contracts.md "Facts exception" -- the set_fact `tailscale_ip` only exists
 # for hosts targeted THIS run, so under `--limit metrics` every un-targeted
@@ -77,5 +78,7 @@
                     | default(hostvars[item.1].primary_ip)))
          if (((tailscale_authkey | default('')) | length > 0)
              and (tailscale_enabled | default(true))
-             and (hostvars[item.1].tailscale_enabled | default(true)))
+             and not (tailscale_access_only | default(false) | bool)
+             and (hostvars[item.1].tailscale_enabled | default(true))
+             and not (hostvars[item.1].tailscale_access_only | default(false) | bool))
          else hostvars[item.1].primary_ip }}

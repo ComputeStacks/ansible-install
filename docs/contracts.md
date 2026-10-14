@@ -379,8 +379,8 @@ and writes the 64-hex result into `metadata.admin_token_hash` in
 output fails the task loudly.
 
 ### agent.yml (owned by `cs_agent`)
-- `metadata.listen_addr`: `:8500` when the node is tailnet-joined, else
-  `<primary_ip>:8500`. NEVER the tailscale IP (containers dial
+- `metadata.listen_addr`: `:8500` when the node routes control-plane traffic
+  over the tailnet (§Tailscale access-only mode), else `<primary_ip>:8500`. NEVER the tailscale IP (containers dial
   metadata.internal -> primary_ip).
 - Key is `backups.borg.compression` (upstream sample's `compress` is a bug);
   `mariadb.*` is TOP-LEVEL (sample nests it wrongly); omit dead keys
@@ -410,6 +410,28 @@ tailnet membership, and a mixture of spellings makes roles disagree about the
 same host — the agent binding `:8500` on all interfaces while the firewall,
 metrics and manifest all treat the node as off-tailnet.
 
+### Tailscale access-only mode
+`tailscale_access_only: true` (per host or group, default `false`) keeps a
+member on the tailnet — the `tailscale` role still joins it, its firewall
+still opens the WireGuard port and drops tailnet sources off `tailscale0` —
+but for operator access only: no control-plane leg is routed over the
+tailnet to or from it. Every pairwise consumer therefore asks a second,
+narrower question, the ROUTING predicate, which also has exactly one
+spelling:
+
+    ((tailscale_authkey | default('')) | length > 0)
+      and (tailscale_enabled | default(true) | bool)
+      and not (tailscale_access_only | default(false) | bool)
+
+(`hostvars[h].` in front of each term for another host.) Membership gates
+the `tailscale` role, the firewall's anti-spoof rules and its UDP 41641
+accept, and preflight's opt-out warning; routing gates everything that picks
+an address or a `tailscale0` accept: the manifest's `node.agent_host` and
+`acme_server`, prometheus scrape addresses, the firewall's tailnet-path
+accepts, the agent's `metadata.listen_addr`, and validate's probes. The
+variable has no role default — it must read the same from every host's
+`hostvars`, so it is always spelled with `| default(false)`.
+
 ### Container network placement
 
 Node-side containers (cadvisor, fluentd) run with `--network=host`, with
@@ -419,10 +441,13 @@ networking does not, so the firewall can enforce them. Metrics-host
 containers bind `127.0.0.1` behind nginx.
 
 ### Tailscale address derivation (PAIRWISE — never per-node)
-- Manifest `node.agent_host` = node tailscale IP ONLY if the CONTROLLER is
-  tailnet-joined; else omit (controller dials primary_ip).
+"Routes over the tailnet" below is the routing predicate of §Tailscale
+access-only mode, asked of both ends.
+- Manifest `node.agent_host` = node tailscale IP ONLY if the CONTROLLER and
+  the node both route over the tailnet; else omit (controller dials
+  primary_ip).
 - Prometheus scrape address for a node = tailscale IP ONLY if the METRICS host
-  is tailnet-joined; else primary_ip/public route.
+  and the node both route over the tailnet; else primary_ip/public route.
 - Enrollment/cstacks-runner is controller-local — unaffected.
 
 ### Prometheus contract (metrics role + validate)

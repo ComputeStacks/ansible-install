@@ -49,5 +49,5 @@
       `metadata.listen_addr` in /etc/computestacks/agent.yml matches this
       address, and that the firewall accepts
       {{ cs_ports.agent_http }} from the controller
-      {{ '(over tailscale0)' if validate_controller_on_tailnet | bool else '(from its primary_ip/public_ip)' }}.
+      {{ '(over tailscale0)' if (validate_controller_on_tailnet | bool and validate_self_on_tailnet | bool) else '(from its primary_ip/public_ip)' }}.
     quiet: true

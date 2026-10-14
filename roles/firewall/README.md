@@ -77,8 +77,9 @@ an inventory var (`primary_ip`, `public_ip`) — no gathered facts, so a
 `--limit` run still renders the full picture (docs/contracts.md rule 1).
 "controller / metrics / node addresses" always means *every* host in that
 group, iterated (never `[0]`), and **every** source-restricted accept in the
-tables below also gets an `iifname "tailscale0"` accept when both ends are
-tailnet members — see [pairwise accepts](#pairwise-accepts-address-path-and-tailnet-path).
+tables below also gets an `iifname "tailscale0"` accept when both ends route
+control-plane traffic over the tailnet (members, neither with
+`tailscale_access_only: true`) — see [pairwise accepts](#pairwise-accepts-address-path-and-tailnet-path).
 It also means every host in that group across **every site**: this role does
 not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 
@@ -91,8 +92,8 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | icmp / icmpv6 sane types | icmp | anywhere | — |
 | 546 | udp | `fe80::/64` destination (DHCPv6/SLAAC client) | — |
 | `ssh` (22, or the host's `ssh_port`) | tcp | anywhere, or `firewall_allow_ssh_from` | 1, 4, 11, 19 |
-| `node_exporter` (9100) | tcp | metrics addresses **+ `iifname tailscale0`** when both this host and the metrics host are tailnet members | 9 |
-| 41641 | udp | anywhere — only when this host is on the tailnet | — (peer WireGuard) |
+| `node_exporter` (9100) | tcp | metrics addresses **+ `iifname tailscale0`** when both this host and the metrics host route over the tailnet | 9 |
+| 41641 | udp | anywhere — whenever this host is on the tailnet, access-only or not | — (peer WireGuard) |
 | `100.64.0.0/10`, `fd7a:115c:a1e0::/48` | any | **dropped** unless it arrives on `tailscale0` — only when this host is on the tailnet | — (anti-spoof) |
 
 ### nodes
@@ -103,7 +104,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | `tenant_port_begin`–`tenant_port_end` (10000–50000) | tcp + udp | anywhere | 13 |
 | `docker_tls` (2376) | tcp | controller addresses | 2 |
 | `agent_http` (8500) | tcp | see [the 8500 rule](#the-8500-rule) | 3, 8 |
-| `cadvisor` (8080), `haproxy_stats` (81) | tcp | metrics addresses **+ `iifname tailscale0`** when both this node and the metrics host are tailnet members | 9 |
+| `cadvisor` (8080), `haproxy_stats` (81) | tcp | metrics addresses **+ `iifname tailscale0`** when both this node and the metrics host route over the tailnet | 9 |
 
 ### controller
 
@@ -155,8 +156,8 @@ source-restricted rule in this role is therefore emitted through one helper,
 
 * one `ip saddr <peer address> … accept` per peer address — the LAN /
   `primary_ip` / public path; and
-* one `iifname "tailscale0" … accept` when **this host and that peer are both
-  tailnet members** — the tailnet path.
+* one `iifname "tailscale0" … accept` when **this host and that peer both
+  route control-plane traffic over the tailnet** — the tailnet path.
 
 Both stay in place at once, because a mixed fleet has both paths at once (a
 same-L2 region with `tailscale_enabled: false` next to a remote tailnet
@@ -177,8 +178,8 @@ running `nft --check`):
 | metrics host | this node | Rules emitted for 9100 / 8080 / 81 | Scrape path |
 |---|---|---|---|
 | tailnet | tailnet | metrics addresses **and** `iifname tailscale0` | tailnet |
-| tailnet | opted out / no key | metrics addresses only | prometheus dials `primary_ip`, source is the metrics host's own address |
-| not tailnet | tailnet | metrics addresses only | address path |
+| tailnet | opted out / no key / access-only | metrics addresses only | prometheus dials `primary_ip`, source is the metrics host's own address |
+| not tailnet or access-only | tailnet | metrics addresses only | address path |
 | not tailnet | not tailnet | metrics addresses only | address path |
 
 In all four the public interface stays closed for 8080 and 81: the only accepts
@@ -223,7 +224,7 @@ addresses only for nodes this run provisions, skipping hosts already flagged
 never opened publicly. Two states, derived pairwise exactly as
 docs/contracts.md requires:
 
-* **This node and the controller are both tailnet members** — the controller
+* **This node and the controller both route over the tailnet** — the controller
   dials the node's tailnet address (`node.agent_host` in the manifest), so the
   only accept is `iifname "tailscale0" tcp dport 8500`. The anti-spoof rule
   above it drops any packet claiming a tailnet source that arrives on another
@@ -252,10 +253,21 @@ therefore computed from inventory alone:
   and (hostvars[h].tailscale_enabled | default(true) | bool)
 ```
 
-which mirrors `site.yml`'s gate and the `cs_agent` role's
-`cs_agent_tailnet_joined`. It stays correct under `--limit`, where un-targeted
+which mirrors `site.yml`'s gate (`firewall_tailnet_hosts`). It decides the
+anti-spoof drops and the UDP 41641 accept. The `tailscale0` accepts follow the
+narrower routing predicate (`firewall_tailnet_routed_hosts`), which adds
+`and not (hostvars[h].tailscale_access_only | default(false) | bool)` and
+mirrors the `cs_agent` role's `cs_agent_tailnet_routed`
+(docs/contracts.md §Tailscale access-only mode): an access-only host joins the
+tailnet for operator access, but no control-plane leg to or from it is
+accepted on `tailscale0`. Both stay correct under `--limit`, where un-targeted
 hosts have no facts at all — a fact-derived version would silently downgrade a
 tailnet-only 8500 rule into a public-address one.
+
+The ssh accept is not tailnet-aware. Tailscale SSH (`--ssh` in
+`tailscale_extra_args`) is answered by `tailscaled` itself and needs no rule
+here; plain `ssh` to a host's tailnet address reaches sshd only when
+`firewall_allow_ssh_from` is empty or lists `100.64.0.0/10`.
 
 Consequence to know: `iifname "tailscale0" … accept` trusts *any* tailnet peer
 for that port, not just the specific peer host. The tailnet is the control
@@ -366,7 +378,8 @@ Current status of every port in the matrix that is served by a container:
 | `firewall_v1_script` | `/usr/local/bin/cs-recover_iptables` | Attach-mode target. |
 
 Consumed, not owned: `cs_ports`, `primary_ip`, `public_ip`, `existing_env`,
-`tailscale_authkey`, `tailscale_enabled`, `group_names`, `groups`.
+`tailscale_authkey`, `tailscale_enabled`, `tailscale_access_only`,
+`group_names`, `groups`.
 
 `firewall_tailscale_udp_port` is deliberately **not** in `cs_ports`: that file
 is the control-plane graph (who dials whom on the ComputeStacks control plane),

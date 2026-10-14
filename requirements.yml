@@ -19,6 +19,12 @@ collections:
   # authorized_key.
   - name: ansible.posix
     version: "==2.2.2"
+  # Collection (role artis3n.tailscale.machine), replacing the standalone
+  # galaxy role of the same name. 1.2.1 is the latest release, verified
+  # 2026-10-14 on galaxy.ansible.com and GitHub
+  # artis3n/ansible-collection-tailscale (requires_ansible >=2.18.0).
+  - name: artis3n.tailscale
+    version: "==1.2.1"
 
 roles:
   # Verified 2026-10-14 against galaxy.ansible.com and the GitHub tags of
@@ -33,5 +39,3 @@ roles:
     version: "4.0.0"
   - name: geerlingguy.redis
     version: "1.8.0"
-  - name: artis3n.tailscale
-    version: "v5.0.1"

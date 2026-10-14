@@ -62,6 +62,10 @@ acme_account_email: admin@example.com
 
 # Tailscale: enabled globally when tailscale_authkey is set in secrets.yml.
 # Opt out per host/group with `tailscale_enabled: false` (same-L2 regions).
+# Or keep a host/group on the tailnet for operator access only (Tailscale SSH;
+# add "--ssh" to tailscale_extra_args) while every control-plane leg to or
+# from it stays on the private addresses:
+# tailscale_access_only: true
 # In ATTACH mode the default flips: add-region.yml requires every host to
 # declare `tailscale_enabled` explicitly when an auth key is present, because
 # an existing v1 controller and metrics host are not on a tailnet until you
