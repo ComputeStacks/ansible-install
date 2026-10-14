@@ -143,8 +143,9 @@ compiled-in default (prune/compact schedules, borg lock waits, changelog and
 task retention, `metadata.max_body_bytes`). **There are no NFS keys anywhere** —
 v2 is SSH/borg only.
 
-`metadata.listen_addr` is `:8500` when the node is on the tailnet, else
-`<primary_ip>:8500`, and never the tailscale address itself: containers reach
+`metadata.listen_addr` is `:8500` when the node routes control-plane traffic
+over the tailnet (`cs_agent_tailnet_routed`: a member without
+`tailscale_access_only: true`), else `<primary_ip>:8500`, and never the tailscale address itself: containers reach
 the agent through `metadata.internal`, which resolves to `primary_ip`. The port
 is `cs_ports.agent_http` and cannot move — it is baked into customer
 containers.
@@ -172,7 +173,8 @@ containers.
 
 Consumed, not owned: `hostname`, `primary_ip` (inventory), `backups_key`,
 `sentry_dsn`, `s3_export_*` (secrets), `cs_portal_domain`, `cs_ports`,
-`borg_image`, `borg_binary_path`, `tailscale_authkey`/`tailscale_enabled`,
+`borg_image`, `borg_binary_path`, `tailscale_authkey`/`tailscale_enabled`/
+`tailscale_access_only`,
 `cs_site` and `cs_site_backup_hosts` (`playbooks/group_vars/all/sites.yml` —
 frozen spellings, local reads only).
 

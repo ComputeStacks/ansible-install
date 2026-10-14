@@ -3,15 +3,19 @@
 
 validate_controller_host: "{{ groups['controller'] | first }}"
 
-# Tailnet membership is the pure-inventory predicate every other role uses
-# (docs/contracts.md §Facts exception): an auth key plus the per-host opt-out.
-# It needs no facts, so it stays correct under `--limit`.
+# Whether a host routes control-plane traffic over the tailnet: the
+# pure-inventory routing predicate every other role uses (docs/contracts.md
+# §Tailscale access-only mode) — an auth key, the per-host opt-out, and not
+# `tailscale_access_only`. It needs no facts, so it stays correct under
+# `--limit`.
 validate_controller_on_tailnet: >-
   {{ (hostvars[validate_controller_host].tailscale_authkey | default('')) | length > 0
-     and (hostvars[validate_controller_host].tailscale_enabled | default(true) | bool) }}
+     and (hostvars[validate_controller_host].tailscale_enabled | default(true) | bool)
+     and not (hostvars[validate_controller_host].tailscale_access_only | default(false) | bool) }}
 validate_self_on_tailnet: >-
   {{ (tailscale_authkey | default('')) | length > 0
-     and (tailscale_enabled | default(true) | bool) }}
+     and (tailscale_enabled | default(true) | bool)
+     and not (tailscale_access_only | default(false) | bool) }}
 
 # The address the CONTROLLER dials this node's agent on — pairwise, exactly
 # as roles/controller_seed derives `node.agent_host`: the node's tailnet

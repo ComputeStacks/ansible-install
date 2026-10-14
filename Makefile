@@ -80,7 +80,8 @@ help:
 	@echo "                                  and the bootstrap manifest against each, and prove"
 	@echo "                                  the powerdns load balancer record plan and the"
 	@echo "                                  node upgrade selection rules and the node data"
-	@echo "                                  disk classification"
+	@echo "                                  disk classification and the tailnet routing"
+	@echo "                                  of every pairwise consumer"
 	@echo "check-pins                        confirm every pin in versions.yml and requirements.yml"
 	@echo "                                  exists upstream (network; not part of check)"
 	@echo ""
@@ -168,12 +169,15 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/ssh_port.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/ssh_port.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/tailscale_routing.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
 	@echo "       node data disk classification formats only a provably blank disk,"
-	@echo "       every ssh port consumer reads the listening host's own ssh_port"
+	@echo "       every ssh port consumer reads the listening host's own ssh_port,"
+	@echo "       every tailnet consumer agrees on which legs ride the tailnet"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
 # requirements.yml) is looked up at its source -- apt indexes, registries,

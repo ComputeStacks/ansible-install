@@ -238,6 +238,7 @@
     controller_seed_node_tailnet: >-
       {{ ((tailscale_authkey | default('')) | length > 0)
          and (hostvars[item].tailscale_enabled | default(true) | bool)
+         and not (hostvars[item].tailscale_access_only | default(false) | bool)
          and ((controller_seed_node_ts | trim) | length > 0) }}
 
 - name: Warn when a node's acme_server is the controller's primary_ip

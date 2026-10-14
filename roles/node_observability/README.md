@@ -56,7 +56,8 @@ Binds:
 **Why cadvisor binds all interfaces rather than `primary_ip`.** The pairwise
 address rule in docs/contracts.md makes the scrape address a property of the
 *metrics host*, not of the node: prometheus dials a node's **tailscale**
-address whenever the metrics host is itself tailnet-joined, and its `primary_ip`
+address whenever the metrics host and the node both route over the tailnet
+(members, neither with `tailscale_access_only: true`), and its `primary_ip`
 otherwise. A cross-region node reached over the tailnet therefore receives a
 connection addressed to its tailnet IP, and a socket bound to `primary_ip`
 would refuse it — every cross-region node would report no container metrics

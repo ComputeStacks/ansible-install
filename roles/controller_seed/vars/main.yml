@@ -18,6 +18,7 @@ controller_seed_controller_ts: >-
 controller_seed_controller_tailnet: >-
   {{ ((tailscale_authkey | default('')) | length > 0)
      and (hostvars[controller_seed_controller_host].tailscale_enabled | default(true) | bool)
+     and not (hostvars[controller_seed_controller_host].tailscale_access_only | default(false) | bool)
      and ((controller_seed_controller_ts | trim) | length > 0) }}
 
 ### Site scoping (docs/contracts.md §Site scoping). Role vars, not defaults:

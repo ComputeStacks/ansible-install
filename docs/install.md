@@ -253,7 +253,9 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
   a tailnet; the controller then dials each node's agent over it and
   prometheus scrapes over it, instead of sending an admin Bearer token and
   exporter scrapes in cleartext across the public internet. Opt a same-L2
-  region out with `tailscale_enabled: false` on the host or group. Without a
+  region out with `tailscale_enabled: false` on the host or group, or keep it
+  on the tailnet for operator access only with `tailscale_access_only: true`
+  (control-plane traffic then stays on `primary_ip`). Without a
   tailnet, a remote region's control-plane traffic is cleartext — a supported
   choice, but an explicit one.
 * **Ubuntu Pro.** Set `ubuntu_pro_token` for livepatch.

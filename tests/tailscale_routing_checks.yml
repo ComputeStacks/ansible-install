@@ -1,0 +1,101 @@
+---
+# One scenario of tests/tailscale_routing.yml, on every host at once (the
+# linear strategy keeps hosts in step, so each set_fact below is visible in
+# every other host's hostvars by the next task).
+- name: "Apply the scenario's access-only set — {{ tailscale_routing_scenario.name }}"
+  ansible.builtin.set_fact:
+    tailscale_access_only: "{{ inventory_hostname in tailscale_routing_scenario.access_only }}"
+
+- name: Derive the firewall's tailnet lists exactly as a converge does
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/firewall/tasks/tailnet.yml"
+
+- name: Work out what this scenario expects of this host
+  ansible.builtin.set_fact:
+    tailscale_routing_self: "{{ not (tailscale_access_only | bool) }}"
+    tailscale_routing_controller: >-
+      {{ not (hostvars[groups['controller'] | first].tailscale_access_only | bool) }}
+    tailscale_routing_any_metrics: >-
+      {{ (groups['metrics'] | default([])
+          | map('extract', hostvars, 'tailscale_access_only')
+          | reject | list | length) > 0 }}
+    tailscale_routing_firewall: >-
+      {{ lookup('ansible.builtin.template',
+                playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').splitlines()
+         | reject('match', '\s*#') | list }}
+
+- name: Assert this host's firewall keeps membership and routes only what it should
+  vars:
+    tailnet_accepts: "{{ tailscale_routing_firewall | select('search', 'iifname \"tailscale0\"') | list }}"
+    exporter_tailnet: >-
+      {{ tailscale_routing_firewall
+         | select('search', 'iifname \"tailscale0\" tcp dport ' ~ cs_ports.node_exporter ~ ' accept') | list }}
+  ansible.builtin.assert:
+    that:
+      # Membership: WireGuard and the anti-spoof drops, access-only or not.
+      - tailscale_routing_firewall | select('search', 'udp dport ' ~ firewall_tailscale_udp_port ~ ' accept') | list | length == 1
+      - tailscale_routing_firewall | select('search', 'saddr ' ~ firewall_tailscale_v4_range ~ ' iifname != ') | list | length == 1
+      # Routing: no tailscale0 accept at all on an access-only host.
+      - tailscale_routing_self | bool or (tailnet_accepts | length == 0)
+      # The exporter scrape rides the tailnet exactly when both ends route.
+      - (exporter_tailnet | length > 0)
+        == (tailscale_routing_self | bool and tailscale_routing_any_metrics | bool)
+    fail_msg: >-
+      {{ tailscale_routing_scenario.name }}: {{ inventory_hostname }}'s firewall
+      disagrees with the routing predicate: {{ tailnet_accepts }}
+    quiet: true
+
+- name: Assert the node's agent, firewall and validate agree on the 8500 leg
+  when: "'nodes' in group_names"
+  vars:
+    both_routed: "{{ tailscale_routing_self | bool and tailscale_routing_controller | bool }}"
+    agent_over_tailnet: >-
+      {{ tailscale_routing_firewall | select('search', 'comment "controller over the tailnet"') | list }}
+    agent_by_address: >-
+      {{ tailscale_routing_firewall
+         | select('search', 'saddr \S+ tcp dport ' ~ cs_ports.agent_http ~ ' accept') | list }}
+    controller_host: "{{ groups['controller'] | first }}"
+    acme_expected: >-
+      {{ controller_acme_address
+         | default(hostvars[controller_host].tailscale_ip if (both_routed | bool)
+                   else hostvars[controller_host].primary_ip) }}
+  ansible.builtin.assert:
+    that:
+      - (agent_over_tailnet | length > 0) == (both_routed | bool)
+      - (agent_by_address | length > 0) != (both_routed | bool)
+      - (cs_agent_listen_addr | trim)
+        == ((':' if (tailscale_routing_self | bool) else primary_ip ~ ':') ~ cs_ports.agent_http)
+      - (validate_agent_dial_address | trim)
+        == (tailscale_ip if (both_routed | bool) else primary_ip)
+      - (validate_acme_address | trim) == (acme_expected | trim)
+    fail_msg: >-
+      {{ tailscale_routing_scenario.name }}: {{ inventory_hostname }} —
+      firewall tailnet {{ agent_over_tailnet }}, firewall address
+      {{ agent_by_address }}, listen {{ cs_agent_listen_addr | trim }},
+      validate dials {{ validate_agent_dial_address | trim }}, acme
+      {{ validate_acme_address | trim }} (expected both_routed={{ both_routed }}).
+    quiet: true
+
+- name: Stand in for the certificates roles/controller_seed slurps
+  when: "'controller' in group_names"
+  ansible.builtin.set_fact:
+    controller_seed_shared_certificates: >-
+      {{ dict((cs_app_domain_cert_paths.keys() | list) | product(['STUB — tests/tailscale_routing.yml'])) }}
+
+- name: Assert the manifest carries agent_host exactly for paired nodes
+  when: "'controller' in group_names"
+  vars:
+    manifest: >-
+      {{ lookup('ansible.builtin.template',
+                playbook_dir ~ '/../roles/controller_seed/templates/manifest.yml.j2') }}
+    node_routed: "{{ not (hostvars[item].tailscale_access_only | bool) }}"
+  ansible.builtin.assert:
+    that:
+      - (controller_seed_controller_tailnet | bool) == (tailscale_routing_self | bool)
+      - >-
+        (('agent_host: ' ~ (hostvars[item].tailscale_ip | to_json)) in manifest)
+        == (tailscale_routing_self | bool and node_routed | bool)
+    fail_msg: >-
+      {{ tailscale_routing_scenario.name }}: the manifest's agent_host for
+      {{ item }} disagrees with the routing predicate.
+    quiet: true
+  loop: "{{ cs_new_nodes | sort }}"

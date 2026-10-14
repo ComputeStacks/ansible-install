@@ -2,6 +2,23 @@
 
 ## October 14, 2026
 
+* **Tailscale now installs from the `artis3n.tailscale` collection** (1.2.1,
+  role `artis3n.tailscale.machine`) instead of the standalone galaxy role,
+  whose deprecation task fails outright on ansible-core 2.19 and later. Run
+  `make deps` after pulling; `galaxy_roles/artis3n.tailscale` is no longer
+  used and can be deleted. The first converge replaces the old
+  `/etc/apt/sources.list.d/tailscale.list` with the collection's deb822
+  source (left in place, the two make apt refuse to update). Joined hosts are
+  not re-authenticated, and every `tailscale_*` variable keeps its meaning.
+* **`tailscale_access_only: true`** keeps a host or group on the tailnet for
+  operator access only (Tailscale SSH needs `--ssh` in
+  `tailscale_extra_args`): the controller dials its agent on `primary_ip`,
+  prometheus scrapes it on `primary_ip`, its acme backend address is the
+  controller's `primary_ip`, its agent binds `primary_ip:8500`, and its
+  firewall accepts no control-plane traffic on `tailscale0` (UDP 41641 stays
+  open). Default `false`, which is the existing behavior. Flipping it on an
+  already-seeded host changes addresses the controller holds, so run that
+  converge with `controller_seed_update_addresses: true` and no `--limit`.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

@@ -84,8 +84,9 @@ the ansible control machine. Those are control-plane rows #3, #10 and #4/#19,
 and they fail for reasons — firewall source restrictions, tailnet routing,
 basic-auth credentials — that only show up on the real leg. The agent probe
 uses the same pairwise derivation `controller_seed` uses for
-`node.agent_host`: the node's tailnet address only when the **controller** is
-itself tailnet-joined, otherwise `primary_ip`.
+`node.agent_host`: the node's tailnet address only when the **controller** and
+the node both route over the tailnet (members, neither with
+`tailscale_access_only: true`), otherwise `primary_ip`.
 
 **The prometheus check runs the controller's query, not a variant of it.**
 `count(node_cpu_seconds_total{node="<hostname>",region="<az>",job="node-exporter"})`
@@ -332,7 +333,8 @@ nameservers),
 `cs_app_domain` and `cs_new_nodes`
 (`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`), `dns_driver`,
 `borg_version`, `borg_image`, `existing_env`, `tailscale_authkey` /
-`tailscale_enabled`, `controller_acme_address`, and the frozen site contract
+`tailscale_enabled` / `tailscale_access_only`, `controller_acme_address`, and
+the frozen site contract
 `cs_site`, `cs_site_backup_hosts`, `cs_site_metrics_domains`,
 `cs_site_metrics_credentials`, `cs_metrics_credentials_default`
 (`playbooks/group_vars/all/sites.yml`).

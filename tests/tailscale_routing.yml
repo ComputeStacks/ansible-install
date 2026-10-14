@@ -1,0 +1,58 @@
+---
+# Does every pairwise tailnet consumer agree on which legs ride the tailnet,
+# with and without `tailscale_access_only`? (docs/contracts.md §Tailscale
+# access-only mode.) A consumer that disagrees with the others is a dead leg:
+# the controller dialing a tailnet address the node's firewall no longer
+# accepts, or a firewall still trusting tailscale0 for a host that was meant
+# to be reachable only for operator access.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
+#
+# (run by `make check`). Every host gets a stand-in auth key and a stand-in
+# tailnet address (100.64.0.0/10, shared address space; nothing is joined),
+# then each scenario sets `tailscale_access_only` on a subset of hosts and the
+# checks re-derive, on each host:
+#
+#   * its firewall (the real template, with roles/firewall/tasks/tailnet.yml
+#     deriving the same lists a converge would);
+#   * on nodes, the agent's listen address and the addresses validate probes;
+#   * on the controller, the manifest's `agent_host` per node.
+#
+# Renders only; nothing is written.
+- name: Every scenario against every host
+  hosts: all
+  gather_facts: false
+  vars:
+    tailscale_routing_scenarios:
+      - name: every host routes over the tailnet
+        access_only: []
+      - name: every host access-only
+        access_only: "{{ groups['all'] }}"
+      - name: controller access-only
+        access_only: "{{ groups['controller'] }}"
+      - name: metrics access-only
+        access_only: "{{ groups['metrics'] | default([]) }}"
+      - name: one node access-only
+        access_only: "{{ [groups['nodes'] | sort | first] }}"
+  tasks:
+    - name: Stand in for the tailscale role (a key's length, an address)
+      ansible.builtin.set_fact:
+        tailscale_authkey: "tskey-auth-stand-in-not-a-key"
+        tailscale_ip: "100.64.0.{{ (groups['all'] | sort).index(inventory_hostname) + 1 }}"
+
+    - name: Load the defaults and vars of the roles under test
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/{{ item }}/main.yml"
+      loop:
+        - firewall/defaults
+        - cs_agent/defaults
+        - validate/vars
+        - controller_seed/defaults
+        - controller_seed/vars
+
+    - name: Run each scenario
+      ansible.builtin.include_tasks: tailscale_routing_checks.yml
+      loop: "{{ tailscale_routing_scenarios }}"
+      loop_control:
+        loop_var: tailscale_routing_scenario
+        label: "{{ tailscale_routing_scenario.name }}"

@@ -156,8 +156,9 @@ of empty regions.
 controller's ACME backend on (`cs_ports.controller_acme_backend`, 3000):
 
 * the **controller's** tailnet address when **both** the controller and that
-  node are tailnet-joined (docs/contracts.md §Tailscale address derivation —
-  the rule is pairwise, never per-node);
+  node route control-plane traffic over the tailnet — members, neither with
+  `tailscale_access_only: true` (docs/contracts.md §Tailscale address
+  derivation — the rule is pairwise, never per-node);
 * otherwise the controller's `primary_ip`.
 
 Set `controller_acme_address` as a host var on a node to override it — a
@@ -177,7 +178,8 @@ certificate that never issues.
 
 The address value uses the blessed facts exception
 (`hostvars[h].tailscale_ip | default(hostvars[h].ansible_local.computestacks.tailscale_ip | default(''))`);
-tailnet *membership* stays a pure inventory predicate.
+tailnet *routing* (membership minus `tailscale_access_only`) stays a pure
+inventory predicate.
 
 The `ansible_local` half reaches hosts outside a `--limit` only through the
 repo's persistent fact cache (`ansible.cfg`, `.ansible_facts_cache/`), which
@@ -190,12 +192,17 @@ for every un-targeted tailnet node, and the role's warning is the only signal.
 `agent_host` overrides the address the **controller** dials cs-agent on, so it
 is the *controller's* tailnet membership that decides it, not the node's:
 
-* both ends tailnet-joined → the **node's** tailscale IP;
+* both ends route over the tailnet (members, neither access-only) → the
+  **node's** tailscale IP;
 * otherwise the key is **omitted entirely**, and the controller falls back to
   `primary_ip`.
 
 Omitted, not blank: the apply assigns every key that is present, so an empty
 string would be stored as an empty `agent_host` rather than read as "unset".
+
+Both derivations are create-only on rows that already exist. Turning on
+`tailscale_access_only` for a seeded controller or node (or tailscale itself)
+is a topology change: run it with `controller_seed_update_addresses: true`.
 
 ## Derivation decisions
 

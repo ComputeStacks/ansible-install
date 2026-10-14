@@ -51,12 +51,20 @@ opting out is reasonable and the two legs ride the LAN. A remote region with
 tailscale disabled sends the admin Bearer and scrapes in cleartext: an
 explicit operator choice, documented rather than prevented.
 
+A host can also join the tailnet for operator access alone:
+`tailscale_access_only: true` keeps it a tailnet member (Tailscale SSH, ad
+hoc access) while every control-plane leg to or from it stays on
+`primary_ip`, exactly as if it had opted out. Use it where the LAN is the
+right path for the control plane but operators still reach hosts over the
+tailnet.
+
 ### The agent's listen address follows from rows 3 and 8
 
 `metadata.listen_addr` cannot be the tailscale address (containers reach the
 agent through `metadata.internal`, which resolves to `primary_ip` — row 8) and
 cannot be `primary_ip` only (with tailscale on, the controller dials the
-tailnet address — row 3). So a tailnet-joined node listens on `:8500`, all
+tailnet address — row 3). So a node that routes control-plane traffic over
+the tailnet (a member without `tailscale_access_only`) listens on `:8500`, all
 interfaces, and the **firewall** is the enforcement: `agent_http` is accepted
 from `tailscale0` and the local/docker paths, never from the public interface.
 That is why the firewall and tailscale roles ship together.
@@ -64,9 +72,12 @@ That is why the firewall and tailscale roles ship together.
 ### Tailscale address derivation is pairwise, never per-node
 
 * `nodes[].agent_host` = the node's tailnet address **only if the controller**
-  is tailnet-joined; otherwise omitted, and the controller dials `primary_ip`.
+  and the node both route over the tailnet (members, neither
+  `tailscale_access_only`); otherwise omitted, and the controller dials
+  `primary_ip`.
 * The prometheus scrape address for a node = its tailnet address **only if the
-  metrics host** is tailnet-joined; otherwise `primary_ip`.
+  metrics host** and the node both route over the tailnet; otherwise
+  `primary_ip`.
 
 A tailnet-only `agent_host` on a controller that is not itself on the tailnet
 is unreachable, and the failure is silent — orders are rejected while every

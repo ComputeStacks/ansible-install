@@ -8,22 +8,8 @@
 # working v1 INPUT policy with a table built from a PARTIAL inventory view
 # (docs/contracts.md rule 9) and lock the operator out of the fleet.
 
-- name: Reset the derived tailnet membership list
-  ansible.builtin.set_fact:
-    firewall_tailnet_hosts: []
-
-- name: Determine which hosts are intended members of the tailnet
-  ansible.builtin.set_fact:
-    firewall_tailnet_hosts: >-
-      {{ firewall_tailnet_hosts
-         + ([item] if ((hostvars[item].tailscale_authkey | default('')) | length > 0)
-                      and (hostvars[item].tailscale_enabled | default(true) | bool)
-            else []) }}
-  loop: "{{ groups['all'] }}"
-  # Pure inventory derivation (mirrors site.yml's gate and the cs_agent role's
-  # cs_agent_tailnet_joined) so it stays correct under --limit, where
-  # un-targeted hosts have no facts at all. Only the LENGTH of the authkey is
-  # ever evaluated, so no secret reaches the output.
+- name: Derive tailnet membership and routing from inventory
+  ansible.builtin.import_tasks: tailnet.yml
 
 - name: Apply the additive firewall updates (attach mode)
   ansible.builtin.include_tasks: append.yml
