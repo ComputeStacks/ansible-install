@@ -84,8 +84,9 @@ help:
 	@echo "                                  the powerdns load balancer record plan, the"
 	@echo "                                  public_ipv6 check and load balancer address seed, the"
 	@echo "                                  node upgrade selection rules, the node data"
-	@echo "                                  disk classification, the reachability verdict"
-	@echo "                                  and the tailnet routing of every pairwise consumer"
+	@echo "                                  disk classification, the reachability verdict,"
+	@echo "                                  the tailnet routing of every pairwise consumer"
+	@echo "                                  and the cs-agent backup export settings"
 	@echo "check-pins                        confirm every pin in versions.yml and requirements.yml"
 	@echo "                                  exists upstream (network; not part of check)"
 	@echo ""
@@ -189,6 +190,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_kernel_uplink_ra.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/tailscale_routing.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
@@ -198,7 +200,8 @@ check:
 	@echo "       the reachability check names every host that did not answer,"
 	@echo "       every ssh port consumer reads the listening host's own ssh_port,"
 	@echo "       the uplink's IPv6 RA fix matches who manages the link,"
-	@echo "       every tailnet consumer agrees on which legs ride the tailnet"
+	@echo "       every tailnet consumer agrees on which legs ride the tailnet,"
+	@echo "       cs-agent's backup export block renders only with a bucket and is checked"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
 # requirements.yml) is looked up at its source -- apt indexes, registries,

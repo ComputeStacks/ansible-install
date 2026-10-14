@@ -51,15 +51,27 @@ backups:
     ssh_borg_remote_path: "{{ cs_agent_borg_remote_path }}"
 {% endif %}
 {% if cs_agent_s3_export_enabled | bool %}
+  # Backup export ("download backup"). Rendered only when a bucket is set;
+  # tasks/export_check.yml has already checked these. Strings go through
+  # to_json so a credential with a quote or backslash still parses (JSON is
+  # YAML).
   export:
+    workers: {{ cs_agent_s3_export_workers | int }}
+    tar_filter: {{ cs_agent_s3_export_tar_filter | string | to_json }}
+    timeout_sec: {{ cs_agent_s3_export_timeout_sec | int }}
     s3:
-      endpoint: "{{ cs_agent_s3_export_endpoint }}"
-      region: "{{ cs_agent_s3_export_region }}"
-      bucket: "{{ cs_agent_s3_export_bucket }}"
-      prefix: "{{ cs_agent_s3_export_prefix }}"
-      access_key: "{{ s3_export_access_key }}"
-      secret_key: "{{ s3_export_secret_key }}"
+      endpoint: {{ cs_agent_s3_export_endpoint | string | trim | to_json }}
+      region: {{ cs_agent_s3_export_region | string | trim | to_json }}
+      bucket: {{ cs_agent_s3_export_bucket | string | trim | to_json }}
+      prefix: {{ cs_agent_s3_export_prefix | string | to_json }}
+      access_key: {{ s3_export_access_key | string | to_json }}
+      secret_key: {{ s3_export_secret_key | string | to_json }}
       force_path_style: {{ cs_agent_s3_export_force_path_style | bool | lower }}
+      part_size_mb: {{ cs_agent_s3_export_part_size_mb | int }}
+      concurrency: {{ cs_agent_s3_export_concurrency | int }}
+      sse: {{ cs_agent_s3_export_sse | string | trim | to_json }}
+      default_ttl_sec: {{ cs_agent_s3_export_default_ttl_sec | int }}
+      max_ttl_sec: {{ cs_agent_s3_export_max_ttl_sec | int }}
 {% endif %}
 
 # TOP-LEVEL, not nested under backups: the agent reads `mariadb.*`.

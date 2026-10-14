@@ -1,0 +1,49 @@
+---
+# PURE. Check the backup export settings (backups.export.* in agent.yml)
+# with the cs_agent_export_problems filter (filter_plugins/cs_agent_export.py).
+# No command runs and no host is read, so roles/preflight includes this file
+# on every new node before anything changes, the role's own tasks/main.yml
+# includes it again as a backstop, and tests/cs_agent_export.yml drives it.
+#
+# Input:   the cs_agent_s3_export_* variables (defaults/main.yml) and the
+#          vaulted s3_export_access_key / s3_export_secret_key
+#          cs_agent_export_check_fail   fail the host on a problem (default true)
+# Output:  cs_agent_export_problems     a list of operator-facing sentences;
+#                                       empty when valid or when no bucket is
+#                                       set (export off)
+#
+# The credentials never enter the dict: only whether each is set, so neither
+# the fact nor a failure message can carry one.
+
+- name: Check the backup export settings
+  vars:
+    cs_agent_export_settings:
+      workers: "{{ cs_agent_s3_export_workers }}"
+      tar_filter: "{{ cs_agent_s3_export_tar_filter }}"
+      timeout_sec: "{{ cs_agent_s3_export_timeout_sec }}"
+      endpoint: "{{ cs_agent_s3_export_endpoint }}"
+      region: "{{ cs_agent_s3_export_region }}"
+      bucket: "{{ cs_agent_s3_export_bucket }}"
+      prefix: "{{ cs_agent_s3_export_prefix }}"
+      access_key_set: "{{ (s3_export_access_key | default('') | string | length) > 0 }}"
+      secret_key_set: "{{ (s3_export_secret_key | default('') | string | length) > 0 }}"
+      force_path_style: "{{ cs_agent_s3_export_force_path_style }}"
+      part_size_mb: "{{ cs_agent_s3_export_part_size_mb }}"
+      concurrency: "{{ cs_agent_s3_export_concurrency }}"
+      sse: "{{ cs_agent_s3_export_sse }}"
+      default_ttl_sec: "{{ cs_agent_s3_export_default_ttl_sec }}"
+      max_ttl_sec: "{{ cs_agent_s3_export_max_ttl_sec }}"
+  ansible.builtin.set_fact:
+    cs_agent_export_problems: >-
+      {{ cs_agent_export_settings | cs_agent_export_problems(cs_agent_upstream_tasks_retention_sec) }}
+
+- name: Refuse an invalid backup export configuration
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }}: the backup export settings are invalid
+      (cs_agent_s3_export_bucket is set, so export is on):
+      {{ cs_agent_export_problems | join(' ') }}
+      See roles/cs_agent/README.md, "Backup export to S3".
+  when:
+    - cs_agent_export_problems | length > 0
+    - cs_agent_export_check_fail | default(true) | bool

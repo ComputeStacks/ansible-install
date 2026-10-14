@@ -36,7 +36,7 @@ greenfield inventory fails the first by design.
 nothing; the OS, data-disk, registry-login and controller-image checks skip
 `existing_env` hosts, and the delegation check is skipped in attach mode.
 **Requires:** — (it includes `roles/node_storage`'s read-only `probe` and pure
-`classify` task files itself).
+`classify` task files, and `roles/cs_agent`'s pure `export_check`, itself).
 
 ## Reachability (`tasks/reachable.yml`)
 
@@ -90,6 +90,11 @@ change nothing.
   required because roles/powerdns, roles/validate and this role compare the
   address as text against what PowerDNS and dig print. Unset, null and
   empty all mean "no IPv6 address".
+- **Backup export to S3.** Each new node runs `roles/cs_agent`'s pure
+  `export_check` with `cs_agent_export_check_fail: false`, and ONE `run_once`
+  assert fails the run if any node's settings were refused, listing every
+  node and its problems. Nodes with no `cs_agent_s3_export_bucket` (export
+  off) always pass. The rules are in `roles/cs_agent/README.md`.
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
 - Exactly one host in `groups['controller']`, and — when

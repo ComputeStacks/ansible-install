@@ -148,6 +148,12 @@
         name: firewall
         tasks_from: v2_append
 
+    # Pure; roles/preflight includes it on every new node.
+    - name: Check the backup export settings
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+
 # The powerdns entry points. add-region.yml includes `lb_records` against an
 # existing ns_primary; `lb_records_plan` is the pure step it (and
 # tests/lb_records_plan.yml) includes.

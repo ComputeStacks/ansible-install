@@ -48,7 +48,8 @@ controller), `backup_server` (`~cstacks/.ssh` on this site's backup host).
    server** — see below.
 5. **Enrollment** (`tasks/enroll.yml`, tagged `enroll`) — see below.
 6. **`agent.yml`** (0600), then enable and start the service. Config changes
-   notify a restart.
+   notify a restart. Before any of this, `tasks/export_check.yml` checks the
+   backup export settings (see below).
 
 ## Which backup server (site scoping)
 
@@ -96,6 +97,64 @@ its enrollment and its metadata front door. What is skipped:
 
 `backups_key` is still required in the secrets file — it is what makes adding
 a server later a no-decision change.
+
+## Backup export to S3
+
+cs-agent's "download backup" feature (`backups.export.*`) streams a chosen
+borg archive to S3 or S3-compatible storage and hands the controller a
+presigned URL. It is **off until `cs_agent_s3_export_bucket` is set**: with
+the bucket empty no `export:` block is rendered and the agent keeps the
+feature inert, whatever else is set.
+
+| Variable | Default | `agent.yml` key |
+|---|---|---|
+| `cs_agent_s3_export_bucket` | `""` (off) | `backups.export.s3.bucket` |
+| `cs_agent_s3_export_endpoint` | `""` (AWS) | `backups.export.s3.endpoint` — an `https://` URL for MinIO, Ceph and the like |
+| `cs_agent_s3_export_region` | `us-east-1` | `backups.export.s3.region` |
+| `cs_agent_s3_export_prefix` | `exports/` | `backups.export.s3.prefix` |
+| `cs_agent_s3_export_force_path_style` | `false` | `backups.export.s3.force_path_style` — `true` for MinIO / path-style |
+| `s3_export_access_key` (secrets) | — | `backups.export.s3.access_key` |
+| `s3_export_secret_key` (secrets) | — | `backups.export.s3.secret_key` |
+| `cs_agent_s3_export_workers` | `1` | `backups.export.workers` |
+| `cs_agent_s3_export_tar_filter` | `gzip` | `backups.export.tar_filter` — `""` uploads uncompressed |
+| `cs_agent_s3_export_timeout_sec` | `14400` | `backups.export.timeout_sec` |
+| `cs_agent_s3_export_part_size_mb` | `64` | `backups.export.s3.part_size_mb` |
+| `cs_agent_s3_export_concurrency` | `4` | `backups.export.s3.concurrency` |
+| `cs_agent_s3_export_sse` | `AES256` | `backups.export.s3.sse` |
+| `cs_agent_s3_export_default_ttl_sec` | `43200` | `backups.export.s3.default_ttl_sec` |
+| `cs_agent_s3_export_max_ttl_sec` | `86400` | `backups.export.s3.max_ttl_sec` |
+
+The defaults are cs-agent's own (`config/config.go`), so an operator sets the
+bucket, the endpoint (unless AWS), the region and the two keys, and nothing
+else. When the bucket is set, every key is rendered.
+
+**Per region.** Each variable is read on the node, so it can differ per
+region, per az or per node: put it in the inventory's
+`group_vars/region_<name>.yml` (or `az_<name>.yml`; both group families are
+built by `zz_constructed.yml`) or in a node's `host_vars`. The credentials
+are secrets: keep them in the vaulted `group_vars/all/secrets.yml`, or in a
+vaulted per-region group_vars file when regions use different accounts.
+`agent.yml` is 0600 and rendered with `no_log`.
+
+**Checks** (`tasks/export_check.yml`, filter `cs_agent_export_problems` in
+`filter_plugins/cs_agent_export.py`). Pure; `preflight` includes it on every
+new node before anything changes, and this role runs it again as a backstop.
+With a bucket set it requires a region and both keys, an `https://` endpoint
+if one is set, whole numbers ≥ 1 for workers, timeout, concurrency and both
+TTLs, `part_size_mb` ≥ 5, an `sse` of `AES256`, `aws:kms`, `aws:kms:dsse` or
+`""`, and `default_ttl_sec` ≤ `max_ttl_sec`. cs-agent itself only *logs* a
+bad export config at startup and then fails every export job.
+
+`max_ttl_sec` must also stay **below cs-agent's terminal task-row retention**
+(`tasks.retention_sec`, 7 days): a completed export whose link is still live
+must not be reaped. This role does not render `tasks.retention_sec`, so the
+check compares against `cs_agent_upstream_tasks_retention_sec` (`604800`),
+which mirrors the agent's compiled-in default and is not a knob.
+
+The exported tar is **plaintext** — the repository's encryption does not
+carry over. Keep the bucket private, leave SSE on, and give it an
+object-expiry lifecycle rule and `AbortIncompleteMultipartUpload`. Each large
+export holds roughly `part_size_mb × concurrency` of memory per worker.
 
 ## Enrollment
 
@@ -168,7 +227,8 @@ containers.
 | `cs_agent_backup_ssh_port` | `backup_ssh_port`, else the backup host's `ssh_port`, else `cs_ports.ssh` | sshd port **on the backup server**. |
 | `cs_agent_borg_compression` | `zstd,3` | `backups.borg.compression`. |
 | `cs_agent_queue_numworkers` | `3` | Agent job workers. |
-| `cs_agent_s3_export_*` | empty | Backup export to S3; inert until a bucket **and** `s3_export_access_key`/`s3_export_secret_key` are set. |
+| `cs_agent_s3_export_*` | cs-agent's defaults, bucket empty | Backup export to S3; off until `cs_agent_s3_export_bucket` is set. See "Backup export to S3". |
+| `cs_agent_upstream_tasks_retention_sec` | `604800` | cs-agent's compiled-in `tasks.retention_sec`; not rendered, only the export check reads it. |
 | `cs_agent_mariadb_*` | agent defaults | Top-level `mariadb.*` block. |
 | `cs_agent_enroll_command` | `cstacks` | Set to an absolute path if `cstacks` is not on the controller's non-interactive `PATH`. |
 
@@ -179,8 +239,9 @@ Consumed, not owned: `hostname`, `primary_ip` (inventory), `backups_key`,
 `cs_site` and `cs_site_backup_hosts` (`playbooks/group_vars/all/sites.yml` —
 frozen spellings, local reads only).
 
-`agent.yml` is rendered `no_log: true`: it carries `backups.key` and the admin
-token hash, and a `--diff` run would otherwise print both.
+`agent.yml` is rendered `no_log: true`: it carries `backups.key`, the admin
+token hash and, with export on, the S3 keys, and a `--diff` run would
+otherwise print them.
 
 **Attach mode:** `backup_host_path` and `backup_borg_remote_path` are
 *required* inventory inputs describing the existing environment (v1 servers:

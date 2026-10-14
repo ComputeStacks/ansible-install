@@ -73,6 +73,25 @@ acme_account_email: admin@example.com
 
 # Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
 
+# Backup export to S3 ("download backup", optional; roles/cs_agent/README.md).
+# Off until a bucket is set. Read per node, so a region with its own S3
+# endpoint sets these in group_vars/region_<name>.yml (or a node's
+# host_vars) instead of here. The keys, s3_export_access_key and
+# s3_export_secret_key, go in secrets.yml. Defaults are cs-agent's own.
+# cs_agent_s3_export_bucket: exports-example
+# cs_agent_s3_export_endpoint: https://s3.example.com   # omit for AWS
+# cs_agent_s3_export_region: us-east-1
+# cs_agent_s3_export_prefix: "exports/"
+# cs_agent_s3_export_force_path_style: false   # true for MinIO
+# cs_agent_s3_export_workers: 1
+# cs_agent_s3_export_tar_filter: gzip          # "" = uncompressed
+# cs_agent_s3_export_timeout_sec: 14400
+# cs_agent_s3_export_part_size_mb: 64          # >= 5
+# cs_agent_s3_export_concurrency: 4
+# cs_agent_s3_export_sse: AES256               # aws:kms, aws:kms:dsse, or ""
+# cs_agent_s3_export_default_ttl_sec: 43200    # <= max_ttl_sec
+# cs_agent_s3_export_max_ttl_sec: 86400        # < 604800 (agent task retention)
+
 # Post-install checks (roles/validate). Names: services, storage, containers,
 # agent, backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain, dns,
 # dns_replication, pdns_api.

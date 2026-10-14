@@ -137,17 +137,56 @@ cs_agent_backup_ssh_port: "{{ backup_ssh_port | default(hostvars[cs_site_backup_
 cs_agent_borg_compression: "zstd,3"
 
 # --- backup export to S3 (optional) ----------------------------------------
-# Inert until a bucket AND both credentials are set; s3_export_access_key /
-# s3_export_secret_key live in the vaulted secrets file.
+# backups.export.* — "download backup": the agent streams a borg archive to S3
+# and hands back a presigned URL. OFF until cs_agent_s3_export_bucket is set;
+# with it empty no `export:` block is rendered at all. Once it is set,
+# tasks/export_check.yml (also run by preflight) requires the region and both
+# credentials and checks the numbers. Every default below is cs-agent's own
+# (config/config.go), so setting only the bucket, endpoint and keys renders
+# exactly what the agent would have assumed.
+#
+# Per region or per site: set these in the inventory's group_vars for a
+# region_<name> / az_<name> group, or in a node's host_vars — operators
+# commonly point each region at its own S3 endpoint. The credentials
+# s3_export_access_key / s3_export_secret_key are secrets: keep them in the
+# vaulted secrets file (or a vaulted per-region group_vars file). They are
+# rendered into agent.yml, which is 0600 and written with no_log.
+#
+# The exported tar is PLAINTEXT (the borg repo's encryption does not carry
+# over): keep the bucket private, leave SSE on, and give it an object-expiry
+# lifecycle rule plus AbortIncompleteMultipartUpload.
 cs_agent_s3_export_bucket: ""
-cs_agent_s3_export_endpoint: ""          # empty = real AWS; set for MinIO/Ceph
+cs_agent_s3_export_endpoint: ""          # empty = real AWS; else an https:// URL (MinIO/Ceph/...)
 cs_agent_s3_export_region: "us-east-1"
 cs_agent_s3_export_prefix: "exports/"
-cs_agent_s3_export_force_path_style: false
-cs_agent_s3_export_enabled: >-
-  {{ (cs_agent_s3_export_bucket | length > 0)
-     and (s3_export_access_key | default('') | length > 0)
-     and (s3_export_secret_key | default('') | length > 0) }}
+cs_agent_s3_export_force_path_style: false   # true for MinIO / path-style endpoints
+# Dedicated export workers; each large export holds about
+# part_size_mb * concurrency of RAM.
+cs_agent_s3_export_workers: 1
+# borg --tar-filter for the exported tar; "" uploads it uncompressed (full
+# plaintext size — the repo's own compression does not carry over).
+cs_agent_s3_export_tar_filter: "gzip"
+# Hard cap on one export, so a hung borg or S3 cannot hold the repo lock (4h).
+cs_agent_s3_export_timeout_sec: 14400
+# Multipart part size; >= 5. S3 allows 10,000 parts, so 64 MB caps one
+# archive at ~625 GB.
+cs_agent_s3_export_part_size_mb: 64
+cs_agent_s3_export_concurrency: 4
+# Server-side encryption: AES256, aws:kms, aws:kms:dsse, or "" for none.
+cs_agent_s3_export_sse: "AES256"
+# Presigned URL lifetime when the request names none (12h), and the cap on a
+# requested one (24h). max must stay below cs_agent_upstream_tasks_retention_sec.
+cs_agent_s3_export_default_ttl_sec: 43200
+cs_agent_s3_export_max_ttl_sec: 86400
+
+# NOT a knob: cs-agent's compiled-in tasks.retention_sec (config/config.go,
+# 7d), which this role deliberately does not render. Terminal task rows must
+# outlive the longest presigned URL, so export_check.yml refuses a
+# cs_agent_s3_export_max_ttl_sec at or above it. Update it if a cs-agent bump
+# changes that default.
+cs_agent_upstream_tasks_retention_sec: 604800
+
+cs_agent_s3_export_enabled: "{{ (cs_agent_s3_export_bucket | default('') | string | trim | length) > 0 }}"
 
 # --- mariadb ---------------------------------------------------------------
 # TOP-LEVEL in the schema. The upstream sample nests these under `backups:`,

@@ -131,6 +131,14 @@ edits `sshd_config`: move the new node's sshd yourself before the run, and
 keep `ansible_port` in step (the example inventory derives it from
 `ssh_port`).
 
+**Backup export to S3 is per node.** If the environment offers "download
+backup", give the new node its region's export settings —
+`cs_agent_s3_export_bucket`, `_endpoint`, `_region` and the vaulted
+`s3_export_access_key` / `s3_export_secret_key` — in
+`group_vars/region_<name>.yml` or the node's `host_vars`. Without a bucket the
+new node's agent simply has export off. Preflight checks the settings before
+anything changes ([roles/cs_agent/README.md](../roles/cs_agent/README.md#backup-export-to-s3)).
+
 **Flag every existing shared host** — controller, metrics, backup, registry,
 nameservers:
 
