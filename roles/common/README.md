@@ -47,6 +47,21 @@ itself when a node has a reboot pending.
     region/az pairs served, derived by iterating `groups['nodes']` hostvars
     (sorted, unique).
   Also empties the static `/etc/motd` so only the dynamic fragment renders.
+- Silences Ubuntu's own login text (help links, sysinfo, motd-news ads, ESM
+  and Pro notices, release-upgrade and "N updates" counts). Every other
+  fragment in `/etc/update-motd.d` except `common_motd_keep` (default
+  `98-reboot-required`) is removed from the directory, durably:
+  - package-owned fragments get a local `dpkg-divert --rename` to
+    `common_motd_disabled_dir` (`/etc/update-motd.d.disabled`), so a package
+    upgrade, unattended or not, installs them there and never back;
+  - landscape-common's sysinfo symlink is turned off through its debconf
+    question, which its postinst honors on every upgrade, and removed;
+  - any other unowned symlink is removed and any unowned file made
+    non-executable;
+  - `motd-news` is disabled (`ENABLED=0`, timer stopped) so it stops
+    fetching ads too.
+  Re-run, it changes nothing; a name added to `common_motd_keep` later is
+  un-diverted.
 - On the controller only: generates a root ed25519 keypair at
   `/root/.ssh/id_ed25519` if absent (`regenerate: never`) — consumed by the
   `ssh_trust` role.

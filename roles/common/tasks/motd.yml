@@ -35,3 +35,136 @@
     owner: root
     group: root
     mode: "0755"
+
+# Ubuntu's own login text: the help links, landscape sysinfo, the motd-news
+# ads, ESM and Pro nags, release-upgrade and "N updates" notices. Every
+# fragment in /etc/update-motd.d except ours and `common_motd_keep` is taken
+# out of the directory.
+#
+# Package-owned fragments are moved with a local dpkg diversion, NOT deleted
+# or chmod'ed: an upgrade of the owning package (unattended-upgrades runs
+# them daily) can put a deleted fragment back and resets a chmod'ed one to
+# its packaged mode, but dpkg writes a diverted path to the diversion target
+# instead, so the fragment stays out for good. dpkg warns that renaming a file of an
+# Essential package is dangerous; that is about binaries in use during the
+# rename, not a shell fragment run at login. A fragment no package owns was
+# made by a maintainer script or by hand: a symlink is removed (never its
+# target), a file is only made non-executable, which run-parts skips.
+- name: Ensure the directory diverted MOTD fragments are moved to exists
+  ansible.builtin.file:
+    path: "{{ common_motd_disabled_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: List the MOTD fragments
+  ansible.builtin.find:
+    paths: /etc/update-motd.d
+    file_type: any
+  register: common_motd_fragments
+
+- name: Note which MOTD fragments are symlinks
+  ansible.builtin.set_fact:
+    common_motd_links: >-
+      {{ common_motd_fragments.files | selectattr('islnk') | map(attribute='path') | list }}
+
+- name: Find which MOTD fragments a package owns
+  ansible.builtin.command:
+    argv: [dpkg-query, -S, "{{ item }}"]
+  loop: "{{ common_motd_unwanted }}"
+  register: common_motd_owners
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  vars:
+    common_motd_unwanted: >-
+      {{ common_motd_fragments.files | map(attribute='path') | map('basename')
+         | reject('in', ['50-computestacks'] + common_motd_keep)
+         | map('regex_replace', '^', '/etc/update-motd.d/') | sort | list }}
+
+- name: Divert package-owned MOTD fragments out of /etc/update-motd.d
+  ansible.builtin.command:
+    argv:
+      - dpkg-divert
+      - --local
+      - --rename
+      - --divert
+      - "{{ common_motd_disabled_dir }}/{{ item.item | basename }}"
+      - --add
+      - "{{ item.item }}"
+  loop: "{{ common_motd_owners.results | selectattr('rc', 'equalto', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: common_motd_divert
+  changed_when: "'Adding' in common_motd_divert.stdout"
+
+# The usual unowned fragment is landscape-common's sysinfo symlink, which its
+# postinst recreates on every upgrade unless debconf says not to.
+- name: Tell landscape-common not to show sysinfo at login
+  ansible.builtin.debconf:
+    name: landscape-common
+    question: landscape-common/sysinfo
+    vtype: select
+    value: Do not display sysinfo on login
+  when: "'50-landscape-sysinfo' not in common_motd_keep"
+
+- name: Remove MOTD symlinks no package owns
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: absent
+  loop: "{{ common_motd_owners.results | rejectattr('rc', 'equalto', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.item in common_motd_links
+
+- name: Make MOTD files no package owns non-executable
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    mode: "a-x"
+    follow: false
+  loop: "{{ common_motd_owners.results | rejectattr('rc', 'equalto', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.item not in common_motd_links
+
+# A name added to common_motd_keep after an earlier run diverted it: put it
+# back, so the keep list is the whole truth either way.
+- name: List the diverted MOTD fragments
+  ansible.builtin.find:
+    paths: "{{ common_motd_disabled_dir }}"
+    file_type: any
+  register: common_motd_diverted
+
+- name: Restore diverted MOTD fragments that are now kept
+  ansible.builtin.command:
+    argv:
+      - dpkg-divert
+      - --local
+      - --rename
+      - --divert
+      - "{{ common_motd_disabled_dir }}/{{ item }}"
+      - --remove
+      - "/etc/update-motd.d/{{ item }}"
+  loop: >-
+    {{ common_motd_diverted.files | map(attribute='path') | map('basename')
+       | select('in', common_motd_keep) | sort | list }}
+  register: common_motd_restore
+  changed_when: "'Removing' in common_motd_restore.stdout"
+
+# motd-news fetches the ad text from motd.ubuntu.com on a timer. With its
+# fragment diverted nothing prints it; this stops the fetch as well.
+- name: Disable motd-news
+  ansible.builtin.lineinfile:
+    path: /etc/default/motd-news
+    regexp: '^ENABLED='
+    line: ENABLED=0
+    create: false
+  failed_when: false
+
+- name: Stop the motd-news timer
+  ansible.builtin.systemd_service:
+    name: motd-news.timer
+    state: stopped
+    enabled: false
+  failed_when: false

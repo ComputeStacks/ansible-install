@@ -49,3 +49,11 @@ common_conflicting_packages:
 # containers -- roles/node_upgrade detect_live), which only warns: its reboot
 # is taken by `make upgrade-docker` in a maintenance window.
 common_allow_reboot: true
+
+# Ubuntu MOTD fragments (names in /etc/update-motd.d) left running beside
+# 50-computestacks. Every other fragment is diverted out (tasks/motd.yml).
+common_motd_keep:
+  - 98-reboot-required
+# Where diverted fragments live. Outside /etc/update-motd.d, so run-parts
+# never sees them.
+common_motd_disabled_dir: /etc/update-motd.d.disabled

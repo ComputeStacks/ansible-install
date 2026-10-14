@@ -2,11 +2,17 @@
 
 ## October 14, 2026
 
+* **Ubuntu's login clutter is gone.** Only the ComputeStacks banner and
+  Ubuntu's "System restart required" notice print at login; the help links,
+  sysinfo, ads, ESM/Pro notices and update counts are diverted out of
+  `/etc/update-motd.d` with `dpkg-divert`, so package upgrades (including
+  unattended ones) cannot bring them back. `common_motd_keep` lists the
+  Ubuntu fragments to leave running.
 * **`ssh_port` is back as a per-host inventory var**, as in v1. A host whose
   sshd is not on 22 sets it, and the host's own firewall opens that port; the
   controller's Node rows, its ssh config (greenfield) and the
-  `registry_ssh_port` setting carry it; nodes dial their backup server on the backup host's value; and
-  `validate` checks on it. Until now port 22 was assumed everywhere, so a node
+  `registry_ssh_port` setting carry it; nodes dial their backup server on the
+  backup host's value; and `validate` checks on it. Until now port 22 was assumed everywhere, so a node
   with sshd elsewhere locked itself out when its firewall loaded. Moving sshd
   is still the operator's job, and `ansible_port` is set separately (the
   example inventory derives it from `ssh_port`). `backup_ssh_port` still
