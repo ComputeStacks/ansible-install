@@ -4,8 +4,8 @@ galaxy_info:
   author: ComputeStacks
   description: >-
     Node kernel tuning: sysctls for container density and BBR, conntrack
-    module sizing, boot-time netfilter module loading, and the IPv6
-    accept_ra=2 uplink fix.
+    module sizing, boot-time netfilter module loading, and keeping IPv6
+    router advertisements accepted on the uplink.
   license: MIT
   min_ansible_version: "2.19"
   platforms:

@@ -260,7 +260,7 @@
 - name: Node base stack
   hosts: nodes
   roles:
-    - node_kernel               # sysctls, modules, BBR, inotify, accept_ra
+    - node_kernel               # sysctls, modules, BBR, inotify, IPv6 RA
     - haproxy                   # apt + certs/errors dirs (config comes from
                                 # the controller at runtime)
     - node_observability        # cadvisor + fluentd containers, image preloads

@@ -356,14 +356,17 @@ distro package and adds a version pin and a hold.
   (`8388608` / `16777216`).
 - v1 wrote every sysctl without a `sysctl_file` to `/etc/sysctl.conf`
   directly. v2 consolidates all of them into files under `/etc/sysctl.d/`
-  (`60-cs-node.conf`, plus `61-cs-node-ipv6.conf` when applicable).
+  (`60-cs-node.conf`, plus `61-cs-node-ipv6.conf` on an uplink
+  systemd-networkd does not manage).
 - **BBR is new** (`net.core.default_qdisc=fq`,
   `net.ipv4.tcp_congestion_control=bbr`).
 - **IPv6 handling changed.** v1 shipped a static `/etc/sysctl.d/50-ipv6.conf`
   that disabled IPv6 entirely (`net.ipv6.conf.{all,default}.disable_ipv6 = 1`);
   v2 does not port it (enabling or disabling IPv6 is a network decision made
-  elsewhere). Instead it adds the `accept_ra = 2` uplink fix, gated on the node
-  having a global IPv6 address and an explicit `uplink_interface`.
+  elsewhere). Instead it keeps router advertisements accepted on the uplink once
+  docker turns forwarding on, gated on the node having a global IPv6 address
+  and an explicit `uplink_interface`: an `IPv6AcceptRA=yes` networkd drop-in
+  where systemd-networkd manages the uplink, `accept_ra = 2` elsewhere.
 - v1's `preload_images.yml` (container image preloads) moved to
   `node_observability`; no docker-related tuning lives in this role.
 - Module loading and the sysctl reload are handler-driven (fire only when the

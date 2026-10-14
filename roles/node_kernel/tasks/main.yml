@@ -36,7 +36,93 @@
     node_kernel_has_global_ipv6: >-
       {{ (ansible_facts['all_ipv6_addresses'] | default([]) | reject('match', '^fe80') | list | length) > 0 }}
 
-- name: Configure IPv6 accept_ra=2 on the uplink interface
+# Docker sets net.ipv6.conf.all.forwarding=1 when it creates an IPv6-enabled
+# network. With forwarding on, the kernel ignores RAs on any interface whose
+# accept_ra is 1, and the RA-learned default route expires ~30 minutes later.
+# Who handles RAs on the uplink decides the fix (filter_plugins/node_kernel.py):
+#
+# * systemd-networkd (netplan's default renderer on Ubuntu server) forces the
+#   kernel's accept_ra to 0 on every link it manages and runs RA in
+#   userspace, so a sysctl is reset at the next boot or link reconfigure.
+#   There the fix is IPv6AcceptRA=yes in a drop-in for the link's .network
+#   file. Explicit, because networkd disables RA by default whenever it
+#   considers IPv6 forwarding enabled (systemd.network(5), IPv6AcceptRA=).
+#   The drop-in lives in /etc and is keyed by the .network file's NAME, so
+#   `netplan generate`/`apply` rewriting /run/systemd/network leaves it in
+#   place, and the operator's netplan YAML is never edited.
+# * Anything else (ifupdown, NetworkManager, an unmanaged link): the kernel
+#   handles RAs, so accept_ra=2 (accept even while forwarding) is the fix.
+- name: Ask systemd-networkd whether it manages the uplink interface
+  ansible.builtin.command:
+    argv: [networkctl, --json=short, --no-pager, status, "{{ uplink_interface }}"]
+  register: node_kernel_uplink_networkctl
+  changed_when: false
+  failed_when: false
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+
+- name: Decide how the uplink keeps accepting IPv6 router advertisements
+  ansible.builtin.include_tasks: uplink_ra.yml
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+
+- name: Refuse an uplink_interface this host does not have
+  ansible.builtin.fail:
+    msg: >-
+      {{ node_kernel_uplink_ra.reason }}. Fix the uplink_interface host var for
+      {{ inventory_hostname }}; nothing about IPv6 router advertisements was
+      changed.
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'missing'
+
+- name: Create the drop-in directory for the uplink's .network file
+  ansible.builtin.file:
+    path: "/etc/systemd/network/{{ node_kernel_uplink_ra.network_file }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'networkd'
+
+- name: Accept IPv6 router advertisements on the networkd-managed uplink
+  ansible.builtin.copy:
+    dest: "/etc/systemd/network/{{ node_kernel_uplink_ra.network_file }}.d/{{ node_kernel_accept_ra_dropin }}"
+    content: |
+      # Managed by the ComputeStacks provisioner (roles/node_kernel).
+      # Docker turns IPv6 forwarding on; keep accepting router advertisements
+      # on {{ uplink_interface }} so the RA-learned default route stays.
+      [Network]
+      IPv6AcceptRA=yes
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'networkd'
+  notify: Reload systemd-networkd
+
+# networkd rewrites accept_ra to 0 when it configures the link, but any later
+# `sysctl --system` would set it back to 2 and have the kernel process RAs
+# alongside networkd. An earlier version of this role wrote the file on every
+# node; drop it where networkd owns the link.
+- name: Remove the accept_ra sysctl where networkd handles RAs
+  ansible.builtin.file:
+    path: /etc/sysctl.d/61-cs-node-ipv6.conf
+    state: absent
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'networkd'
+
+- name: Configure IPv6 accept_ra=2 on an uplink networkd does not manage
   ansible.builtin.copy:
     dest: /etc/sysctl.d/61-cs-node-ipv6.conf
     content: |
@@ -44,6 +130,8 @@
       # IPv6-enabled network, which silently withdraws the RA-learned IPv6
       # default route ~30 minutes later unless accept_ra is forced to 2
       # (accept RAs even while forwarding) on the uplink interface.
+      # systemd-networkd does not manage this interface; were it to, this
+      # role would use a networkd drop-in instead (see README.md).
       net.ipv6.conf.{{ uplink_interface }}.accept_ra = 2
     owner: root
     group: root
@@ -51,13 +139,14 @@
   when:
     - node_kernel_has_global_ipv6
     - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'sysctl'
   notify: Reload sysctl
 
-- name: Note that the IPv6 accept_ra fix is skipped without uplink_interface
+- name: Note that the IPv6 router advertisement fix is skipped without uplink_interface
   ansible.builtin.debug:
     msg: >-
       This node has a global IPv6 address but no 'uplink_interface' inventory
-      var is set, so the accept_ra=2 fix is SKIPPED (see README.md). Docker
+      var is set, so the IPv6 router advertisement fix is SKIPPED (see README.md). Docker
       creating an IPv6-enabled network will silently withdraw the RA-learned
       default route about 30 minutes after boot until 'uplink_interface'
       (e.g. eth0) is set as a host var for {{ inventory_hostname }}.

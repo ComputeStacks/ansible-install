@@ -183,13 +183,15 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_reachable.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/ssh_port.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/ssh_port.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_kernel_uplink_ra.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
 	@echo "       node data disk classification formats only a provably blank disk,"
 	@echo "       the reachability check names every host that did not answer,"
-	@echo "       every ssh port consumer reads the listening host's own ssh_port"
+	@echo "       every ssh port consumer reads the listening host's own ssh_port,"
+	@echo "       the uplink's IPv6 RA fix matches who manages the link"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
 # requirements.yml) is looked up at its source -- apt indexes, registries,
