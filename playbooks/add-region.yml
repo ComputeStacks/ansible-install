@@ -49,9 +49,27 @@
 # (roles/controller/README.md, "Attach mode"). Every alternate entry point
 # below is therefore a task.
 
+# First, before anything gathers facts: ansible drops an unreachable host
+# from the play and carries on without it, and in attach mode that host is
+# usually a shared production one (roles/preflight/README.md). Tagged
+# `always` so `make add-region-validate` checks it too.
+- name: Every targeted host is reachable
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check every targeted host answers over ssh
+      ansible.builtin.import_role:
+        name: preflight
+        tasks_from: reachable
+      tags: [always]
+
+# `any_errors_fatal` here regardless of ansible.cfg (which sets it for every
+# play): one host failing preflight must stop the run before any host is
+# changed.
 - name: Preflight validation and attach-mode inventory checks
   hosts: all
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - preflight
   tasks:
@@ -355,7 +373,11 @@
   roles:
     - controller_post_enroll
 
+# Not any_errors_fatal (ansible.cfg makes every other play so): validate
+# changes nothing, and a failing check on one host should not hide the
+# other's results.
 - name: Validate the new region
   hosts: controller:nodes
+  any_errors_fatal: false
   roles:
     - validate

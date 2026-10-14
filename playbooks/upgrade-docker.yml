@@ -14,7 +14,8 @@
 #
 # The FIRST FAILURE STOPS THE WHOLE RUN (`any_errors_fatal`,
 # `max_fail_percentage: 0`) and leaves that node as the failure message
-# describes. A node part-way through keeps its state in
+# describes. A targeted node that cannot be reached stops it before any node
+# is touched. A node part-way through keeps its state in
 # /var/lib/computestacks/upgrade/state.json, and re-running resumes it.
 #
 # Scope: `nodes` only, and never an `existing_env` (v1-built) host -- those
@@ -43,6 +44,19 @@
         key: node_upgrade_targets
       when: not (existing_env | default(false) | bool)
       changed_when: false
+
+# Before anything gathers facts: ansible drops an unreachable node from the
+# play and carries on without it, so this fails the run instead, naming every
+# targeted node that did not answer (roles/preflight/README.md).
+- name: Every targeted node is reachable
+  hosts: node_upgrade_targets
+  gather_facts: false
+  tasks:
+    - name: Check every targeted node answers over ssh
+      ansible.builtin.import_role:
+        name: preflight
+        tasks_from: reachable
+      tags: [always]
 
 # Every targeted node, in parallel, before any of them is touched: an agent
 # too old across the fleet, a pin missing from the mirror or a downgrade in

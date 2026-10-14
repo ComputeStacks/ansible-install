@@ -18,6 +18,15 @@
 * **Facts are read through `ansible_facts`** rather than the top-level
   `ansible_*` variables ansible-core is deprecating, in preflight and
   node_kernel. No behavior change.
+* **An unreachable host now stops the run, before anything is changed.**
+  Every playbook first pings each host it targets and fails, naming every
+  host that did not answer with its address, port and ssh's error. Until
+  now ansible dropped such a host and carried on, skipping every later play
+  that targeted it, and failed much later somewhere unrelated. After that,
+  any host that fails or becomes unreachable stops every host
+  (`any_errors_fatal = True` in `ansible.cfg`) instead of being left behind;
+  the validate plays still report every host. If you run ansible with your
+  own `ansible.cfg`, copy the setting.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

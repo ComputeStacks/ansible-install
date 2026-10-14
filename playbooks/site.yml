@@ -19,9 +19,27 @@
 # different playbook: playbooks/add-region.yml. Do not run this one against
 # hosts flagged `existing_env: true`.
 
+# First, before anything gathers facts: ansible drops an unreachable host
+# from the play and carries on without it, so this fails the run instead,
+# naming every host that did not answer (roles/preflight/README.md). Tagged
+# `always` so `make validate` (--tags validate) checks it too.
+- name: Every targeted host is reachable
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check every targeted host answers over ssh
+      ansible.builtin.import_role:
+        name: preflight
+        tasks_from: reachable
+      tags: [always]
+
+# `any_errors_fatal` here regardless of ansible.cfg (which sets it for every
+# play): one host failing preflight must stop the run before any host is
+# changed, not leave the others to carry on.
 - name: Preflight validation
   hosts: all
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - preflight
 
@@ -274,7 +292,11 @@
   roles:
     - controller_post_enroll    # datachannel + metadata backfills, test_connection
 
+# The one play that is NOT any_errors_fatal (ansible.cfg makes the rest so):
+# validate changes nothing, so a failing check on one host should not hide
+# the results of every other host.
 - name: Validate
   hosts: all
+  any_errors_fatal: false
   roles:
     - validate

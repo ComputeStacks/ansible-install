@@ -97,9 +97,17 @@ hosts and backup hosts; unset everywhere means the single site called
 
 The order of plays in `site.yml` is load-bearing:
 
-* **Preflight runs first, on every host, and changes nothing.** Every check
-  that can fail on inventory or host state belongs there, so a bad input
-  stops the run before any host is touched.
+* **Reachability, then preflight, run first, on every host, and change
+  nothing.** Every targeted host must answer a ping before anything gathers
+  facts (`roles/preflight/tasks/reachable.yml`, the first play of every entry
+  point), because ansible otherwise drops an unreachable host and runs every
+  later play without it. Every check that can fail on inventory or host
+  state belongs in preflight, and the preflight play is `any_errors_fatal`,
+  so a bad input on any one host stops the run before any host is touched.
+* **Every play stops on the first failed or unreachable host** (`ansible.cfg`
+  `any_errors_fatal = True`), except the validate plays, which change
+  nothing. A partly converged fleet that carries on is worse than a stopped,
+  idempotent run.
 * **`node_storage` runs before docker is installed** on the nodes; docker or
   containerd starting first would write their state to the root disk. Its
   read-only probe also runs in preflight and in `upgrade-docker.yml`.
