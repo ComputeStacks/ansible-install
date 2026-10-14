@@ -13,12 +13,24 @@
       'tailscale_enabled: false' on the hosts that must stay off the tailnet.
     quiet: true
 
+- name: Remove the apt source the standalone artis3n.tailscale role wrote
+  # The standalone role (and tailscale's own install script) wrote a one-line
+  # tailscale.list signed by this keyring; the collection writes a deb822
+  # tailscale.sources signed by a key under /etc/apt/keyrings. Left in place,
+  # the two disagree on Signed-By for the same repository and apt refuses to
+  # update at all. Absent on a fresh host, so a no-op there.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ tailscale_legacy_apt_files }}"
+
 - name: Install and join tailscale
   ansible.builtin.include_role:
-    name: artis3n.tailscale
+    name: artis3n.tailscale.machine
   vars:
-    # Upstream role variables. 'state' is the upstream name (a generic one —
-    # it is scoped to this include).
+    # Collection role variables. 'state' is the upstream name (a generic one —
+    # it is scoped to this include). tailscale_authkey and
+    # tailscale_up_timeout already carry the upstream names.
     state: "{{ tailscale_package_state }}"
     tailscale_args: "{{ tailscale_up_args | trim }}"
 

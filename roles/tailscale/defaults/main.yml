@@ -1,9 +1,10 @@
 ---
-# Thin wrapper around artis3n.tailscale (pinned in requirements.yml).
+# Thin wrapper around the artis3n.tailscale collection's `machine` role
+# (pinned in requirements.yml).
 # `tailscale_authkey` itself comes from the vaulted secrets file and is the
 # switch that turns the whole feature on (site.yml gates the role on it).
 
-# Passed to the upstream role's `state` variable. 'present' installs the
+# Passed to the collection role's `state` variable. 'present' installs the
 # package and leaves it alone; the upstream default of 'latest' would upgrade
 # tailscale on every converge, which contradicts docs/contracts.md rule 4
 # (every version pinned, nothing floats). See README §Decisions.
@@ -16,12 +17,19 @@ tailscale_accept_dns: false
 
 # No exit node, no subnet routes, no tags by default. Extra flags for
 # `tailscale up` go here (e.g. "--advertise-tags=tag:cs" needs tailscale_tags
-# on the upstream role instead).
+# on the collection role instead).
 tailscale_extra_args: ""
 tailscale_up_args: >-
   --accept-dns={{ tailscale_accept_dns | bool | lower }}
   {{ tailscale_extra_args }}
 tailscale_up_timeout: "120"
+
+# Apt source files left by the standalone artis3n.tailscale role (and by
+# tailscale's install script). Removed before the collection role writes its
+# deb822 source; see tasks/main.yml.
+tailscale_legacy_apt_files:
+  - /etc/apt/sources.list.d/tailscale.list
+  - /usr/share/keyrings/tailscale-archive-keyring.gpg
 
 # Local facts. Written so LATER runs and plays can read this host's tailnet
 # address out of hostvars without re-deriving it (see README §consumers).
