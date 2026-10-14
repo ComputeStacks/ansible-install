@@ -34,7 +34,7 @@ def node_kernel_uplink_ra(result, interface, interfaces=None):
 
     `result` is a registered `networkctl --json=short status <interface>`
     (command module, failed_when false). `interfaces` is the host's
-    `ansible_interfaces`, used only to tell a misspelled uplink_interface
+    `ansible_facts['interfaces']`, used only to tell a misspelled uplink_interface
     from a host without networkd.
 
     Returns {"mode": ..., "network_file": ..., "reason": ...}:

@@ -21,7 +21,8 @@
   gather_facts: false
   vars:
     uplink_interface: eth0
-    ansible_interfaces: "{{ nkr_interfaces }}"
+    ansible_facts:
+      interfaces: "{{ nkr_interfaces }}"
     nkr_interfaces: [lo, eth0, docker0]
     nkr_cases:
       - name: netplan link, configured
