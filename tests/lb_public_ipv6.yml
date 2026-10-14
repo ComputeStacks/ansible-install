@@ -1,0 +1,211 @@
+---
+# Does an optional node `public_ipv6` get validated, and does
+# roles/controller_seed decide and read the load balancer address rows right?
+# -- proven without a controller.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/lb_public_ipv6.yml
+#
+# (run by `make check`)
+#
+# Two pure pieces:
+#
+#   * roles/preflight's `cs_ipv6_problem` filter (filter_plugins/
+#     preflight_ipv6.py), which every downstream string comparison relies on:
+#     only one canonical (RFC 5952) host address passes. The task file
+#     tasks/public_ipv6.yml is included for real against nodes added with
+#     `add_host`, which also loads the filter for the direct cases after it.
+#   * roles/controller_seed's tasks/lb_public_ipv6_plan.yml: which new nodes
+#     want an address, the `cstacks runner` program it renders (its payload
+#     decoded back here), and how the program's output is read. The program
+#     itself only runs on a controller.
+#
+# The nodes are real inventory hosts, as in tests/lb_records_plan.yml, so the
+# cross-host `hostvars[n]` reads are exercised. The node list is passed
+# explicitly as `controller_seed_lb_ipv6_nodes`, the role default that
+# otherwise reads `cs_new_nodes`.
+
+- name: Add the test nodes to the inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add a node with public_ipv6 and one without
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: nodes
+        az: "{{ item.az }}"
+        public_ip: "{{ item.public_ip }}"
+        public_ipv6: "{{ item.public_ipv6 }}"
+      loop:
+        - {name: v6t1, az: exm-061, public_ip: 192.0.2.161, public_ipv6: "2001:db8::161"}
+        # empty means unset, everywhere
+        - {name: v6t2, az: exm-062, public_ip: 192.0.2.162, public_ipv6: ""}
+        - {name: v6t3, az: exm-063, public_ip: 192.0.2.163, public_ipv6: "2001:db8:0:1::a"}
+      loop_control:
+        label: "{{ item.name }}"
+
+- name: Validate public_ipv6 and plan the load balancer rows
+  hosts: localhost
+  gather_facts: false
+  vars:
+    v6t_nodes: [v6t1, v6t2, v6t3]
+  tasks:
+    # ======================================================================
+    # roles/preflight
+    # ======================================================================
+    - name: "Case: preflight accepts the canonical addresses and skips the empty one"
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: public_ipv6
+
+    - name: "Assert: the filter accepts exactly the canonical host addresses"
+      ansible.builtin.assert:
+        that:
+          - item | cs_ipv6_problem == ''
+        fail_msg: "{{ item }}: {{ item | cs_ipv6_problem }}"
+        quiet: true
+      loop:
+        - "2001:db8::10"
+        - "2001:db8:0:1::a"
+        - "fd00::1"
+        - "3fff:0:1:2::3"
+
+    - name: "Assert: the filter refuses everything else, saying why"
+      ansible.builtin.assert:
+        that:
+          - (item.v | cs_ipv6_problem) is search(item.why)
+        fail_msg: "{{ item.v }}: {{ item.v | cs_ipv6_problem }}"
+        quiet: true
+      loop:
+        - {v: "", why: "empty"}
+        - {v: " 2001:db8::10", why: "whitespace"}
+        - {v: "2001:db8::10/128", why: "prefix length"}
+        - {v: "2001:db8::/64", why: "prefix length"}
+        - {v: "fe80::1%eth0", why: "zone index"}
+        - {v: "192.0.2.10", why: "not an IPv6 address"}
+        - {v: "example.com", why: "not an IPv6 address"}
+        - {v: "2001:db8::10::1", why: "not an IPv6 address"}
+        - {v: "::ffff:192.0.2.10", why: "IPv4-mapped"}
+        - {v: "::", why: "unspecified"}
+        - {v: "::1", why: "loopback"}
+        - {v: "fe80::1", why: "link-local"}
+        - {v: "ff02::1", why: "multicast"}
+        - {v: "fec0::1", why: "site-local"}
+        - {v: "2001:DB8::10", why: "write it as 2001:db8::10"}
+        - {v: "2001:db8:0:0:0:0:0:10", why: "write it as 2001:db8::10"}
+        - {v: "2001:0db8::0010", why: "write it as 2001:db8::10"}
+      loop_control:
+        label: "{{ item.v }}"
+
+    - name: "Assert: a number (an unquoted YAML address read as one) is refused"
+      ansible.builtin.assert:
+        that:
+          - (20010 | cs_ipv6_problem) is search('not an IPv6 address')
+          - (none | cs_ipv6_problem) is search('empty')
+        quiet: true
+
+    # ======================================================================
+    # roles/controller_seed: the wanted rows and the program
+    # ======================================================================
+    - name: "Case: plan program for three new nodes, two with public_ipv6"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_apply: false
+
+    - name: "Assert: one row per node that sets public_ipv6, read-only program carrying exactly them"
+      ansible.builtin.assert:
+        that:
+          - controller_seed_lb_ipv6_wanted == v6t_wanted
+          - "'apply = false;' in controller_seed_lb_ipv6_program"
+          - "'apply = true;' not in controller_seed_lb_ipv6_program"
+          - (controller_seed_lb_ipv6_program | regex_search('strict_decode64\\(\"([A-Za-z0-9+/=]+)\"\\)', '\\1') | first | b64decode | from_json) == v6t_wanted
+          - "'role: \"public\"' in controller_seed_lb_ipv6_program"
+          - "'ActiveRecord::Base.transaction do' in controller_seed_lb_ipv6_program"
+          - controller_seed_lb_ipv6_result is not defined
+        fail_msg: "{{ controller_seed_lb_ipv6_wanted }} {{ controller_seed_lb_ipv6_program }}"
+        quiet: true
+      vars:
+        v6t_wanted:
+          - {az: exm-061, ip: "2001:db8::161", label: exm-061 public ipv6}
+          - {az: exm-063, ip: "2001:db8:0:1::a", label: exm-063 public ipv6}
+
+    - name: "Case: apply program"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_apply: true
+
+    - name: "Assert: the apply program writes"
+      ansible.builtin.assert:
+        that:
+          - "'apply = true;' in controller_seed_lb_ipv6_program"
+        quiet: true
+
+    - name: "Case: no new node sets public_ipv6"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: [v6t2]
+
+    - name: "Assert: nothing is wanted, so tasks/main.yml runs no program"
+      ansible.builtin.assert:
+        that:
+          - controller_seed_lb_ipv6_wanted == []
+        quiet: true
+
+    # ======================================================================
+    # roles/controller_seed: reading the program's output
+    # ======================================================================
+    - name: "Case: every kind of line, among noise the runner may print"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_output:
+          - "W, [2026-10-14T10:00:00] WARN -- : something rails said"
+          - "CREATE|exm-061|2001:db8::161"
+          - "OK|exm-063|2001:db8:0:1::a"
+          - "CONFLICT|exm-064|2001:db8::164|proxy"
+          - "MISSING|exm-065|2001:db8::165|NOREGION"
+          - "MISSING|exm-066|2001:db8::166|NOLB"
+          - "CREATE|truncated"
+          - "DONE"
+
+    - name: "Assert: each line lands in its list, malformed ones nowhere"
+      ansible.builtin.assert:
+        that:
+          - >-
+            controller_seed_lb_ipv6_result.create == [{'az': 'exm-061', 'ip': '2001:db8::161'}]
+          - >-
+            controller_seed_lb_ipv6_result.ok == [{'az': 'exm-063', 'ip': '2001:db8:0:1::a'}]
+          - >-
+            controller_seed_lb_ipv6_result.conflict == [{'az': 'exm-064', 'ip': '2001:db8::164', 'role': 'proxy'}]
+          - >-
+            controller_seed_lb_ipv6_result.missing == [
+              {'az': 'exm-065', 'ip': '2001:db8::165', 'why': 'NOREGION'},
+              {'az': 'exm-066', 'ip': '2001:db8::166', 'why': 'NOLB'}]
+          - controller_seed_lb_ipv6_result.done | bool
+        fail_msg: "{{ controller_seed_lb_ipv6_result | to_json }}"
+        quiet: true
+
+    - name: "Case: the program died before DONE"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_output:
+          - "CREATE|exm-061|2001:db8::161"
+
+    - name: "Assert: an unfinished run is not read as success"
+      ansible.builtin.assert:
+        that:
+          - not (controller_seed_lb_ipv6_result.done | bool)
+        fail_msg: "{{ controller_seed_lb_ipv6_result | to_json }}"
+        quiet: true

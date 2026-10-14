@@ -165,6 +165,28 @@
         name: powerdns
         tasks_from: lb_records_plan
 
+# The public_ipv6 entry points: preflight's check and controller_seed's
+# address step, which their main.yml include, and the pure plan
+# tests/lb_public_ipv6.yml drives.
+- name: Load balancer public IPv6 task-file entry points
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Check every public_ipv6 that is set
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: public_ipv6
+
+    - name: Add the load balancer public IPv6 addresses
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6
+
+    - name: Plan the load balancer public IPv6 addresses
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+
 # The node_upgrade entry points. `detect_live` is the live-node probe that
 # site.yml's and add-region.yml's docker plays and roles/common's reboot step
 # include; `preflight` is upgrade-docker.yml's fleet-wide first pass; `select`

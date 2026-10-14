@@ -81,7 +81,8 @@ help:
 	@echo "check                             syntax-check the playbooks and the role harness, then"
 	@echo "                                  parse both inventories and render the site contract"
 	@echo "                                  and the bootstrap manifest against each, and prove"
-	@echo "                                  the powerdns load balancer record plan and the"
+	@echo "                                  the powerdns load balancer record plan, the"
+	@echo "                                  public_ipv6 check and load balancer address seed, the"
 	@echo "                                  node upgrade selection rules, the node data"
 	@echo "                                  disk classification, the reachability verdict"
 	@echo "                                  and the tailnet routing of every pairwise consumer"
@@ -179,6 +180,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_public_ipv6.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_reachable.yml
@@ -190,6 +192,7 @@ check:
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
+	@echo "       public_ipv6 is validated and seeded as a load balancer address,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
 	@echo "       node data disk classification formats only a provably blank disk,"
 	@echo "       the reachability check names every host that did not answer,"

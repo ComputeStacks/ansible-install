@@ -61,10 +61,16 @@ top-level key set before it writes anything.
    basic-auth, DNS API keys, LB shared certificate/stats password — are the
    ONE class the apply converges on existing rows; everything else is
    create-if-absent), and `pause`s for the operator.
-6. Runs `cstacks seed`, prints the change log, and **deletes the manifest**.
+6. When any new node sets `public_ipv6`, plans its load balancer address
+   with a read-only `cstacks runner` program and prints the plan before the
+   pause (on every apply that has one, previewed or not), failing before the
+   apply on a CONFLICT — see "Load balancer public IPv6".
+7. Runs `cstacks seed`, prints the change log, and **deletes the manifest**.
    A failed apply keeps the file on purpose and says so — the apply is one
    transaction, so nothing was written to the database and the rendered
    document is the thing to look at.
+8. Adds each new node's `public_ipv6` to its az's load balancer as a
+   `public` LoadBalancerAddr (`tasks/lb_public_ipv6.yml`), after the apply.
 
 ## Vocabulary mapping
 
@@ -79,6 +85,7 @@ role is the only place the mapping exists (docs/contracts.md §Vocabulary).
 | `container_network` | `…regions[].networks[].subnet` | Must be RFC-1918 and at least a `/28`. |
 | `container_network_name` | `…regions[].networks[].name` | Passed **raw**; the model normalizes it (`net-exm-001` is stored as `netexm001`). The apply matches on the normalized form, so the raw value is stable and readable in the diff. |
 | the az's single node | `…regions[].load_balancer` | `ext_ip`/`internal_ip` = that node's `primary_ip`, `public_ip` = its `public_ip`. |
+| `public_ipv6` host var (optional) | a `LoadBalancerAddr` with role `public` on `…load_balancer` | **Not in the manifest** — the schema has no key for these rows. Added after the apply by `cstacks runner`; see "Load balancer public IPv6". |
 | `app_domain` host var, else `cs_app_zone` | `…load_balancer.domain` **and** the CN of `…load_balancer.shared_certificate` | **Per az**, through the cross-host-safe `hostvars[host].cs_app_domain`. One load balancer per az, and in a real estate every one of them answers on a different domain. Both fields are keyed off the same value so they cannot disagree — a mismatch is a failed TLS handshake for every tenant container in that az. |
 | `site` host var | *(nothing — the controller has no column for it)* | Decides **which** client each az names. One `metric_clients[]`/`log_clients[]` entry per site this run seeds nodes into, deduped by endpoint. |
 | that site's `metrics_domain`, else `cs_metrics_domain`, + `cs_ports.metrics_*` | `metric_clients[].endpoint` / `log_clients[].endpoint` | Regions reference them by **exact endpoint string**. A single-site inventory renders the same one-element lists it always did. |
@@ -318,6 +325,54 @@ load balancer is out of scope for the provisioner**, and this is a guard
 against a future mistake rather than a migration tool: production's rows were
 created by v1 with their correct per-region domains already.
 
+## Load balancer public IPv6
+
+The controller validates a load balancer's domain (`ValidateDomainWorker`)
+by resolving its apex and requiring **every** A and AAAA address there to be
+one of the load balancer's public addresses
+(`LoadBalancer#full_public_ip_list`: the `public_ip` column, each node's
+`public_ip`, and its `public`/`proxy` `LoadBalancerAddr` rows). An apex with
+an AAAA that is none of those marks the load balancer INVALID, and nothing
+deploys into that az. The manifest can only set the IPv4 `public_ip` column:
+`regions[].load_balancer` has no key for `LoadBalancerAddr` rows, and the
+schema is frozen with unknown keys a hard error. So the optional node host
+var `public_ipv6` is added by a step of this role's own, through `cstacks
+runner`:
+
+* **Which nodes:** `controller_seed_lb_ipv6_nodes` (`cs_new_nodes`) that set
+  `public_ipv6`; roles/preflight has already checked it is one canonical
+  IPv6 host address.
+* **Plan, before the apply** (`controller_seed_lb_ipv6_apply: false`):
+  read-only; printed beside the DRY_RUN preview and before the confirm
+  pause. An az whose Region or load balancer does not exist yet is reported
+  as created by this apply, with the address added right after it.
+* **Add, after the apply** (`controller_seed_lb_ipv6_apply: true`): an
+  address the load balancer does not hold is created with role `public` and
+  label `<az> public ipv6`; one it already holds as `public` is left alone.
+  All creates are one transaction. Changed only when a row was created.
+* **Never changed or removed:** an address already on that load balancer
+  with another role (`connect`, `internal`, `proxy`) is a CONFLICT that fails
+  the run naming the row — before the apply in the plan — because a row's
+  role is the operator's. Removing `public_ipv6` from the inventory removes
+  nothing on the controller, and other addresses on the load balancer are
+  never touched: the step is additive, like the apply.
+
+The plan runs on every apply that has an address to add, not only the
+previewed attach/readdress ones, because a CONFLICT must stop the run while
+nothing has been written. The add runs after the seed block: the manifest
+apply has committed by then, so a failure there says so instead of the
+block's "nothing was written"; a re-run converges both. In check mode
+neither runs.
+
+Adding the row does not make the controller re-check the domain; it checks
+when the load balancer's domain is saved or the load balancer is deployed.
+On an existing az that is already marked INVALID for an AAAA, re-run the seed
+with `public_ipv6` set and then have it re-checked from the admin UI.
+
+The program and the reading of its output are pure
+(`tasks/lb_public_ipv6_plan.yml`) and covered by `tests/lb_public_ipv6.yml`;
+the program itself only runs on a controller.
+
 ## Attach mode (`existing_env: true`)
 
 The manifest carries the **topology only** — `locations` with their regions,
@@ -395,6 +450,7 @@ the printed output.
 | `controller_seed_lb_stats_bind` | `*:{{ cs_ports.haproxy_stats }}` | Same value the metrics scrape and the firewall use. |
 | `controller_seed_lb_stats_password` | `haproxy_stats_password`, else derived from `secret_key_base` | Never leave it at the column default. |
 | `controller_seed_shared_cert_path` | `{{ controller_wildcard_cert \| default('/var/lib/computestacks/.ssl_wildcard/sharedcert.pem') }}` | The **legacy** path, and the one operator override inside `cs_app_domain_cert_paths`: it supplies the entry for the domain equal to `cs_app_zone`. Every *other* domain derives its path from `cs_app_wildcard_dir` and this variable does not touch them. v1 used this same path, which is why it is still the **attach-mode escape hatch** — on a controller with a non-default `controller_data_dir`, point it at that environment's existing shared certificate pem. (A new az attached to an existing environment should set its own `app_domain` and takes the per-domain path instead; `roles/preflight` asserts exactly that.) |
+| `controller_seed_lb_ipv6_nodes` | `{{ cs_new_nodes }}` | Role-internal: the nodes whose `public_ipv6` is added to their load balancer. |
 | `controller_seed_catalog_container_images` | `true` | Slow; an attach manifest omits the section entirely. |
 | `controller_seed_admin_*` | from `cs_admin_email` / `cs_admin_password` | Create-if-absent only: re-running never resets a password. |
 
@@ -443,6 +499,10 @@ node.
   not visible from this play, so the value has to be inventory-level; the role
   asserts it is present and unique per nameserver.
 * `haproxy_stats_password` is optional but recommended in the vaulted secrets.
+* **`public_ipv6`** is optional per node and unset by default: the az's load
+  balancer's public IPv6 address, added as a `public` LoadBalancerAddr (see
+  "Load balancer public IPv6"). Set it whenever the az's `app_domain` has an
+  AAAA record.
 * **`app_domain`** is optional per node and defaults to `cs_app_zone`, so no
   existing inventory needs an edit — but every distinct value it takes must
   have a pem on the controller before this role runs, or the per-domain

@@ -1,0 +1,78 @@
+---
+# Adds each new az's `public_ipv6` to its load balancer as a `public`
+# LoadBalancerAddr, through `cstacks runner` (lb_public_ipv6_plan.yml says
+# why this is not in the manifest, and what the program prints).
+#
+# Run twice from tasks/main.yml:
+#
+#   controller_seed_lb_ipv6_apply: false   inside the seed block, before the
+#       apply -- read-only, and printed next to the DRY_RUN preview. A
+#       CONFLICT stops the run there, before anything is applied.
+#   controller_seed_lb_ipv6_apply: true    after the apply has succeeded --
+#       writes the missing rows. Anything but CREATE/OK fails the run; the
+#       manifest apply has committed by then, and a re-run converges both.
+
+- name: Render the load balancer public IPv6 program
+  ansible.builtin.include_tasks: lb_public_ipv6_plan.yml
+
+- name: Run the load balancer public IPv6 program
+  ansible.builtin.command:
+    argv:
+      - "{{ controller_seed_cstacks_bin }}"
+      - runner
+      - "{{ controller_seed_lb_ipv6_program }}"
+  register: controller_seed_lb_ipv6_cmd
+  # Judged by the assert below, which can say what went wrong.
+  failed_when: false
+  changed_when: >-
+    (controller_seed_lb_ipv6_apply | bool)
+    and (controller_seed_lb_ipv6_cmd.stdout_lines | default([]) | select('match', '^CREATE[|]') | list | length) > 0
+
+- name: Read the load balancer public IPv6 result
+  ansible.builtin.include_tasks: lb_public_ipv6_plan.yml
+  vars:
+    controller_seed_lb_ipv6_output: "{{ controller_seed_lb_ipv6_cmd.stdout_lines | default([]) }}"
+
+- name: Show the load balancer public IPv6 addresses
+  ansible.builtin.debug:
+    msg: >-
+      {% set r = controller_seed_lb_ipv6_result %}
+      {% set verb = 'added' if controller_seed_lb_ipv6_apply | bool else 'would be added' %}
+      {% for x in r.create %}{{ x.az }}: {{ x.ip }} {{ verb }} as a public load balancer address. {% endfor %}
+      {% for x in r.ok %}{{ x.az }}: {{ x.ip }} is already a public load balancer address. {% endfor %}
+      {% for x in r.missing %}{{ x.az }}: {{ x.ip }} -- {{ 'the az' if x.why == 'NOREGION' else 'its load balancer' }}
+      does not exist yet{{ controller_seed_lb_ipv6_later }}. {% endfor %}
+      {% for x in r.conflict %}{{ x.az }}: {{ x.ip }} is already on this load balancer with role {{ x.role }}. {% endfor %}
+  vars:
+    controller_seed_lb_ipv6_later: >-
+      {{ '' if controller_seed_lb_ipv6_apply | bool
+         else '; the apply creates it, and the address is added right after' }}
+
+- name: Assert the load balancer public IPv6 addresses can be seeded
+  ansible.builtin.assert:
+    that:
+      - controller_seed_lb_ipv6_cmd.rc == 0
+      - controller_seed_lb_ipv6_result.done | bool
+      - controller_seed_lb_ipv6_result.conflict | length == 0
+      - (controller_seed_lb_ipv6_result.missing | length == 0) or not (controller_seed_lb_ipv6_apply | bool)
+    fail_msg: >-
+      {% set r = controller_seed_lb_ipv6_result %}
+      {% if controller_seed_lb_ipv6_cmd.rc != 0 or not (r.done | bool) %}
+      `cstacks runner` did not finish (rc {{ controller_seed_lb_ipv6_cmd.rc }}):
+      {{ (controller_seed_lb_ipv6_cmd.stderr | default('') | trim)[-800:] }}
+      {{ 'Nothing was written: the creates run in one transaction.' if controller_seed_lb_ipv6_apply | bool else '' }}
+      {% endif %}
+      {% for x in r.conflict %}
+      {{ x.ip }} (public_ipv6 of az {{ x.az }}) is already one of that load
+      balancer's addresses with role `{{ x.role }}`, not `public`. This role
+      does not change an existing row's role; the controller's domain
+      validation accepts `public` and `proxy` addresses, so either change
+      that row's role to public in the admin UI (load balancer ->
+      addresses), or delete it there and re-run.
+      {% endfor %}
+      {% for x in r.missing if controller_seed_lb_ipv6_apply | bool %}
+      az {{ x.az }} has {{ 'no Region' if x.why == 'NOREGION' else 'no load balancer' }}
+      on the controller after the apply, so its public_ipv6 {{ x.ip }} could
+      not be added. Read the seed output above.
+      {% endfor %}
+    quiet: true

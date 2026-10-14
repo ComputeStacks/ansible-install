@@ -1,0 +1,114 @@
+---
+# PURE. Runs no command: every task is a set_fact over its inputs, so it runs
+# on any host and tests/lb_public_ipv6.yml feeds it canned runner output.
+#
+# WHY THIS IS NOT IN THE MANIFEST. A load balancer's public IPv6 address is a
+# `LoadBalancerAddr` row (role `public`) on the controller, and the bootstrap
+# manifest has no key for those rows: `regions[].load_balancer` carries the
+# IPv4 `public_ip` COLUMN only, and the schema is frozen, with an unknown key
+# a hard error (README.md, "Load balancer public IPv6"). So the rows are added
+# by a `cstacks runner` step of this role's own, after the apply -- additive
+# and idempotent, the same way the apply treats a row that already exists.
+#
+# The controller's domain validation (ValidateDomainWorker, through
+# `LoadBalancer#full_public_ip_list`) accepts an apex address only if it is
+# the `public_ip` column, a node's `public_ip`, or a `public`/`proxy`
+# LoadBalancerAddr. An AAAA at the apex that is none of those marks the load
+# balancer INVALID, and nothing deploys into the az.
+#
+# Inputs:
+#   controller_seed_lb_ipv6_nodes  (role default: cs_new_nodes)
+#   hostvars[n].az / .public_ipv6  (plain inventory vars)
+#   controller_seed_lb_ipv6_apply   bool; false renders the read-only plan
+#                                   program, true the one that writes
+#   controller_seed_lb_ipv6_output  optional: the runner's stdout lines; when
+#                                   given they are parsed into the result
+#
+# Outputs (facts):
+#   controller_seed_lb_ipv6_wanted   [{az, ip, label}], one per new node that
+#                                    sets public_ipv6, sorted by node
+#   controller_seed_lb_ipv6_program  the ruby for `cstacks runner`
+#   controller_seed_lb_ipv6_result   (only with output) {create, ok, conflict,
+#                                    missing, done}: each list holds one
+#                                    {az, ip[, role|why]} per line of that
+#                                    kind; `done` is whether the program ran
+#                                    to its end
+#
+# THE PROGRAM prints one line per wanted address and a final DONE:
+#
+#   CREATE|<az>|<ip>          absent; created (apply) or would be (plan)
+#   OK|<az>|<ip>              already a `public` address of that load balancer
+#   CONFLICT|<az>|<ip>|<role> already on that load balancer with another role
+#                             (`connect`, `internal`, `proxy`): not changed --
+#                             the row's role is the operator's -- and the run
+#                             fails, naming it
+#   MISSING|<az>|<ip>|<why>   no Region (NOREGION) or no load balancer (NOLB)
+#                             of that name yet: expected in the plan for an az
+#                             this apply creates, a failure after it
+#   DONE
+#
+# Addresses are compared as IPAddr, not text, against what the controller
+# holds (an inet column). The wanted list is passed base64-encoded JSON, so no
+# value is ever spliced into ruby source as code. Every create in the apply
+# program runs in one transaction: a validation failure on one address writes
+# none of them.
+
+- name: Decide the load balancer public IPv6 addresses to seed
+  ansible.builtin.set_fact:
+    controller_seed_lb_ipv6_wanted: "{{ controller_seed_lb_ipv6_wanted_json | from_json }}"
+  vars:
+    controller_seed_lb_ipv6_wanted_json: >-
+      {%- set acc = namespace(out=[]) -%}
+      {%- for h in (controller_seed_lb_ipv6_nodes | sort) -%}
+        {%- set v6 = hostvars[h].public_ipv6 | default('', true) | string -%}
+        {%- if v6 | length > 0 -%}
+          {%- set acc.out = acc.out + [{'az': hostvars[h].az | string, 'ip': v6,
+                                        'label': (hostvars[h].az | string) ~ ' public ipv6'}] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ acc.out | to_json }}
+
+- name: Render the runner program for the load balancer public IPv6 addresses
+  ansible.builtin.set_fact:
+    controller_seed_lb_ipv6_program: >-
+      {{ 'require "base64"; require "json"; require "ipaddr";'
+         ~ ' want = JSON.parse(Base64.strict_decode64("' ~ (controller_seed_lb_ipv6_wanted | to_json | b64encode) ~ '"));'
+         ~ ' apply = ' ~ ((controller_seed_lb_ipv6_apply | default(false) | bool) | ternary('true', 'false')) ~ ';'
+         ~ ' ActiveRecord::Base.transaction do'
+         ~ ' want.each do |w|'
+         ~ ' r = Region.find_by(name: w["az"]); lb = r&.load_balancer;'
+         ~ ' if lb.nil? then puts ["MISSING", w["az"], w["ip"], (r.nil? ? "NOREGION" : "NOLB")].join("|"); next; end;'
+         ~ ' ip = IPAddr.new(w["ip"]);'
+         ~ ' hit = lb.ipaddrs.to_a.find { |a| a.ip_addr.is_a?(IPAddr) && a.ip_addr.ipv6? && a.ip_addr == ip };'
+         ~ ' if hit.nil?'
+         ~ ' then lb.ipaddrs.create!(ip_addr: w["ip"], role: "public", label: w["label"]) if apply;'
+         ~ ' puts ["CREATE", w["az"], w["ip"]].join("|");'
+         ~ ' elsif hit.role == "public" then puts ["OK", w["az"], w["ip"]].join("|");'
+         ~ ' else puts ["CONFLICT", w["az"], w["ip"], hit.role.to_s].join("|"); end;'
+         ~ ' end;'
+         ~ ' end;'
+         ~ ' puts "DONE"' }}
+
+- name: Parse the runner output
+  when: controller_seed_lb_ipv6_output is defined
+  ansible.builtin.set_fact:
+    controller_seed_lb_ipv6_result: "{{ controller_seed_lb_ipv6_result_json | from_json }}"
+  vars:
+    controller_seed_lb_ipv6_result_json: >-
+      {%- set r = namespace(create=[], ok=[], conflict=[], missing=[], done=false) -%}
+      {%- for line in controller_seed_lb_ipv6_output | default([]) -%}
+        {%- set f = (line | string | trim).split('|') -%}
+        {%- if f == ['DONE'] -%}
+          {%- set r.done = true -%}
+        {%- elif f[0] == 'CREATE' and (f | length) == 3 -%}
+          {%- set r.create = r.create + [{'az': f[1], 'ip': f[2]}] -%}
+        {%- elif f[0] == 'OK' and (f | length) == 3 -%}
+          {%- set r.ok = r.ok + [{'az': f[1], 'ip': f[2]}] -%}
+        {%- elif f[0] == 'CONFLICT' and (f | length) == 4 -%}
+          {%- set r.conflict = r.conflict + [{'az': f[1], 'ip': f[2], 'role': f[3]}] -%}
+        {%- elif f[0] == 'MISSING' and (f | length) == 4 -%}
+          {%- set r.missing = r.missing + [{'az': f[1], 'ip': f[2], 'why': f[3]}] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ {'create': r.create, 'ok': r.ok, 'conflict': r.conflict, 'missing': r.missing,
+          'done': r.done} | to_json }}

@@ -63,6 +63,17 @@
   open). Default `false`, which is the existing behavior. Flipping it on an
   already-seeded host changes addresses the controller holds, so run that
   converge with `controller_seed_update_addresses: true` and no `--limit`.
+* **New optional node var `public_ipv6`**, the az load balancer's public
+  IPv6 address. When set, the seed adds it to that load balancer as a
+  `public` address (a `cstacks runner` step after the apply, planned before
+  it), and with `dns_driver: powerdns` it is published as the apex AAAA of
+  `app_domain` under the same ownership rules as the A. The controller marks
+  a load balancer's domain INVALID when any A or AAAA at its apex is not one
+  of its public addresses, so set it on every node whose `app_domain` has an
+  AAAA. Preflight requires one canonical IPv6 address (quote it in YAML) and
+  warns about an apex AAAA no node sets; `validate` checks the published
+  AAAA, and its `lb_domain` failure now says the rule covers AAAA records.
+  Unset, nothing changes: an existing AAAA is left as it is.
 * **Load balancer records now default to a 4-hour TTL**
   (`powerdns_lb_record_ttl: 14400`, was 300). The next converge rewrites the
   TTL on existing A, wildcard CNAME and `_cs-lb` records; set the variable to

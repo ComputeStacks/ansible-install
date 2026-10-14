@@ -184,10 +184,20 @@
       wildcard A record answers nothing and fails with event_code
       2721edc59787a807 ("Missing CNAME record"). A wildcard CNAME pointing
       somewhere other than the domain itself fails with 635285f7f2889009,
-      and an A record that is not one of this load balancer's own public
-      addresses fails with 510806d5621c97d5. Read the load balancer's event
-      log in the admin UI for which one fired, fix the zone, and re-run
-      `--tags lb_domain`.
+      and an apex address that is not one of this load balancer's own public
+      addresses fails with 510806d5621c97d5. That last one covers EVERY A
+      and AAAA record on '{{ validate_lb_domain_fields[1] }}': each must be
+      this load balancer's public_ip, a node's public_ip, or one of its
+      `public` (or `proxy`) addresses on the controller (admin UI, load
+      balancer -> addresses). An IPv6 apex is the usual culprit: set the
+      node's `public_ipv6` to the AAAA's address and re-run the seed
+      (roles/controller_seed adds it as a public address), or remove the
+      AAAA.{{ ' This node sets public_ipv6 ' ~ public_ipv6 ~ ', so any other AAAA there is the one to look at.'
+      if (public_ipv6 | default('', true) | string) | length > 0 else '' }}
+      Read the load balancer's event log in the admin UI for which one fired,
+      fix the zone or the addresses, have the controller check again (it
+      re-checks when the load balancer's domain is saved or it is deployed
+      from the admin UI), and re-run `--tags lb_domain`.
     success_msg: >-
       {{ az }}: {{ validate_lb_domain_fields[1] }} validated at
       {{ validate_lb_domain_fields[3] }}

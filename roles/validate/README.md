@@ -46,7 +46,7 @@ this role exists to catch at install time.
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
-| `lb_domain_public` | nodes (new azs only), **only when roles/powerdns wrote the records** | **the control machine** | Public DNS resolves this az's `cs_app_domain` to an A set including its `public_ip`, and a label under `*.<cs_app_domain>` to a CNAME to the apex. |
+| `lb_domain_public` | nodes (new azs only), **only when roles/powerdns wrote the records** | **the control machine** | Public DNS resolves this az's `cs_app_domain` to an A set including its `public_ip` (and an AAAA set including its `public_ipv6`, when set), and a label under `*.<cs_app_domain>` to a CNAME to the apex. Warns about an apex AAAA that is no node's `public_ipv6`. |
 | `lb_domain` | nodes (new azs only) | **the controller** | This az's `LoadBalancer` reached `domain_valid`, and its `domain` equals the CN of its `shared_certificate`. |
 | `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone` — and, when roles/powerdns wrote the load balancer records, serves every new az's apex A (including its `public_ip`) and wildcard CNAME (to the apex). |
 | `pdns_api` | controller (once) | the controller | The PowerDNS HTTP API answers on the address `controller_seed_dns_endpoint` dials. pdns keeps serving DNS with its webserver dead, so no other check sees this. |
@@ -153,7 +153,11 @@ The failure message names the exact pair of records the controller demands:
 **CNAME** to `<app_domain>`. The wildcard cannot be an A record:
 `ValidateDomainService` queries a random label under the domain for a CNAME,
 so an A record answers nothing and fails with event_code
-`2721edc59787a807`.
+`2721edc59787a807`. It also says that **every** A and AAAA at the apex must be
+one of the load balancer's public addresses (event `510806d5621c97d5`) — an
+AAAA nobody added to the load balancer is the usual IPv6 cause — and how to
+fix it: set the node's `public_ipv6` and re-run the seed
+(roles/controller_seed adds it as a `public` address), or remove the AAAA.
 
 **It does not assert that the row's `domain` equals `cs_app_domain`.** A load
 balancer's domain is operator-owned controller-side — it is edited in the
@@ -189,7 +193,12 @@ its parent, and the records are checked here, twice, from two directions:
   records. When `dns` passes and this fails, the path to the nameservers is
   wrong: the parent's delegation of `cs_app_zone`, or a resolver still holding
   a negative answer cached before the records existed. The message says so and
-  never tells the operator to create the records by hand. A split-horizon
+  never tells the operator to create the records by hand. When the node sets
+  `public_ipv6`, the apex AAAA must include it too (roles/powerdns wrote it).
+  Any apex AAAA that is not the `public_ipv6` of a node on that name is
+  **warned** about rather than failed: the controller rejects it unless it is
+  one of the load balancer's addresses, but one added there by hand is
+  invisible from here. A split-horizon
   control machine that cannot see public DNS skips it with
   `validate_skip: [lb_domain_public]`.
 

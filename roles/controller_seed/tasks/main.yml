@@ -343,6 +343,15 @@
       locations. This is a template bug -- nothing was written.
     quiet: true
 
+# Each new node's optional `public_ipv6` becomes a `public` LoadBalancerAddr
+# on its az's load balancer -- not through the manifest, which has no key for
+# those rows, but through `cstacks runner` (tasks/lb_public_ipv6_plan.yml).
+# Decided here so both runs below know whether there is anything to do.
+- name: Decide the load balancer public IPv6 addresses
+  ansible.builtin.include_tasks: lb_public_ipv6_plan.yml
+  vars:
+    controller_seed_lb_ipv6_apply: false
+
 - name: Seed the controller
   block:
     - name: Write the manifest
@@ -497,6 +506,19 @@
           must never roll it back.
         quiet: true
 
+    # Read-only. Shown beside the DRY_RUN preview, and run on EVERY apply that
+    # has an address to add, not only the previewed ones: a CONFLICT (the
+    # address already on the load balancer under another role) has to stop
+    # the run before the apply, while the rescue below can still say that
+    # nothing was written.
+    - name: Plan the load balancer public IPv6 addresses
+      ansible.builtin.include_tasks: lb_public_ipv6.yml
+      vars:
+        controller_seed_lb_ipv6_apply: false
+      when:
+        - controller_seed_lb_ipv6_wanted | length > 0
+        - not ansible_check_mode
+
     - name: Confirm the apply against the existing controller
       ansible.builtin.pause:
         prompt: >-
@@ -547,3 +569,14 @@
           above. From `cstacks seed` it names the manifest section and key
           path; from the load balancer domain gate it names the load balancer
           and the two domains, and nothing was applied.
+
+# After the block, not in it: the manifest apply has committed by now, so the
+# rescue's "nothing was written" would be untrue for a failure here. A re-run
+# converges both -- the apply and this step are each idempotent.
+- name: Add the load balancer public IPv6 addresses
+  ansible.builtin.include_tasks: lb_public_ipv6.yml
+  vars:
+    controller_seed_lb_ipv6_apply: true
+  when:
+    - controller_seed_lb_ipv6_wanted | length > 0
+    - not ansible_check_mode

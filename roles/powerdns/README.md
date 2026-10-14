@@ -89,6 +89,7 @@ below that cut is never served. `tasks/lb_records.yml` writes them, on
 ns_primary, right after the zone exists:
 
     <app_domain>.         A      <public_ip>
+    <app_domain>.         AAAA   <public_ipv6>     (only when the node sets it)
     *.<app_domain>.       CNAME  <app_domain>.
     _cs-lb.<app_domain>.  TXT    "owner=<node inventory_hostname>"
 
@@ -119,11 +120,11 @@ once):
 | --- | --- |
 | The domain, or a parent of it below `cs_app_zone`, is a zone of its own on this server | **Skipped**, with a warning: it is served from its own zone and its records are yours to manage. Also left out of the stale check. |
 | `cs_app_zone` has an NS rrset at the domain, or at a name between it and `cs_app_zone` (the zone apex's own NS does not count) | **Skipped**, with a warning: the name is delegated to other nameservers, so anything written at or below that cut would never be served; its records are yours to manage there. Also left out of the stale check. |
-| Marker names only nodes of this inventory (`groups['nodes']`) | **Converge**, even when the named set differs from this run's -- a node moved off the name or joined it. The wanted owners are this run's nodes on the name plus every named node this run does not build that still answers on it (so a run with `powerdns_lb_records_nodes` narrowed never drops another node's address; an attach run never reaches this row, because the existing fleet's nodes are not in its inventory and their markers conflict as unknown owners); a named node that now answers elsewhere is dropped. The apex A rrset becomes exactly the wanted owners' addresses; a CNAME at the apex is deleted; every non-CNAME rrset at `*.<domain>` is deleted; the wildcard CNAME becomes exactly `<domain>.`; the marker becomes exactly the wanted owner set; all at `powerdns_lb_record_ttl`. Other types at the apex (AAAA, HTTPS, TXT, MX, NS, SOA) are never touched. |
-| No marker, and what is there already matches (no apex CNAME; apex A absent or exactly the addresses; wildcard absent or exactly `CNAME <domain>.` with nothing beside it) | **Adopt**: write the marker, fill in whatever is missing, fix TTLs. An empty zone is the plain-create case; a correct hand-made pair -- every install before this task existed -- is the other common one. |
+| Marker names only nodes of this inventory (`groups['nodes']`) | **Converge**, even when the named set differs from this run's -- a node moved off the name or joined it. The wanted owners are this run's nodes on the name plus every named node this run does not build that still answers on it (so a run with `powerdns_lb_records_nodes` narrowed never drops another node's address; an attach run never reaches this row, because the existing fleet's nodes are not in its inventory and their markers conflict as unknown owners); a named node that now answers elsewhere is dropped. The apex A rrset becomes exactly the wanted owners' addresses; a CNAME at the apex is deleted; every non-CNAME rrset at `*.<domain>` is deleted; the wildcard CNAME becomes exactly `<domain>.`; the marker becomes exactly the wanted owner set; all at `powerdns_lb_record_ttl`. When any wanted owner sets `public_ipv6`, the apex AAAA rrset becomes exactly those owners' `public_ipv6` addresses too; when none does it is left alone (see "AAAA"). Other types at the apex (HTTPS, TXT, MX, NS, SOA) are never touched. |
+| No marker, and what is there already matches (no apex CNAME; apex A absent or exactly the addresses; apex AAAA absent or exactly the `public_ipv6` addresses, when any owner sets one; wildcard absent or exactly `CNAME <domain>.` with nothing beside it) | **Adopt**: write the marker, fill in whatever is missing, fix TTLs. An empty zone is the plain-create case; a correct hand-made pair -- every install before this task existed -- is the other common one. |
 | Marker names any host that is not in `groups['nodes']` | **Conflict.** The message names the unknown owner(s) and the two possible causes: an az of another inventory answers on the name (give this node a different `app_domain`), or a node of this inventory was renamed and the marker still carries its old name (if the name really is this inventory's, delete its records by hand and re-run). |
 | Marker is malformed, or the marker name holds a non-TXT record | **Conflict.** |
-| No marker, and anything differs (including an A rrset whose addresses are not exactly this run's) | **Conflict.** |
+| No marker, and anything differs (including an A rrset whose addresses are not exactly this run's, or an AAAA rrset that is not exactly the owners' `public_ipv6` when any owner sets one) | **Conflict.** |
 
 A conflict fails the run with one message per domain naming what was found
 and how to resolve it: give the node a different `app_domain`, or -- if the
@@ -139,6 +140,31 @@ inventory is converged to the current set -- a node joining or leaving the
 name is an ordinary change. A marker naming a host this inventory does not
 know is a conflict: neither `site.yml`'s inventory nor an attach inventory
 sees the whole fleet, so that host may be a live az somewhere else.
+
+### AAAA
+
+The controller validates a load balancer's domain by requiring every A
+**and AAAA** address at the apex to be one of that load balancer's public
+addresses, so an AAAA is written only from the inventory's `public_ipv6`
+(an optional node host var, which roles/controller_seed also adds to the
+load balancer as a `public` address). The AAAA rrset is managed only for a
+name where at least one wanted owner sets `public_ipv6`, under the same
+marker and adopt rules as the A: it becomes exactly those owners' addresses
+(several nodes on one name share it; a node that sets none adds nothing),
+and an unmarked AAAA that differs is a conflict.
+
+A name where no owner sets `public_ipv6` keeps whatever AAAA it has,
+untouched, as before. Such an AAAA may be an operator's, matched by an
+address they added to the load balancer on the controller by hand, and the
+marker cannot tell whether this provisioner wrote it -- so deleting it
+because the inventory is silent could take an az off IPv6. The consequence:
+**removing `public_ipv6` from a node leaves its AAAA published** (and its
+load balancer address on the controller). Delete the AAAA by hand
+(`pdnsutil delete-rrset <cs_app_zone> <name> AAAA`) if the address is gone.
+
+Addresses are compared as text against `pdnsutil list-zone`, which prints
+them in canonical form; roles/preflight requires `public_ipv6` in that same
+form.
 
 ### Stale names -- warned about, never deleted
 
