@@ -74,8 +74,11 @@ Three things are different or worth knowing there:
   port, host_path}` -- the hold's own database, the controller's token, the
   front door, the borg passphrase and where the repositories live. The values
   are compared as sha256 digests and never printed. A per-node `backups_key`
-  must therefore be byte for byte the node's current passphrase (no trailing
-  newline: encrypt it with `printf %s ... | ansible-vault encrypt_string`).
+  must therefore be byte for byte the node's current passphrase, with no
+  trailing newline. Encrypt it with
+  `IFS= read -rs K && printf %s "$K" | ansible-vault encrypt_string --stdin-name backups_key; unset K`
+  and paste the passphrase at the silent prompt (it stays out of the shell
+  history and survives any character in the key).
 * **Enrollment is a read.** For an enrolled node the controller returns the
   hash the node already has, `agent.yml` is unchanged, and nothing is
   restarted for it.

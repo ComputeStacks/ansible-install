@@ -10,11 +10,15 @@
     path: "{{ cs_agent_config_file }}"
   register: cs_agent_existing_config
 
+# no_log: agent.yml holds the borg passphrase (backups.key). The registered
+# content is still there for the tasks below and immutable_check.yml; only
+# its display is suppressed.
 - name: Read the existing agent.yml
   ansible.builtin.slurp:
     src: "{{ cs_agent_config_file }}"
   register: cs_agent_existing_config_content
   when: cs_agent_existing_config.stat.exists
+  no_log: true
 
 - name: Carry the existing admin token hash forward
   ansible.builtin.set_fact:

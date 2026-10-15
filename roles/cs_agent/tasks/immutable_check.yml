@@ -57,6 +57,8 @@
       the borg passphrase and repository location). Values are not printed.
       Fix the inventory or secrets so they render what the node has now -- a
       per-node backups_key must be byte for byte the node's current passphrase,
-      with no trailing newline -- and re-run. No hold was taken; nothing was
-      changed.
+      with no trailing newline (encrypt it with `IFS= read -rs K && printf %s "$K" |
+      ansible-vault encrypt_string --stdin-name backups_key; unset K`, pasting the
+      passphrase at the silent prompt) -- and re-run. No hold was taken; nothing
+      was changed.
     quiet: true
