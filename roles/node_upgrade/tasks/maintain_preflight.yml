@@ -41,6 +41,24 @@
     tasks_from: immutable_check
 
 # --- 3. tailscale ---------------------------------------------------------
+# A node that says it is on the tailnet but has no auth key in the run would
+# be converged as a non-member: tailscale untouched, and its firewall
+# rewritten without the tailnet rules. Refuse instead of silently dropping
+# them on a live node.
+- name: Refuse a tailnet node whose auth key is missing from the run
+  ansible.builtin.assert:
+    that:
+      - not (tailscale_enabled is defined and (tailscale_enabled | bool)
+             and ((tailscale_authkey | default('')) | length == 0))
+    fail_msg: >-
+      {{ inventory_hostname }} sets tailscale_enabled: true but this run has no
+      tailscale_authkey, so maintain-nodes would treat it as a non-member and
+      rewrite its firewall without the tailnet rules. Add tailscale_authkey to
+      the vaulted secrets, or set tailscale_enabled: false if the node is
+      really off the tailnet. Nothing was changed.
+    quiet: true
+
+
 # The membership predicate, in its one spelling (docs/contracts.md §Facts
 # exception). `debug prefs` is read-only; its output is not logged (it is the
 # node's whole tailscale configuration), and the comparison yields only the
