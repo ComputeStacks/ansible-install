@@ -44,6 +44,23 @@
       then re-run.
     quiet: true
 
+# R7: upgrade-docker.yml and maintain-nodes.yml share this state file and
+# this role's steps, but not their order or their phases. A state file
+# without `playbook` predates the field and can only be upgrade-docker's.
+- name: Gate - the unfinished run must belong to this playbook
+  ansible.builtin.assert:
+    that:
+      - not node_upgrade_resume or (node_upgrade_state | node_upgrade_state_owner) == node_upgrade_playbook
+    fail_msg: >-
+      {{ node_upgrade_state_file }} on {{ inventory_hostname }} belongs to an unfinished
+      {{ node_upgrade_state | node_upgrade_state_owner }} run (phases done:
+      {{ node_upgrade_state.phases_done | default([]) | join(', ') | default('none', true) }}),
+      not to {{ node_upgrade_playbook }}. This playbook never resumes another playbook's
+      run: finish it with `make {{ node_upgrade_state | node_upgrade_state_owner }}
+      ENV=<env>` for this node first (its own README says how), then re-run this one.
+      Nothing was changed by this run.
+    quiet: true
+
 - name: Note the completed phases
   ansible.builtin.set_fact:
     node_upgrade_phases_done: "{{ node_upgrade_state.phases_done | default([]) }}"

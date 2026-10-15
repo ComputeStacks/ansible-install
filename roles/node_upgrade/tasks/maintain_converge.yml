@@ -1,0 +1,86 @@
+---
+# The node-side roles of add-region.yml's node plays, converged on a LIVE
+# node with its tenant containers RUNNING. tasks/maintain_cycle.yml runs this
+# inside the maintenance hold; tasks/maintain_preview.yml runs it in --check.
+# README.md ("maintain-nodes") lists exactly what each role may touch, on the
+# node and off it.
+#
+# What makes it safe to run under live tenants:
+#   * no dockerd restart: docker_tls' "Restart docker" handler is deferred by
+#     the play var docker_tls_restart_deferred and records the reason instead
+#     (docker_config's handler is a SIGHUP reload, which stops nothing);
+#   * no reboot: roles/common's reboot is switched off here (and would defer
+#     on a live node anyway) -- the maintenance cycle owns reboots;
+#   * no docker package change: geerlingguy.docker is not run, the docker
+#     packages stay held, and they move only through the cycle's package step;
+#   * no OS upgrade: nothing here runs `apt upgrade`; the roles install their
+#     own packages at `present` (cs-agent and node_exporter at their pins);
+#   * no agent downgrade: cs_agent_allow_downgrade is false.
+#
+# Left out on purpose: node_storage (verified `ready` in preflight, never
+# re-applied to a live disk), geerlingguy.docker, ssh_trust, controller_seed,
+# controller_post_enroll, and every role that configures the controller, the
+# metrics or backup hosts, or the nameservers. The only writes off the node
+# are the ones cs_agent and docker_tls make for a node (README.md).
+#
+# The caller flushes the handlers right after this file, inside the hold:
+# nothing may be left to fire after `cs-agent maintenance off`.
+
+- name: Converge the base system
+  ansible.builtin.include_role:
+    name: common
+  vars:
+    common_allow_reboot: false
+
+- name: Converge node_exporter
+  ansible.builtin.include_role:
+    name: node_exporter
+
+# Its `tailscale up` was compared with the node's settings in preflight. Not
+# previewed in --check: the collection's own status read is a command that
+# check mode skips, and the role cannot continue without it.
+- name: Converge tailscale
+  ansible.builtin.include_role:
+    name: tailscale
+  when:
+    - ((tailscale_authkey | default('')) | length > 0)
+      and (tailscale_enabled | default(true) | bool)
+    - not ansible_check_mode
+
+- name: Converge Ubuntu Pro
+  ansible.builtin.include_role:
+    name: ubuntu_pro
+  when: (ubuntu_pro_token | default('')) | length > 0
+
+- name: Converge the docker daemon configuration
+  ansible.builtin.include_role:
+    name: docker_config
+
+- name: Converge docker TLS
+  ansible.builtin.include_role:
+    name: docker_tls
+
+- name: Converge the node kernel settings
+  ansible.builtin.include_role:
+    name: node_kernel
+
+- name: Converge haproxy's host preparation
+  ansible.builtin.include_role:
+    name: haproxy
+
+- name: Converge cadvisor and fluentd
+  ansible.builtin.include_role:
+    name: node_observability
+
+- name: Converge the firewall
+  ansible.builtin.include_role:
+    name: firewall
+
+# Inside the hold: the package install restarts the agent (postinst and the
+# role's handler); the hold lives in control.db and survives it. The caller
+# waits for the agent to be back before deciding anything.
+- name: Converge cs-agent
+  ansible.builtin.include_role:
+    name: cs_agent
+  vars:
+    cs_agent_allow_downgrade: false

@@ -1,21 +1,25 @@
 # node_upgrade
 
-The rolling docker upgrade: run by `playbooks/upgrade-docker.yml`
-(`make upgrade-docker ENV=<env>`), one node at a time, inside a scheduled
-customer maintenance window. Never unattended. Its `detect_live` probe also
-keeps the converges from disrupting a live node.
+The maintenance cycle of live nodes: the rolling docker upgrade
+(`playbooks/upgrade-docker.yml`, `make upgrade-docker ENV=<env>`) and the
+converge of live nodes inside a maintenance hold
+(`playbooks/maintain-nodes.yml`, `make maintain-nodes ENV=<env>`), one node
+at a time, inside a scheduled customer maintenance window. Never unattended.
+Its `detect_live` probe also keeps the converges from disrupting a live node.
 
 | Runs in | Play | Hosts |
 | --- | --- | --- |
 | `upgrade-docker.yml` | "Upgrade docker, one node at a time" | `node_upgrade_targets` |
 | `upgrade-docker.yml` (`tasks_from: preflight`) | "Preflight every targeted node" | `node_upgrade_targets` |
+| `maintain-nodes.yml` (`tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` |
+| `maintain-nodes.yml` (`tasks_from: preflight`, `maintain_preflight`) | "Preflight every targeted node" | `maintain_node_targets` |
 | `site.yml` (`tasks_from: detect_live`) | "Docker hosts" | `nodes` |
 | `add-region.yml` (`tasks_from: detect_live`) | "New node docker" | `nodes` (the new node) |
 | `roles/common` (`tasks_from: detect_live`) | "Base system" / "New node base system", before a reboot | nodes, not `existing_env` |
 | `unseal.yml` | not run | — |
 
-**Attach mode:** never touches an `existing_env` host — upgrade-docker.yml
-never selects one, and the role's preflight refuses it. **Requires:** a provisioner-built node with the data disk `ready`
+**Attach mode:** never touches an `existing_env` host — neither playbook
+selects one, and the role's preflight refuses it. **Requires:** a provisioner-built node with the data disk `ready`
 (`node_storage`) and the contract dependencies below.
 
 ## Purpose
@@ -97,7 +101,7 @@ to name; one with neither is reported as removed.
 `/var/lib/computestacks/upgrade/state.json` (dir 0700, file 0600, root):
 
 ```json
-{"version": 1, "host": "node1001", "reason": "docker-upgrade",
+{"version": 1, "host": "node1001", "playbook": "upgrade-docker", "reason": "docker-upgrade",
  "started_at": "...", "updated_at": "...",
  "recorded": [{"id": "<64 hex>", "name": "web-app-1"}],
  "phase": "stopped", "phases_done": ["held", "recorded", "stopped"],
@@ -116,6 +120,9 @@ It is written right after the hold succeeds, and `recorded` is filled
 * `releasing` is set just before `off`, so a run that died between `off` and
   the `released` mark resumes at the confirmation instead of reading the
   missing hold as an external removal.
+* `playbook` names the playbook that owns the run; upgrade-docker.yml and
+  maintain-nodes.yml each refuse to resume the other's (a file without it is
+  upgrade-docker's).
 
 Finished runs are kept as `state.done.<timestamp>.json` (the newest
 `node_upgrade_state_keep`). The role also writes `stop.json`/`start.json`
@@ -167,6 +174,107 @@ mid-upgrade; the fix is to correct the cause and re-run
 Any other task failure inside the cycle is re-raised with the node's phase
 and these instructions appended (`templates/cycle_failed.j2`).
 
+## maintain-nodes (`tasks_from: maintain`)
+
+`playbooks/maintain-nodes.yml` converges LIVE nodes -- the node-side roles of
+`add-region.yml`'s node plays -- each inside a cs-agent maintenance hold the
+run places and releases itself, and stops the tenant containers only when
+the node needs dockerd restarted or a reboot. It reuses this role's hold,
+record/stop/packages/reboot/services/start, release and archive steps and its
+state file; what is new is in `tasks/maintain*.yml`, `agent_wait.yml`,
+`docker_restart.yml` and the filters at the end of
+`filter_plugins/node_upgrade.py`. docs/maintain-nodes.md is the operator's
+view.
+
+### Flow
+
+| Step | File | Phase written | What happens |
+| --- | --- | --- | --- |
+| preflight | `preflight.yml` | — | As upgrade-docker (agent >= 3.4.0, status readable, pins on the mirror, no docker downgrade), plus R7: a state.json of the other playbook is refused. |
+| converge preflight | `maintain_preflight.yml` | — | `cs_agent_apt_version` not below the installed agent (never downgrade); `cs_agent` `tasks_from: immutable_check` (R4, reads the controller); on a tailnet member, `tailscale debug prefs` against the role's `tailscale up` flags (R8). Before ANY hold: fleet-wide in the preflight play, and again per node. |
+| download | `download.yml` | — | `apt-get update`, `--download-only` of the OS upgrade and the drifting pins, containers running, no hold. |
+| hold | `hold.yml` | `held` | `cs-agent maintenance on --reason maintain-nodes --wait ...`; resume requires the existing hold. state.json gets `playbook: maintain-nodes`. |
+| converge | `maintain_converge_phase.yml` → `maintain_converge.yml` | — | `converge_started` saved first. Then, containers RUNNING: common (its reboot off), node_exporter, tailscale (members), ubuntu_pro (token), docker_config, docker_tls (restart deferred), node_kernel, haproxy, node_observability, firewall, cs_agent (pin installed, never downgraded). |
+| handlers | `maintain_converge_phase.yml` | — | `meta: flush_handlers` inside the hold (R1). |
+| agent | `agent_wait.yml` | — | Poll `maintenance status --json` until `agent_active` and a local hold (`node_upgrade_agent_wait`, 300s). Exit 3 and no output are retried; no hold, or another error document, fails at once. `controller_acked` is not read. |
+| decide | `maintain_decide.yml` | `converged` | Stop iff docker drifts, dockerd must restart (docker_tls' deferred reason, or a docker_tls file newer than the running dockerd), `/var/run/reboot-required` exists, or `maintain_force_restart`. The decision and its inputs are written with the phase (R2). |
+| report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the pending OS updates (kernel/libc named). |
+| record, stop, packages | as upgrade-docker | `recorded`, `stopped`, `packages` | Only when the decision says stop. The OS updates are applied here and only here (R3). |
+| docker restart | `docker_restart.yml` | `docker_restarted` | When the decision requires it and no reboot follows. |
+| reboot, services, start | as upgrade-docker | `rebooted`, `started` | |
+| release | `release.yml` | `released` | `meta: flush_handlers` first (a no-op: nothing notifies after the converge), then `off` and the controller confirmation. |
+| archive, settle | as upgrade-docker | — | |
+
+### `--check --diff`
+
+`tasks/maintain_preview.yml`: both preflights, then the converge in check mode
+with its diffs (agent.yml stays `no_log`), the handlers (none acts; docker_tls
+records its reason), the decision, the pending OS updates, and per node
+"would stop containers: yes/no because ...". NO hold. A docker certificate due
+for renewal is reported, not issued, and counts as "docker restart required".
+The tailscale role is not previewed (the collection's own status read cannot
+run in check mode); its `tailscale up` was compared in preflight. An
+unfinished run whose converge is done is previewed from its recorded
+decision.
+
+### The rules that keep tenants safe
+
+* **R1 -- no handler after `off`, no dockerd restart under tenants.**
+  `docker_tls_restart_deferred: true` is a play var of the serial play, so
+  docker_tls' handlers see it: "Restart docker" does not run, "Record a
+  deferred docker restart" does. `docker_config`'s handler is a SIGHUP reload
+  and fires inside the hold. The converge's handlers are flushed right after
+  it, before the agent wait and the decision, and again before the release;
+  no task of this role notifies anything. `tests/maintain_nodes.yml` checks
+  all of it statically, including that no handler of a converged role
+  restarts dockerd without the gate. `tasks/maintain.yml` refuses to run
+  without the play var.
+* **R2 -- decide once, from state.** The decision and its inputs are written
+  with `converged`; a resumed run reads them and never re-decides. The
+  docker_tls file check also re-detects a restart a dead run did not record.
+* **R3 -- OS updates.** Not a reason to stop; applied only in a stopped window
+  that happens for another reason; never with tenants running (no role in the
+  converge runs `apt upgrade`; they install at `present`, the agent and
+  node_exporter at their pins).
+* **R5 -- releasing after a failure.** If the run fails after its own hold and
+  before the converge's first task (state.json with only `held`, no
+  `converge_started`), nothing has changed and the hold is released and the
+  state set aside (`state.aborted.<timestamp>.json`). From the converge on,
+  ansible offers no reliable "did any task change something" for included
+  roles, so the node stays held and `templates/maintain_failed.j2` says what
+  to do: re-run (it resumes inside the hold), or, as long as nothing was
+  stopped, `cs-agent maintenance off` is safe for the tenants.
+* **R7 -- one owner per state file.** `playbook` is recorded in state.json;
+  each playbook refuses to resume the other's (a file without the field is
+  upgrade-docker's). Their hold reasons differ too (`maintain-nodes` /
+  `docker-upgrade`), so neither adopts the other's hold.
+
+### Off the node
+
+What a maintain run touches outside the node it is converging, and nothing
+else (the playbook refuses a LIMIT that leaves the first two out):
+
+| Host | By | What |
+| --- | --- | --- |
+| controller | `cs_agent` enroll (preflight and converge) | `cstacks runner` read of the node's agent token hash -- a read |
+| controller | `docker_tls` (only when the node's certificate is missing, within `docker_tls_renew_days` of expiry, or its SANs changed) | `vault-bootstrap`: inspect; `docker start` it if stopped; unseal it if sealed; `vault write pki/docker/issue/server` (a new leaf certificate) |
+| the node's backup host | `cs_agent` | `authorized_key` entry `cs-agent <hostname>` for `cstacks` -- only if missing |
+| the tailnet's coordination server | `tailscale` (members) | `tailscale up` only when the collection's state file is new or changed or the node is offline -- prefs compared first (R8) |
+| Ubuntu Pro | `ubuntu_pro` (token set) | `pro attach` only if not attached; `pro enable` of missing services |
+| the registries in `docker_registries` | `docker_config`, `node_observability` | `docker login`; pulls of pinned images not present |
+| apt mirrors, the cs-agent repository | several | package lists, packages |
+| the control machine | `docker_tls` | `x509_certificate_info` of the node's certificate (localhost) |
+
+Not run: node_storage (only its read-only probe), geerlingguy.docker,
+ssh_trust, controller_seed, controller_post_enroll, and every role that
+configures the controller, metrics, backup or nameserver hosts.
+
+### State file additions
+
+`playbook` (`maintain-nodes`), `converge_started`, and with `converged` the
+`decision`: `{stop, reasons, docker_restart_required, docker_restart_reasons,
+drift, reboot_pending, force}`; `docker_restarted` with that phase.
+
 ## Variables (`defaults/main.yml`)
 
 | Variable | Default | |
@@ -187,6 +295,10 @@ and these instructions appended (`templates/cycle_failed.j2`).
 | `node_upgrade_services_timeout` | 300 (s) | docker/cs-agent/cs-firewall after packages/reboot |
 | `node_upgrade_force` | false | run the cycle even with nothing to do |
 | `node_upgrade_node_settle` | 60 (s) | pause before the next node |
+| `node_upgrade_playbook` | `upgrade-docker` | recorded in state.json (R7); `maintain-nodes.yml` sets `maintain-nodes` |
+| `node_upgrade_maintain_force_restart` | `maintain_force_restart`, else false | maintain-nodes: stop (and so apply OS updates, reboot if they ask) even with no other reason |
+| `node_upgrade_agent_wait` / `_interval` | 300 / 5 (s) | maintain-nodes: wait for cs-agent after the converge |
+| `node_upgrade_tailscale_up_args` | roles/tailscale's composition | maintain-nodes: the flags the prefs are compared with |
 
 ## `tasks_from: detect_live`
 

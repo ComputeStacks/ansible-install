@@ -43,3 +43,10 @@ docker_tls_renew_days: 30
 # v2, so it is vestigial; kept for parity and switchable. See README.
 docker_tls_create_dockremap_user: true
 docker_tls_dockremap_uid: 1001
+
+# Defer the "Restart docker" handler: record that dockerd must restart
+# (docker_tls_restart_deferred_reasons) instead of restarting it. Set by
+# playbooks/maintain-nodes.yml, which restarts dockerd itself inside a
+# maintenance hold and only with the tenant containers stopped. False
+# everywhere else, which keeps site.yml and add-region.yml as they were.
+docker_tls_restart_deferred: false

@@ -52,8 +52,28 @@
              < (docker_tls_renew_days | int * 86400))
          or ((docker_tls_cert_info.subject_alt_name | default([], true) | sort) != (docker_tls_desired_sans | sort)) }}
 
+# --check cannot preview the issuance itself: it reads and may unseal the
+# controller's vault and writes a key pair. It reports what a real run would
+# do instead, and notifies the restart a renewal would need, so a preview
+# (playbooks/maintain-nodes.yml) can say "would renew -> docker restart
+# required".
+- name: Report the certificate a real run would issue (check mode)
+  ansible.builtin.debug:
+    msg: >-
+      CHECK MODE: the docker daemon certificate on {{ inventory_hostname }} would be
+      {{ 'issued (none on disk)' if not docker_tls_cert_stat.stat.exists else 'renewed (it expires within '
+         ~ docker_tls_renew_days ~ ' days, or its SANs no longer match the inventory)' }};
+      dockerd would then have to restart to load it.
+  changed_when: true
+  notify: Restart docker
+  when:
+    - docker_tls_issue_required | bool
+    - ansible_check_mode
+
 - name: Issue the docker daemon certificate
-  when: docker_tls_issue_required | bool
+  when:
+    - docker_tls_issue_required | bool
+    - not ansible_check_mode
   block:
     # `public: true` on both, because the issue task below is a task of THIS
     # role and reads vault's contract directly -- vault_command,

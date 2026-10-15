@@ -9,6 +9,8 @@ server certificate issued by the controller's vault.
 | `site.yml` (`tasks_from: clear_stale_dropin`) | "Docker hosts" (pre_task) | `nodes` only |
 | `add-region.yml` | "New node docker TLS, issued from the existing Vault" | `nodes` (the new node) |
 | `add-region.yml` (`tasks_from: clear_stale_dropin`) | "New node docker" (pre_task) | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold; restart deferred) |
+| `maintain-nodes.yml` (`tasks_from: restart_files`, via `node_upgrade`) | "Maintain the nodes, one at a time" | `maintain_node_targets` |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; issuance reaches the existing controller's
@@ -58,6 +60,35 @@ pki/docker/issue/server …`, delegated to `vault_host`
 2). The requested TTL is `vault_effective_cert_ttl_hours`: 1 year, clamped to
 the CA's remaining lifetime.
 
+## Deferred restart (`maintain-nodes.yml`)
+
+`maintain-nodes.yml` converges this role on a LIVE node, inside a cs-agent
+maintenance hold, with the tenant containers running. It sets the play var
+`docker_tls_restart_deferred: true`, and then:
+
+* the "Restart docker" handler does not run;
+* "Record a deferred docker restart" (same notification, `listen`) adds a
+  reason to `docker_tls_restart_deferred_reasons` instead;
+* `roles/node_upgrade` reads that list after flushing the handlers inside
+  the hold, together with an independent check -- any file in
+  `tasks/restart_files.yml`'s list (the certificate, CA, key and the
+  drop-in) modified after dockerd last started -- and, if either says so,
+  stops the recorded containers and restarts dockerd in that window.
+
+The file check covers a run that died after writing a certificate but before
+recording the reason. Everywhere else the variable is false and the handler
+restarts dockerd exactly as before. A new handler in any role the maintain
+converge includes that restarts dockerd must carry the same gate;
+`tests/maintain_nodes.yml` fails otherwise.
+
+## Check mode
+
+`--check` does not issue: the issuance reads (and may unseal) the controller's
+vault and writes a key pair. When a certificate would be issued or renewed,
+the run says so and notifies "Restart docker", so `maintain-nodes.yml`'s
+preview reports "would renew -> docker restart required". The probes (stat,
+slurp, `x509_certificate_info`) all run in check mode.
+
 ## Attach mode (`existing_env: true`)
 
 `playbooks/add-region.yml` runs the **whole role** on the new node, not just
@@ -101,6 +132,7 @@ Only this role's own `startup.conf` is ever removed, and only on `nodes`.
 | `docker_tls_bin` | `/usr/bin/dockerd` | |
 | `docker_tls_create_dockremap_user` | `true` | See below. |
 | `docker_tls_dockremap_uid` | `1001` | |
+| `docker_tls_restart_deferred` | `false` | Record "docker restart required" instead of restarting dockerd. Set by `maintain-nodes.yml` only. |
 
 Consumed from elsewhere: `cs_ports.docker_tls` (ports.yml), `hostname` and
 `primary_ip` (inventory, asserted), and the `vault` role's `vault_command`,

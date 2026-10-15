@@ -24,6 +24,10 @@
     cs_agent_enroll_query: "{{ 'puts Node.find_by!(hostname: %q{' ~ hostname ~ '}).agent_token_hash' }}"
   delegate_to: "{{ groups[cs_agent_controller_group] | first }}"
   changed_when: false
+  # A read (`puts ... agent_token_hash`): safe to run in --check, and needed
+  # there -- without the hash the assert below fails and nothing after it,
+  # the agent.yml diff included, can be previewed.
+  check_mode: false
   register: cs_agent_enroll_result
 
 - name: Assert the controller returned a usable agent token hash

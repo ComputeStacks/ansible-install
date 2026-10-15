@@ -164,6 +164,7 @@
         node_upgrade_state_update:
           version: 1
           host: "{{ inventory_hostname }}"
+          playbook: "{{ node_upgrade_playbook }}"
           reason: "{{ node_upgrade_reason }}"
           started_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
           recorded: []

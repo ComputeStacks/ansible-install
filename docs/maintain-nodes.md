@@ -1,0 +1,131 @@
+# Maintaining live nodes (`maintain-nodes.yml`)
+
+`make maintain-nodes ENV=<env>` brings nodes that already carry customers up
+to date with the inventory and `versions.yml`: the node-side roles of a node
+build (base system, node_exporter, tailscale, Ubuntu Pro, docker's daemon
+configuration and TLS listener, kernel settings, haproxy's host preparation,
+cadvisor and fluentd, the firewall, and cs-agent — upgraded to its pin), the
+docker packages, the pending OS updates and a pending reboot. One node at a
+time, each inside a cs-agent maintenance hold that the run places and
+releases itself.
+
+It is the way to change a live node. `site.yml` and `add-region.yml` stay the
+way to build one: on a live node they deliberately skip docker's packages
+and the reboot, and they restart dockerd when a docker certificate changes.
+
+## Customer impact
+
+**Every node the run touches goes into maintenance for its turn**, whether or
+not anything else happens to it. While a node is held the controller does not
+place new containers on it, does not health-check or recover its containers,
+and refuses customer power actions on them; the agent runs no backups. The
+hold waits out the backups and tasks already in flight (`--wait`, up to two
+hours), so a node's turn starts when it is quiet.
+
+**Tenant containers keep running** through the converge. They are stopped —
+the running ones recorded first, and exactly those started again before the
+hold is released — only when one of these is true for the node:
+
+| Reason | Why it needs the containers stopped |
+| --- | --- |
+| docker drifts from its pins in `versions.yml` | the package install restarts dockerd |
+| the converge changed what dockerd reads only at start: its TLS certificate (renewed within 30 days of expiry, or new SANs) or its ExecStart drop-in | dockerd must restart to load it |
+| `/var/run/reboot-required` exists (often: unattended-upgrades installed a kernel) | the node reboots |
+| `-e maintain_force_restart=true` | asked for |
+
+Tenant containers have no docker restart policy, so a dockerd restart or a
+reboot would leave them down; that is why the run stops and starts them
+itself, inside the hold.
+
+**Pending OS updates never stop containers on their own.** When the run stops
+them anyway, it applies the OS updates in that window (docker's packages held)
+and reboots if they ask for it. Otherwise they wait for unattended-upgrades or
+for the next window that stops.
+
+The cs-agent upgrade happens inside the hold with the containers running: the
+agent restarts, keeps its hold, and the run waits until it is back.
+
+## Running it
+
+Preview first. `--check --diff` takes no hold and changes nothing: it runs
+every preflight, shows the converge's diffs, and prints per node
+
+    <node>: would stop containers: YES because docker must restart: ... .
+    Tenant containers running now: 412. Pending OS updates: 23 (kernel/libc:
+    libc6, linux-image-...) -- would be applied while the containers are
+    stopped, and the node would then reboot.
+
+```sh
+make maintain-nodes ENV=prod ARGS='--check --diff'
+make maintain-nodes ENV=prod
+```
+
+**`LIMIT`.** The converge reads the controller (each node's agent token hash,
+and its vault when a docker certificate is due) and may add the node's borg
+key on its site's backup host, so those hosts must be in the run. A `LIMIT`
+that leaves them out is refused before anything happens, and the refusal
+names them:
+
+```sh
+make maintain-nodes ENV=prod LIMIT='node1001:ctl1:backup1'
+```
+
+That is also how a single node is resumed after a failure.
+
+After each node the run validates it (`roles/validate`) and pauses 60s so the
+controller's health check has seen it before the next node is held.
+
+## Before the first hold
+
+The run refuses — before it holds any node, and again just before each
+node's hold — when:
+
+* a node's cs-agent is older than 3.4.0, or `cs_agent_apt_version` is below
+  the version installed (the agent is never downgraded);
+* a node's docker and containerd state is not on its data disk;
+* a docker pin is missing from the mirror or below what is installed;
+* the agent.yml the converge would write changes `store.data_dir`,
+  `metadata.admin_token_hash`, `metadata.listen_addr`, `backups.key` or where
+  the borg repositories live. Values are never printed. A per-node
+  `backups_key` must be byte for byte the node's passphrase, without a
+  trailing newline (`printf %s '<passphrase>' | ansible-vault encrypt_string
+  --stdin-name backups_key`);
+* on a tailnet member, `tailscale up` with the inventory's flags would change
+  the node's tailscale settings — typically a node joined by hand with
+  `--ssh` or tags the inventory does not carry. `tailscale debug prefs` on the
+  node shows them; describe them in `tailscale_extra_args` /
+  `tailscale_tags`. Such nodes are expected to be `tailscale_access_only:
+  true` (docs/contracts.md §Tailscale access-only mode);
+* the controller already holds the node, or someone else holds it locally;
+* the node has an unfinished `upgrade-docker` run (finish that first).
+
+The controller must be >= 9.8.0 (it confirms agent holds).
+
+## When it fails
+
+The first failure stops the whole run; the message says whether the node is
+held, whether its containers are running, and what to do. The state of a
+node part-way through is in `/var/lib/computestacks/upgrade/state.json`,
+and re-running the same command resumes it — inside the same hold, from the
+last completed step, never stopping a container twice and never re-deciding
+whether to stop.
+
+* Failed before the converge started: the hold is released automatically;
+  nothing changed.
+* Failed during the converge or before anything was stopped: the node stays
+  held with its containers running. Re-run to resume, or, to abandon, run
+  `cs-agent maintenance off` on the node (safe: nothing was stopped) and move
+  the state file aside.
+* Failed after containers were stopped: re-run. Do NOT clear the hold by
+  hand — the controller would start recovering the node mid-window.
+
+`roles/node_upgrade/README.md` ("maintain-nodes") has the step-by-step
+account, the state file and the complete list of what the run touches off
+the node.
+
+## maintain-nodes and upgrade-docker
+
+`upgrade-docker.yml` still exists and still only moves docker (and the OS
+updates and reboot riding with it). `maintain-nodes.yml` does that too when
+docker drifts, plus the converge. They share the state file and refuse to
+resume each other's unfinished run.

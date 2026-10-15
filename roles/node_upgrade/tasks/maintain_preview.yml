@@ -1,0 +1,40 @@
+---
+# --check --diff: what a real maintain-nodes run would do to this node, with
+# NO hold and no change. The preflight (both files) has already run, so every
+# refusal a real run would make has already been made.
+#
+#   1. the converge in check mode -- its diffs are the preview of every file
+#      it would change (agent.yml stays no_log); a docker_tls certificate that
+#      a real run would renew is reported, not issued, and counts as a
+#      required docker restart;
+#   2. the handlers, flushed: in check mode none acts, and docker_tls' deferred
+#      restart only records its reason;
+#   3. the decision, from the same inputs a real run reads after its converge;
+#   4. the pending OS updates;
+#   5. "would stop containers: yes/no because ...".
+#
+# An unfinished run (state.json) is previewed from its record: once its
+# converge is done, the decision it wrote is the one a resumed run acts on.
+
+- name: Preview the converge
+  ansible.builtin.include_tasks: maintain_converge.yml
+  when: "'converged' not in node_upgrade_phases_done"
+
+- name: Run the converge's handlers (check mode)
+  ansible.builtin.meta: flush_handlers
+
+- name: Gather the decision's inputs
+  ansible.builtin.include_tasks: maintain_decide.yml
+  when: "'converged' not in node_upgrade_phases_done"
+
+- name: Use the decision the unfinished run recorded
+  ansible.builtin.set_fact:
+    node_upgrade_maintain_decision: "{{ node_upgrade_state.decision }}"
+    node_upgrade_maintain_from_state: true
+  when: "'converged' in node_upgrade_phases_done"
+
+- name: List the pending OS updates
+  ansible.builtin.include_tasks: maintain_os_updates.yml
+
+- name: Report what a real run would do
+  ansible.builtin.include_tasks: maintain_report.yml

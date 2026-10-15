@@ -13,6 +13,8 @@ exists once the controller has a `Node` row for this hostname
 | --- | --- | --- |
 | `site.yml` | "Node agents (requires seeded Node rows)" | `nodes` |
 | `add-region.yml` | "New node agent (requires the seeded Node row)" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
+| `maintain-nodes.yml` (`tasks_from: immutable_check`, via `node_upgrade`) | "Preflight every targeted node", and again per node before its hold | `maintain_node_targets` |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; on the existing backup server it adds one
@@ -50,6 +52,41 @@ controller), `backup_server` (`~cstacks/.ssh` on this site's backup host).
 6. **`agent.yml`** (0600), then enable and start the service. Config changes
    notify a restart. Before any of this, `tasks/export_check.yml` checks the
    backup export settings (see below).
+
+## On a live node (`maintain-nodes.yml`)
+
+`maintain-nodes.yml` runs this whole role on enrolled, live nodes, inside a
+cs-agent maintenance hold (roles/node_upgrade/README.md, "maintain-nodes").
+Three things are different or worth knowing there:
+
+* **The agent is upgraded inside the hold, never downgraded.** The package
+  install restarts the agent (postinst, and the "Restart cs-agent" handler);
+  the hold lives in control.db and survives it, and node_upgrade waits for
+  `maintenance status --json` to show the agent active with the hold still in
+  place before it goes on. `cs_agent_allow_downgrade: false` is passed, and
+  node_upgrade's preflight refuses a `cs_agent_apt_version` below the
+  installed version before any hold.
+* **Immutable keys** (`tasks/immutable_check.yml`, filter
+  `cs_agent_immutable_changes`). Before any hold, the role's render of
+  `agent.yml` is compared with the node's file, and the run is refused if it
+  would change `store.data_dir`, `metadata.admin_token_hash`,
+  `metadata.listen_addr`, `backups.key` or `backups.borg.ssh.{user, host,
+  port, host_path}` -- the hold's own database, the controller's token, the
+  front door, the borg passphrase and where the repositories live. The values
+  are compared as sha256 digests and never printed. A per-node `backups_key`
+  must therefore be byte for byte the node's current passphrase (no trailing
+  newline: encrypt it with `printf %s ... | ansible-vault encrypt_string`).
+* **Enrollment is a read.** For an enrolled node the controller returns the
+  hash the node already has, `agent.yml` is unchanged, and nothing is
+  restarted for it.
+
+Everything a converge of this role does OFF the node, in any playbook:
+
+| Host | What | Write? |
+| --- | --- | --- |
+| controller | `cstacks runner "puts Node.find_by!(hostname: ...).agent_token_hash"` (`bin/rails runner` inside the portal container) | no -- a read |
+| this site's backup host | `authorized_key` for `cstacks`: the node's borg key, comment `cs-agent <hostname>`; `manage_dir` creates `~cstacks/.ssh` if missing | only when the entry is missing (never on a node converged before) |
+| the apt repository | `get_url` of the signing key; `apt-get update` | no |
 
 ## Which backup server (site scoping)
 
@@ -216,7 +253,8 @@ containers.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `cs_agent_apt_version` | versions.yml (`3.4.0`) | Pinned apt package version. |
+| `cs_agent_apt_version` | versions.yml | Pinned apt package version. |
+| `cs_agent_allow_downgrade` | `true` | Let the pinned install move the agent to an older version. `maintain-nodes.yml` passes `false`. |
 | `cs_agent_apt_repo` / `cs_agent_apt_key_url` | versions.yml | Repository and signing key. |
 | `cs_agent_listen_addr` | derived | Metadata front-door bind address (see above). |
 | `cs_agent_admin_token_hash` | `""` | Filled by enrollment; pre-seeded from the existing file. |

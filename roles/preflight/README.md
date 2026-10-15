@@ -17,6 +17,8 @@ to a host.
 | `firewall.yml` | "Preflight validation" | `all` |
 | `firewall.yml` (`tasks_from: attach`, attach inventory only) | "Preflight validation" | `all` |
 | `upgrade-docker.yml` | "Every targeted node is reachable" (`tasks_from: reachable`) | `node_upgrade_targets` |
+| `maintain-nodes.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | the nodes it maintains, the controller and their backup hosts |
+| `maintain-nodes.yml` | "Preflight validation" (and `tasks_from: attach` on an attach inventory) | the same hosts |
 | `unseal.yml` | not run | — |
 
 The reachability play runs first in every playbook, with `gather_facts:
@@ -27,6 +29,11 @@ false`; the preflight play follows with `gather_facts: true` and
 `preflight_check_app_domain_dns`, `preflight_check_node_storage`,
 `preflight_check_public_ipv6`, `preflight_check_backup_export`), none of
 which bear on a firewall change.
+
+`maintain-nodes.yml` turns off the load balancer DNS, data disk (it checks
+`ready` itself, as upgrade-docker.yml does) and controller image checks;
+the registry logins stay on, because the converge logs in again inside a
+maintenance hold.
 
 `tasks/attach.yml` holds the attach-mode inventory checks: every host in
 `controller`, `metrics`, `backup` or `registry` is flagged `existing_env`, no

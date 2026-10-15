@@ -13,6 +13,7 @@ additive append path for existing shared hosts in attach mode.
 | `add-region.yml` (`tasks_from: append`) | "Existing backup server — account, repository path, firewall appends" | `backup` |
 | `firewall.yml` | "Host firewalls" | every host not `existing_env`; on an attach inventory, `nodes` only |
 | `firewall.yml` (`tasks_from: append`) | "Existing shared hosts — new node address appends only" | `controller`, `metrics`, `backup` that are `existing_env` |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** the nftables table is never rendered on an `existing_env`

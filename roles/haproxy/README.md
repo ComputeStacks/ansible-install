@@ -7,6 +7,7 @@ runtime configuration depends on.
 | --- | --- | --- |
 | `site.yml` | "Node base stack" | `nodes` |
 | `add-region.yml` | "New node base stack" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; never runs on an existing shared host.

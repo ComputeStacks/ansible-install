@@ -1,0 +1,62 @@
+---
+# Gather the inputs of the stop decision AFTER the converge and its handlers,
+# and apply the rule (filter node_upgrade_maintain_decide). Read-only and
+# check-mode safe. tasks/maintain_cycle.yml writes the result into state.json
+# with the `converged` phase (R2); a resumed run decides from that record and
+# never from what a later converge reports as changed.
+#
+# Sets: node_upgrade_maintain_decision  (the filter's dict)
+#       node_upgrade_maintain_running   how many tenant containers run now
+
+# Docker drift (and the running containers, for the report): the same probe
+# tasks/preflight.yml ran, re-read because the converge ran since.
+- name: Re-probe docker and the containers
+  ansible.builtin.include_tasks: detect_live.yml
+
+- name: Check whether a reboot is pending
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: node_upgrade_maintain_reboot
+  check_mode: false
+
+# A docker_tls file written after dockerd last started is not loaded yet,
+# whatever recorded it: this also catches a run that died between writing a
+# certificate and recording the `converged` phase.
+- name: List the files dockerd only reads at start
+  ansible.builtin.include_role:
+    name: docker_tls
+    tasks_from: restart_files
+
+- name: Read when dockerd last started
+  ansible.builtin.command:
+    argv: [systemctl, show, docker, --property=ActiveEnterTimestamp, --timestamp=unix]
+  register: node_upgrade_maintain_docker_started
+  changed_when: false
+  check_mode: false
+
+- name: Read the docker_tls files' modification times
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: "{{ docker_tls_restart_files }}"
+  register: node_upgrade_maintain_restart_stats
+  check_mode: false
+
+- name: Decide whether the tenant containers must stop
+  vars:
+    node_upgrade_maintain_newer_files: >-
+      {{ node_upgrade_maintain_restart_stats.results
+         | node_upgrade_files_newer_than(node_upgrade_maintain_docker_started.stdout | node_upgrade_systemd_unix_ts) }}
+  ansible.builtin.set_fact:
+    node_upgrade_maintain_running: >-
+      {{ (node_upgrade_detect_inspect.stdout | default('') | node_upgrade_parse_inspect | node_upgrade_select | length)
+         if node_upgrade_detect_inspect.rc | default(1) == 0 else 'unknown' }}
+    node_upgrade_maintain_decision: >-
+      {{ {'docker_drift': node_upgrade_drift_list,
+          'docker_restart_reasons': (docker_tls_restart_deferred_reasons | default([]))
+                                    + (node_upgrade_maintain_newer_files
+                                       | map('regex_replace', '$', ' is newer than the running dockerd')
+                                       | list),
+          'reboot_pending': node_upgrade_maintain_reboot.stat.exists,
+          'force': node_upgrade_maintain_force_restart | bool}
+         | node_upgrade_maintain_decide }}

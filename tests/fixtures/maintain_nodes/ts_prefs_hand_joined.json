@@ -1,0 +1,44 @@
+{
+	"ControlURL": "https://controlplane.tailscale.com",
+	"RouteAll": false,
+	"ExitNodeID": "",
+	"ExitNodeIP": "",
+	"ExitNodeAllowLANAccess": false,
+	"CorpDNS": false,
+	"RunSSH": true,
+	"RunWebClient": false,
+	"WantRunning": true,
+	"LoggedOut": false,
+	"ShieldsUp": false,
+	"AdvertiseTags": [
+		"tag:cs-node"
+	],
+	"Hostname": "",
+	"NotepadURLs": false,
+	"AdvertiseRoutes": null,
+	"AdvertiseServices": null,
+	"NoSNAT": false,
+	"NoStatefulFiltering": "false",
+	"NetfilterMode": 2,
+	"OperatorUser": "",
+	"AutoUpdate": {
+		"Check": true,
+		"Apply": null
+	},
+	"AppConnector": {
+		"Advertise": false
+	},
+	"PostureChecking": false,
+	"NetfilterKind": "",
+	"Config": {
+		"PrivateNodeKey": "privkey:0000000000000000000000000000000000000000000000000000000000000000",
+		"OldPrivateNodeKey": "privkey:0000000000000000000000000000000000000000000000000000000000000000",
+		"UserProfile": {
+			"ID": 0,
+			"LoginName": "",
+			"DisplayName": ""
+		},
+		"NetworkLockKey": "nlpriv:0000000000000000000000000000000000000000000000000000000000000000",
+		"NodeID": ""
+	}
+}

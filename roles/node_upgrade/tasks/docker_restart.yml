@@ -1,0 +1,32 @@
+---
+# maintain-nodes only: the dockerd restart the converge deferred
+# (docker_tls_restart_deferred), taken here with the recorded containers
+# stopped and the docker packages already at their pins. Skipped when a
+# reboot is pending -- the reboot step right after restarts dockerd anyway.
+# The phase is marked either way, so a resumed run never restarts twice.
+
+- name: Check whether a reboot will follow
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: node_upgrade_docker_restart_reboot
+
+- name: Check the node is still held before restarting docker
+  ansible.builtin.include_tasks: hold_check.yml
+  vars:
+    node_upgrade_hold_check_at: before restarting docker
+  when: not node_upgrade_docker_restart_reboot.stat.exists
+
+# daemon_reload: the drop-in may be what changed.
+- name: Restart docker to load the new certificate or drop-in
+  ansible.builtin.systemd_service:
+    name: docker
+    state: restarted
+    daemon_reload: true
+  when: not node_upgrade_docker_restart_reboot.stat.exists
+
+- name: Mark the docker restart done
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: docker_restarted
+    node_upgrade_state_update:
+      docker_restarted: "{{ not node_upgrade_docker_restart_reboot.stat.exists }}"

@@ -1,0 +1,44 @@
+---
+# maintain-nodes: converge ONE live node inside a cs-agent maintenance hold,
+# and stop its tenant containers only when the converge (or the node) needs
+# dockerd restarted or the host rebooted. Run by playbooks/maintain-nodes.yml
+# with `serial: 1`; README.md ("maintain-nodes") has the full account.
+#
+#   preflight   tasks/preflight.yml + tasks/maintain_preflight.yml, read-only
+#   --check     tasks/maintain_preview.yml: no hold, a check-mode converge with
+#               diffs, and "would stop containers: yes/no because ..."
+#   otherwise   tasks/maintain_cycle.yml: hold -> converge -> handlers ->
+#               agent back -> decide -> [record/stop/packages/docker
+#               restart/reboot/services/start] -> release
+#
+# The play MUST set docker_tls_restart_deferred: true (a play var, so the
+# role's handlers see it too): the converge runs with tenants up, and a
+# docker_tls certificate or drop-in change must become "docker restart
+# required" here rather than a dockerd restart under them.
+
+- name: Gate - docker restarts must be deferred in this play
+  ansible.builtin.assert:
+    that:
+      - docker_tls_restart_deferred | default(false) | bool
+      - node_upgrade_playbook == 'maintain-nodes'
+    fail_msg: >-
+      tasks_from: maintain converges a live node with its tenant containers
+      running. The play including it must set `docker_tls_restart_deferred: true`
+      and `node_upgrade_playbook: maintain-nodes` as play vars
+      (playbooks/maintain-nodes.yml does); without the first, a certificate or
+      drop-in change would restart dockerd under the tenants. Nothing was changed.
+    quiet: true
+
+- name: Preflight
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Preflight the converge
+  ansible.builtin.include_tasks: maintain_preflight.yml
+
+- name: Preview the node
+  ansible.builtin.include_tasks: maintain_preview.yml
+  when: ansible_check_mode
+
+- name: Maintain the node
+  ansible.builtin.include_tasks: maintain_cycle.yml
+  when: not ansible_check_mode

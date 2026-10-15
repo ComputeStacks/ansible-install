@@ -1,0 +1,8 @@
+---
+# Print the stop decision for this node (templates/maintain_report.j2): in
+# --check, "would stop containers: yes/no because ..."; in a real run the same
+# line, before acting on it.
+
+- name: Report the decision
+  ansible.builtin.debug:
+    msg: "{{ lookup('ansible.builtin.template', 'maintain_report.j2') | regex_replace('\\s+', ' ') | trim }}"

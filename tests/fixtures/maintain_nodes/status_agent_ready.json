@@ -1,0 +1,1 @@
+{"paused":true,"controller":null,"local":{"since":1791400000,"reason":"maintain-nodes","by":"root"},"controller_gen":3,"paused_since":1791400000,"running":[],"pending":0,"skipped_backups":0,"seq":52,"quiesce":"unknown","sample":null,"instance_id":"0f3c9a52-5d1e-4c1b-9b7e-1d2f3a4b5c6d","controller_acked":false,"agent_active":true,"a_key_from_a_newer_agent":{"nested":[1,2]}}

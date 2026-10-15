@@ -8,6 +8,7 @@
 #   make site ENV=prod
 #   make add-region ENV=prod
 #   make upgrade-docker ENV=prod
+#   make maintain-nodes ENV=prod
 #   make firewall ENV=prod
 #   make validate ENV=prod
 #   make lint check
@@ -65,7 +66,7 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region upgrade-docker firewall validate add-region-validate lint check check-pins
+.PHONY: help deps site add-region upgrade-docker maintain-nodes firewall validate add-region-validate lint check check-pins
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
@@ -73,6 +74,10 @@ help:
 	@echo "add-region ENV=<name>             attach a region to an existing environment"
 	@echo "upgrade-docker ENV=<name>         roll docker to its pins on the nodes, one at a"
 	@echo "                                  time, in a maintenance window (LIMIT=<node> resumes one)"
+	@echo "maintain-nodes ENV=<name>         converge the live nodes one at a time, each inside"
+	@echo "                                  a maintenance hold; stops containers only when"
+	@echo "                                  dockerd must restart or the node reboot"
+	@echo "                                  (ARGS='--check --diff' previews it, no hold)"
 	@echo "firewall ENV=<name>               re-render and apply the host firewalls only"
 	@echo "                                  (ARGS='--check --diff' shows the change first)"
 	@echo "validate ENV=<name>               re-run the post-install checks only"
@@ -83,7 +88,9 @@ help:
 	@echo "                                  and the bootstrap manifest against each, and prove"
 	@echo "                                  the powerdns load balancer record plan, the"
 	@echo "                                  public_ipv6 check and load balancer address seed, the"
-	@echo "                                  node upgrade selection rules, the node data"
+	@echo "                                  node upgrade selection rules, the maintain-nodes"
+	@echo "                                  decision, agent.yml and tailscale comparisons and"
+	@echo "                                  deferred docker restarts, the node data"
 	@echo "                                  disk classification, the reachability verdict,"
 	@echo "                                  the tailnet routing of every pairwise consumer"
 	@echo "                                  and the cs-agent backup export settings"
@@ -121,6 +128,20 @@ add-region:
 upgrade-docker:
 	$(require_env)
 	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/upgrade-docker.yml
+
+# Converge the LIVE nodes (playbooks/maintain-nodes.yml, docs/maintain-nodes.md):
+# one node at a time, each inside a cs-agent maintenance hold the playbook
+# places and releases itself. Customer-impacting -- every node goes into
+# maintenance for its turn -- and its tenant containers are stopped and
+# started again only when dockerd must restart or the node must reboot. Run
+# it in a scheduled window; `ARGS='--check --diff'` previews every node
+# without holding any. LIMIT works differently from upgrade-docker: the
+# converge also reaches the controller and each node's backup host, and a
+# LIMIT that leaves them out is refused -- `LIMIT=<node>:<controller>:<backup>`
+# (the refusal names them). That is also how a failed node is resumed.
+maintain-nodes:
+	$(require_env)
+	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/maintain-nodes.yml
 
 # The host firewalls and nothing else (playbooks/firewall.yml), after an
 # inventory change only the firewall reads -- firewall_allow_ssh_from, a
@@ -167,6 +188,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/site.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/add-region.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/upgrade-docker.yml
+	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/maintain-nodes.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example playbooks/firewall.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i inventories/example tests/roles.yml
 	$(ANSIBLE_PLAYBOOK) --syntax-check -i tests/fixtures/single-site playbooks/site.yml
@@ -183,6 +205,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_public_ipv6.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/maintain_nodes.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_reachable.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/ssh_port.yml
@@ -196,6 +219,7 @@ check:
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       public_ipv6 is validated and seeded as a load balancer address,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
+	@echo "       maintain-nodes decides, compares and defers docker restarts as specified,"
 	@echo "       node data disk classification formats only a provably blank disk,"
 	@echo "       the reachability check names every host that did not answer,"
 	@echo "       every ssh port consumer reads the listening host's own ssh_port,"

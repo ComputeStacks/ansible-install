@@ -7,6 +7,7 @@ docker host; the engine itself comes from `geerlingguy.docker`.
 | --- | --- | --- |
 | `site.yml` | "Docker hosts" | `controller:metrics:registry:nodes` |
 | `add-region.yml` | "New node docker" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; never runs on an existing shared host.
@@ -53,7 +54,13 @@ that does not currently run.
 
 Both are SIGHUP-reloadable, which is why they live in `daemon.json` and not in
 an ExecStart flag, and why this role's handler **reloads** rather than restarts
-dockerd. Docker hard-errors when an option is set in both `daemon.json` and the
+dockerd. That is also why `maintain-nodes.yml`, which converges this role on a
+live node with its tenants running, lets the handler fire (inside the
+maintenance hold, when it flushes the converge's handlers): a reload stops
+nothing. `docker_tls`' handler is a real restart and is deferred there
+instead. Anything added to this role that needs a dockerd restart must be
+deferred the same way (`docker_tls_restart_deferred`; tests/maintain_nodes.yml
+fails on an ungated restart handler). Docker hard-errors when an option is set in both `daemon.json` and the
 command line, so nothing here may be repeated in the `docker_tls` drop-in.
 
 ## Private registry authentication

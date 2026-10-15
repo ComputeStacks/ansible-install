@@ -1,0 +1,62 @@
+---
+# Refuse a converge that would change one of agent.yml's immutable keys
+# (filter_plugins/cs_agent_immutable.py has the list and why each one is on
+# it). playbooks/maintain-nodes.yml includes this BEFORE it holds a node --
+# once in its fleet-wide preflight, again right before that node's hold --
+# so the refusal costs nothing: no hold taken, nothing changed.
+#
+#   - ansible.builtin.include_role:
+#       name: cs_agent
+#       tasks_from: immutable_check
+#
+# It renders templates/agent.yml.j2 exactly as tasks/main.yml would, with
+# the same inputs: the admin token hash pre-seeded from the node's file
+# (read_token_hash.yml) and then read from the controller (enroll.yml -- a
+# read-only `cstacks runner` query, delegated). Nothing is written. Every
+# task that touches the file's content is no_log: it holds the borg
+# passphrase and the token hash, and the comparison yields key NAMES only.
+#
+# Check-mode safe (the enroll query runs with check_mode: false).
+#
+# Sets: cs_agent_immutable_problems  [{key, change}] (empty when none)
+
+- name: Read the admin token hash already present in agent.yml
+  ansible.builtin.include_tasks: read_token_hash.yml
+
+- name: Gate - the node must already have an agent.yml
+  ansible.builtin.assert:
+    that:
+      - cs_agent_existing_config.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} has no {{ cs_agent_config_file }}: it is not a
+      node this provisioner finished building. maintain-nodes converges built,
+      enrolled nodes only; finish the node with site.yml / add-region.yml.
+      Nothing was changed.
+    quiet: true
+
+- name: Fetch this node's admin token hash from the controller
+  ansible.builtin.include_tasks: enroll.yml
+
+- name: Compare the immutable agent.yml keys with what this role would render
+  ansible.builtin.set_fact:
+    cs_agent_immutable_problems: >-
+      {{ (cs_agent_existing_config_content.content | b64decode)
+         | cs_agent_immutable_changes(lookup('ansible.builtin.template', 'agent.yml.j2')) }}
+  no_log: true
+
+- name: Gate - the converge must not change an immutable agent.yml key
+  ansible.builtin.assert:
+    that:
+      - cs_agent_immutable_problems | length == 0
+    fail_msg: >-
+      Converging {{ inventory_hostname }} would change
+      {% for p in cs_agent_immutable_problems %}{{ p.key }} ({{ p.change }}){{ ', ' if not loop.last else '' }}{% endfor %}
+      in {{ cs_agent_config_file }}. These keys must never change on a running
+      node (roles/cs_agent/filter_plugins/cs_agent_immutable.py says why for each:
+      the hold's own database, the controller's token, the metadata front door,
+      the borg passphrase and repository location). Values are not printed.
+      Fix the inventory or secrets so they render what the node has now -- a
+      per-node backups_key must be byte for byte the node's current passphrase,
+      with no trailing newline -- and re-run. No hold was taken; nothing was
+      changed.
+    quiet: true

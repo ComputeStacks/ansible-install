@@ -1,0 +1,365 @@
+---
+# Does playbooks/maintain-nodes.yml decide, compare and defer the way its
+# safety rests on -- proven without a node.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/maintain_nodes.yml
+#
+# (run by `make check`). Two halves:
+#
+# PURE RULES. The filters in roles/node_upgrade/filter_plugins/node_upgrade.py
+# and roles/cs_agent/filter_plugins/cs_agent_immutable.py, fed canned copies of
+# what a node prints (tests/fixtures/maintain_nodes/, placeholders only):
+#   * the stop decision (node_upgrade_maintain_decide);
+#   * reading `cs-agent maintenance status --json` while the agent restarts
+#     (node_upgrade_agent_status): extra keys, `quiesce: "unknown"`, a false
+#     `controller_acked`, exit 3 and error documents;
+#   * agent.yml's immutable keys (cs_agent_immutable_changes), including a
+#     backups_key that gained a trailing newline, and that no value leaks;
+#   * `tailscale debug prefs` against the role's `tailscale up` flags;
+#   * the pending OS updates, dockerd's start time and the docker_tls files
+#     newer than it;
+#   * which playbook owns a state.json (R7).
+#
+# STATIC GUARDS over the repository's own YAML (tests/filter_plugins/
+# maintain_static.py), so a later edit cannot quietly undo them:
+#   * R1: no handler of a role the maintain converge includes restarts or
+#     stops dockerd without the docker_tls_restart_deferred gate; the serial
+#     play sets that var; the cycle flushes the handlers after the converge,
+#     before the agent wait and the decision, and again before the release;
+#     and no node_upgrade task notifies a handler at all;
+#   * the converge includes exactly the intended roles -- never node_storage,
+#     geerlingguy.docker, ssh_trust or the controller-side roles -- with
+#     common's reboot off and cs-agent downgrades off;
+#   * node_upgrade's copy of roles/tailscale's `tailscale up` flag
+#     composition still matches the original.
+
+- name: The maintain-nodes rules and guards
+  hosts: localhost
+  gather_facts: false
+  vars:
+    mn_fixtures: "{{ playbook_dir }}/fixtures/maintain_nodes"
+    mn_nu_fixtures: "{{ playbook_dir }}/fixtures/node_upgrade"
+    mn_roles: "{{ playbook_dir }}/../roles"
+    mn_drift:
+      - name: docker-ce
+        pin: "5:29.7.2-1~ubuntu.26.04~resolute"
+        installed: "5:29.7.1-1~ubuntu.26.04~resolute"
+  tasks:
+    # Load both roles' filter plugins exactly as a converge does: a pure
+    # task file of each.
+    - name: Load roles/node_upgrade's filters
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: select
+      vars:
+        node_upgrade_inspect_stdout: ""
+
+    - name: Load roles/cs_agent's filters
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+
+    # ======================================================================
+    # The stop decision
+    # ======================================================================
+    - name: "Assert: nothing to do means no stop, and says why"
+      vars:
+        mn_d: "{{ {'docker_drift': [], 'docker_restart_reasons': [], 'reboot_pending': false, 'force': false} | node_upgrade_maintain_decide }}"
+      ansible.builtin.assert:
+        that:
+          - mn_d.stop is false
+          - mn_d.reasons == []
+          - mn_d.docker_restart_required is false
+          - ({} | node_upgrade_maintain_decide).stop is false
+        fail_msg: "{{ mn_d | to_json }}"
+        quiet: true
+
+    - name: "Assert: each reason stops on its own, and is named"
+      vars:
+        mn_base: {docker_drift: [], docker_restart_reasons: [], reboot_pending: false, force: false}
+        mn_drifted: "{{ mn_base | combine({'docker_drift': mn_drift}) | node_upgrade_maintain_decide }}"
+        mn_restart: "{{ mn_base | combine({'docker_restart_reasons': ['docker_tls changed', ' ', 'docker_tls changed']}) | node_upgrade_maintain_decide }}"
+        mn_reboot: "{{ mn_base | combine({'reboot_pending': true}) | node_upgrade_maintain_decide }}"
+        mn_forced: "{{ mn_base | combine({'force': true}) | node_upgrade_maintain_decide }}"
+      ansible.builtin.assert:
+        that:
+          - mn_drifted.stop and mn_drifted.reasons | length == 1
+          - mn_drifted.reasons[0] is search('docker-ce 5:29.7.1-1~ubuntu.26.04~resolute -> 5:29.7.2')
+          - not mn_drifted.docker_restart_required
+          # blank and repeated reasons collapse
+          - mn_restart.stop and mn_restart.docker_restart_required
+          - mn_restart.docker_restart_reasons == ['docker_tls changed']
+          - "mn_restart.reasons == ['docker must restart: docker_tls changed']"
+          - mn_reboot.stop and mn_reboot.reasons[0] is search('reboot is already pending')
+          - mn_forced.stop and mn_forced.reasons == ['forced (maintain_force_restart)']
+        fail_msg: "{{ [mn_drifted, mn_restart, mn_reboot, mn_forced] | to_json }}"
+        quiet: true
+
+    - name: "Assert: pending OS updates are not an input -- they never stop containers"
+      vars:
+        mn_d: >-
+          {{ {'docker_drift': [], 'docker_restart_reasons': [], 'reboot_pending': false, 'force': false, 'os_updates': 40}
+             | node_upgrade_maintain_decide }}
+      ansible.builtin.assert:
+        that:
+          - mn_d.stop is false
+        quiet: true
+
+    # ======================================================================
+    # Waiting for cs-agent after its install/restart
+    # ======================================================================
+    - name: "Assert: agent status reading"
+      vars:
+        mn_ready: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/status_agent_ready.json') | node_upgrade_agent_status(0) }}"
+        mn_inactive: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/status_agent_inactive.json') | node_upgrade_agent_status(0) }}"
+        mn_unheld: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/status_unheld.json') | node_upgrade_agent_status(0) }}"
+        mn_db: "{{ lookup('ansible.builtin.file', mn_nu_fixtures ~ '/on_rc3_error.json') | node_upgrade_agent_status(3) }}"
+        mn_usage: "{{ lookup('ansible.builtin.file', mn_nu_fixtures ~ '/on_rc1_usage.json') | node_upgrade_agent_status(1) }}"
+        mn_none: "{{ '' | node_upgrade_agent_status(127) }}"
+      ansible.builtin.assert:
+        that:
+          # extra keys, quiesce "unknown", sample null and controller_acked
+          # false: still held, agent up -> ready
+          - mn_ready.done and mn_ready.ready and mn_ready.state == 'ready'
+          - mn_inactive.state == 'agent_inactive' and not mn_inactive.done and not mn_inactive.ready
+          # a missing hold is final, never retried
+          - mn_unheld.state == 'unheld' and mn_unheld.done and not mn_unheld.ready
+          # exit 3 is retried
+          - mn_db.state == 'unavailable' and not mn_db.done
+          - mn_db.error is search('control.db')
+          # any other error document is final
+          - mn_usage.state == 'error' and mn_usage.done and not mn_usage.ready
+          # nothing parseable (binary being replaced) is retried
+          - mn_none.state == 'no_output' and not mn_none.done
+        fail_msg: "{{ [mn_ready, mn_inactive, mn_unheld, mn_db, mn_usage, mn_none] | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # agent.yml immutable keys
+    # ======================================================================
+    - name: "Assert: immutable keys are compared by value, not by spelling"
+      vars:
+        mn_current: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/agent_current.yml') }}"
+        mn_same: "{{ mn_current | cs_agent_immutable_changes(lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_same.yml')) }}"
+        mn_listen: "{{ mn_current | cs_agent_immutable_changes(lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_listen.yml')) }}"
+        mn_newline: "{{ mn_current | cs_agent_immutable_changes(lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_key_newline.yml')) }}"
+        mn_noborg: "{{ mn_current | cs_agent_immutable_changes(lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_no_borg.yml')) }}"
+        mn_many: "{{ mn_current | cs_agent_immutable_changes(lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_many.yml')) }}"
+      ansible.builtin.assert:
+        that:
+          # other keys changed, and `port: 22` became `port: "22"`: no problem
+          - mn_same == []
+          - mn_current | cs_agent_immutable_changes(mn_current) == []
+          - mn_listen | map(attribute='key') | list == ['metadata.listen_addr']
+          - mn_listen | map(attribute='change') | list == ['changed']
+          # a backups_key with a trailing newline renders differently: refused
+          - mn_newline | map(attribute='key') | list == ['backups.key']
+          - mn_newline | map(attribute='change') | list == ['changed']
+          - mn_noborg | map(attribute='key') | list ==
+            ['backups.borg.ssh.user', 'backups.borg.ssh.host', 'backups.borg.ssh.port', 'backups.borg.ssh.host_path']
+          - mn_noborg | map(attribute='change') | unique | list == ['removed']
+          - mn_many | map(attribute='key') | list ==
+            ['store.data_dir', 'metadata.admin_token_hash', 'backups.borg.ssh.host_path']
+          # a borg block that appears is a change too
+          - (lookup('ansible.builtin.file', mn_fixtures ~ '/agent_render_no_borg.yml') | cs_agent_immutable_changes(mn_current))
+            | map(attribute='change') | unique | list == ['added']
+          # names only: no value reaches the result
+          - (mn_newline + mn_many + mn_listen) | to_json is not search('EXAMPLE-passphrase')
+          - (mn_newline + mn_many + mn_listen) | to_json is not search('aaaaaaaa|bbbbbbbb|10\.100\.0\.')
+        fail_msg: "{{ [mn_same, mn_listen, mn_newline, mn_noborg, mn_many] | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # tailscale debug prefs vs the role's flags
+    # ======================================================================
+    - name: "Assert: tailscale settings comparison"
+      vars:
+        mn_default: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_default.json') }}"
+        mn_hand: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_hand_joined.json') }}"
+        mn_out: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_logged_out.json') }}"
+        mn_ok: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=false ', []) }}"
+        mn_hand_plain: "{{ mn_hand | node_upgrade_tailscale_prefs_problems('--accept-dns=false', []) }}"
+        mn_hand_flags: "{{ mn_hand | node_upgrade_tailscale_prefs_problems('--accept-dns=false --ssh', ['cs-node']) }}"
+        mn_dns: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=true', []) }}"
+        mn_unknown: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=false --webclient', []) }}"
+        mn_logged_out: "{{ mn_out | node_upgrade_tailscale_prefs_problems('--accept-dns=false', []) }}"
+      ansible.builtin.assert:
+        that:
+          - mn_ok == []
+          # joined by hand with --ssh and a tag the inventory does not carry
+          - mn_hand_plain | length == 2
+          - mn_hand_plain | select('search', 'RunSSH') | list | length == 1
+          - mn_hand_plain | select('search', 'AdvertiseTags') | list | length == 1
+          # the inventory describing the hand join exactly: accepted
+          - mn_hand_flags == []
+          - mn_dns | length == 1 and mn_dns[0] is search('CorpDNS')
+          - mn_unknown | length == 1 and mn_unknown[0] is search('--webclient')
+          - mn_logged_out | select('search', 'not logged in') | list | length == 1
+          - ('not json' | node_upgrade_tailscale_prefs_problems('--accept-dns=false', [])) | length == 1
+          # nothing from the prefs' key material ever reaches a message
+          - (mn_hand_plain + mn_dns + mn_logged_out) | to_json is not search('privkey|nlpriv')
+        fail_msg: "{{ [mn_ok, mn_hand_plain, mn_hand_flags, mn_dns, mn_unknown, mn_logged_out] | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # OS updates, dockerd's start, docker_tls files newer than it
+    # ======================================================================
+    - name: "Assert: pending OS updates and the docker restart evidence"
+      vars:
+        mn_os: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/apt_sim.txt') | node_upgrade_parse_apt_sim }}"
+        mn_stats:
+          - {item: /etc/docker/certs/server.crt, stat: {exists: true, mtime: 1791400100.5}}
+          - {item: /etc/docker/certs/ca.crt, stat: {exists: true, mtime: 1700000000}}
+          - {item: /etc/docker/certs/server.key, stat: {exists: false}}
+          # written in the same second dockerd started: not newer
+          - {item: /etc/systemd/system/docker.service.d/startup.conf, stat: {exists: true, mtime: 1791400000.7}}
+      ansible.builtin.assert:
+        that:
+          - mn_os.count == 5
+          - mn_os.packages[0] == 'libc6'
+          # held docker packages are never listed
+          - "'docker-ce' not in mn_os.packages"
+          - mn_os.reboot_hint
+          - mn_os.reboot_packages == ['libc6', 'libc-bin', 'linux-modules-6.20.0-11-generic', 'linux-image-6.20.0-11-generic']
+          - ('' | node_upgrade_parse_apt_sim).count == 0
+          - not ('Inst openssl [1] (2 x)' | node_upgrade_parse_apt_sim).reboot_hint
+          - ('ActiveEnterTimestamp=@1791400000' | node_upgrade_systemd_unix_ts) == 1791400000
+          - ('ActiveEnterTimestamp=' | node_upgrade_systemd_unix_ts) == 0
+          - ('ActiveEnterTimestamp=n/a' | node_upgrade_systemd_unix_ts) == 0
+          - (mn_stats | node_upgrade_files_newer_than(1791400000)) == ['/etc/docker/certs/server.crt']
+          # dockerd not running: every existing file is newer
+          - (mn_stats | node_upgrade_files_newer_than(0)) | length == 3
+          - "([{'path': '/x', 'exists': true, 'mtime': 5}] | node_upgrade_files_newer_than(4)) == ['/x']"
+        fail_msg: "{{ mn_os | to_json }}"
+        quiet: true
+
+    # ======================================================================
+    # R7: which playbook owns a state.json
+    # ======================================================================
+    - name: "Assert: state ownership"
+      ansible.builtin.assert:
+        that:
+          # written before the field existed: upgrade-docker's
+          - "({'version': 1, 'phases_done': ['held']} | node_upgrade_state_owner) == 'upgrade-docker'"
+          - "({'playbook': 'maintain-nodes'} | node_upgrade_state_owner) == 'maintain-nodes'"
+          - "({'playbook': ''} | node_upgrade_state_owner) == 'upgrade-docker'"
+          - ('not a mapping' | node_upgrade_state_owner) == 'upgrade-docker'
+        quiet: true
+
+    # ======================================================================
+    # Static guards
+    # ======================================================================
+    - name: Read the maintain converge, cycle and playbook
+      ansible.builtin.set_fact:
+        mn_converge: "{{ lookup('ansible.builtin.file', mn_roles ~ '/node_upgrade/tasks/maintain_converge.yml') | from_yaml }}"
+        mn_cycle: "{{ lookup('ansible.builtin.file', mn_roles ~ '/node_upgrade/tasks/maintain_cycle.yml') | from_yaml }}"
+        mn_phase: "{{ lookup('ansible.builtin.file', mn_roles ~ '/node_upgrade/tasks/maintain_converge_phase.yml') | from_yaml }}"
+        mn_playbook: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../playbooks/maintain-nodes.yml') | from_yaml }}"
+
+    - name: Note the roles the converge includes
+      ansible.builtin.set_fact:
+        mn_included: "{{ mn_converge | maintain_included_roles }}"
+
+    - name: Read the handlers of every role the converge includes
+      ansible.builtin.set_fact:
+        mn_handlers: >-
+          {{ mn_handlers | default({})
+             | combine({item: (lookup('ansible.builtin.file', mn_roles ~ '/' ~ item ~ '/handlers/main.yml') | from_yaml)}) }}
+      loop: "{{ mn_included | map(attribute='name') | list }}"
+      when: (mn_roles ~ '/' ~ item ~ '/handlers/main.yml') is file
+
+    - name: Read every node_upgrade task file
+      ansible.builtin.set_fact:
+        mn_nu_tasks: >-
+          {{ mn_nu_tasks | default({})
+             | combine({item | basename: (lookup('ansible.builtin.file', item) | from_yaml)}) }}
+      loop: "{{ query('ansible.builtin.fileglob', mn_roles ~ '/node_upgrade/tasks/*.yml') }}"
+
+    - name: "Assert: R1 -- no dockerd restart can fire under live tenants"
+      vars:
+        mn_serial: "{{ mn_playbook | selectattr('name', 'equalto', 'Maintain the nodes, one at a time') | first }}"
+        mn_ungated: "{{ mn_handlers | maintain_ungated_docker_restarts }}"
+        mn_notifying: "{{ mn_nu_tasks | maintain_tasks_with_notify }}"
+      ansible.builtin.assert:
+        that:
+          # the guard has something to guard: docker_tls is converged and
+          # its restart handler was read
+          - "'docker_tls' in mn_handlers"
+          - mn_handlers.docker_tls | selectattr('name', 'equalto', 'Restart docker') | list | length == 1
+          - mn_ungated == []
+          # the play var the handlers read
+          - mn_serial.vars.docker_tls_restart_deferred is true
+          - mn_serial.serial == 1
+          # nothing in the maintenance cycle queues a handler
+          - mn_notifying == []
+        fail_msg: >-
+          Ungated dockerd restarts: {{ mn_ungated }}. node_upgrade tasks with notify:
+          {{ mn_notifying }}. Serial play vars: {{ mn_serial.vars | default({}) }}.
+        quiet: true
+
+    - name: "Assert: R1 -- handlers flush inside the hold, before the decision and the release"
+      vars:
+        mn_steps: "{{ mn_cycle[0].block | maintain_flattened_task_names }}"
+        mn_phase_steps: "{{ mn_phase | maintain_flattened_task_names }}"
+      ansible.builtin.assert:
+        that:
+          # inside the converge phase: converge, flush, agent, decide, record
+          - mn_phase_steps | maintain_in_order(['Converge the node-side roles, containers running',
+                                                 'Run the converge handlers inside the hold',
+                                                 'Wait for cs-agent',
+                                                 'Gather the decision\'s inputs',
+                                                 'Record the converge and the decision'])
+          # and in the cycle: the converge phase, a second flush, then the release
+          - mn_steps | maintain_in_order(['Hold the node',
+                                           'Converge inside the hold',
+                                           'Run any handler still pending, inside the hold',
+                                           'Release the node'])
+          # both flushes really are meta: flush_handlers
+          - (mn_cycle[0].block | selectattr('name', 'equalto', 'Run any handler still pending, inside the hold')
+             | first)['ansible.builtin.meta'] == 'flush_handlers'
+          - (mn_phase | selectattr('name', 'equalto', 'Run the converge handlers inside the hold')
+             | first)['ansible.builtin.meta'] == 'flush_handlers'
+          # the converge phase is an include with its own `when`, never a
+          # block: a block's `when` would skip the write that marks it done
+          - (mn_cycle[0].block | selectattr('name', 'equalto', 'Converge inside the hold')
+             | first)['ansible.builtin.include_tasks'] == 'maintain_converge_phase.yml'
+        fail_msg: "{{ mn_steps }} / {{ mn_phase_steps }}"
+        quiet: true
+
+    - name: "Assert: the converge includes exactly the node-side roles, safely"
+      vars:
+        mn_names: "{{ mn_included | map(attribute='name') | list }}"
+        mn_common: "{{ mn_included | selectattr('name', 'equalto', 'common') | first }}"
+        mn_agent: "{{ mn_included | selectattr('name', 'equalto', 'cs_agent') | first }}"
+      ansible.builtin.assert:
+        that:
+          - mn_names == ['common', 'node_exporter', 'tailscale', 'ubuntu_pro', 'docker_config', 'docker_tls',
+                         'node_kernel', 'haproxy', 'node_observability', 'firewall', 'cs_agent']
+          - mn_included | selectattr('tasks_from') | list == []
+          - mn_common.vars.common_allow_reboot is false
+          - mn_agent.vars.cs_agent_allow_downgrade is false
+          - mn_names | intersect(['node_storage', 'geerlingguy.docker', 'ssh_trust', 'controller', 'controller_seed',
+                                  'controller_post_enroll', 'metrics', 'backup_server', 'powerdns', 'vault']) == []
+        fail_msg: "{{ mn_included | to_json }}"
+        quiet: true
+
+    - name: "Assert: node_upgrade's copy of the tailscale up flags matches roles/tailscale"
+      vars:
+        mn_ts_defaults: "{{ lookup('ansible.builtin.file', mn_roles ~ '/tailscale/defaults/main.yml') }}"
+        mn_nu_defaults: "{{ lookup('ansible.builtin.file', mn_roles ~ '/node_upgrade/defaults/main.yml') }}"
+        # Regexes over the two files' raw text (no braces are ever templated here).
+        mn_ts_up_rx: 'tailscale_up_args: >-\n  --accept-dns=\{\{ tailscale_accept_dns \| bool \| lower \}\}\n  \{\{ tailscale_extra_args \}\}\n'
+        mn_ts_dns_rx: '\ntailscale_accept_dns: false\n'
+        mn_nu_dns_rx: "'--accept-dns=' ~ \\(tailscale_accept_dns \\| default\\(false\\) \\| bool \\| lower\\)"
+        mn_nu_extra_rx: "~ ' ' ~ \\(tailscale_extra_args \\| default\\(''\\)\\)"
+      ansible.builtin.assert:
+        that:
+          - mn_ts_defaults is search(mn_ts_up_rx)
+          - mn_ts_defaults is search(mn_ts_dns_rx)
+          - mn_nu_defaults is search(mn_nu_dns_rx)
+          - mn_nu_defaults is search(mn_nu_extra_rx)
+        fail_msg: >-
+          roles/tailscale composes tailscale_up_args differently from
+          node_upgrade_tailscale_up_args (roles/node_upgrade/defaults/main.yml);
+          change both together.
+        quiet: true

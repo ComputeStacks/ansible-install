@@ -1,0 +1,30 @@
+---
+# Managed by the provisioner. Placeholder values only.
+host:
+  iptables-cmd: "iptables"
+  ip6tables-cmd: "ip6tables"
+
+store:
+  data_dir: "/srv/cs-agent"
+
+metadata:
+  listen_addr: "10.100.0.21:8500"
+  admin_token_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+queue:
+  numworkers: 3
+
+backups:
+  enabled: true
+  key: "EXAMPLE-passphrase-not-real"
+  borg:
+    image: "registry.example.com/borg:1.0"
+    compression: "zstd,3"
+    ssh:
+      enabled: true
+      user: "cstacks"
+      host: "10.100.0.12"
+      port: 22
+      host_path: "/mnt"
+      keyfile: "/etc/computestacks/backup/.ssh/id_ed25519"
+    ssh_borg_remote_path: "/usr/local/bin/borg"

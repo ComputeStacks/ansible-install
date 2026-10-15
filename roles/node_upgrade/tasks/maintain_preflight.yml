@@ -1,0 +1,84 @@
+---
+# maintain-nodes' own preflight, after tasks/preflight.yml. Read-only and
+# check-mode safe; nothing here holds or changes the node. Like
+# tasks/preflight.yml it runs twice: fleet-wide before the first node is
+# held, and again for each node immediately before its hold.
+#
+#   1. cs-agent is never downgraded: the pin may not be below what is
+#      installed (the converge installs the pin inside the hold).
+#   2. The agent.yml the converge would render keeps every immutable key
+#      (roles/cs_agent tasks_from: immutable_check -- reads the controller).
+#   3. On a tailnet member, `tailscale up` with the role's flags would leave
+#      the node's tailscale settings as they are.
+
+# --- 1. cs-agent pin --------------------------------------------------------
+# tasks/preflight.yml has already proved an agent >= the minimum is
+# installed (node_upgrade_cs_agent_version). dpkg's comparison, for the same
+# epoch/`~` reasons as there.
+- name: Compare the installed cs-agent with its pin
+  ansible.builtin.command:
+    argv: [dpkg, --compare-versions, "{{ node_upgrade_cs_agent_version }}", gt, "{{ cs_agent_apt_version }}"]
+  register: node_upgrade_cs_agent_pin_cmp
+  changed_when: false
+  failed_when: node_upgrade_cs_agent_pin_cmp.rc not in [0, 1]
+  check_mode: false
+
+- name: Gate - the cs-agent pin must not be a downgrade
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_cs_agent_pin_cmp.rc == 1
+    fail_msg: >-
+      cs-agent {{ node_upgrade_cs_agent_version }} is installed on {{ inventory_hostname }}, and
+      versions.yml pins cs_agent_apt_version {{ cs_agent_apt_version }} -- a downgrade.
+      maintain-nodes never downgrades a live node's agent. Raise the pin to at least
+      the installed version (and check it with `make check-pins`). Nothing was changed.
+    quiet: true
+
+# --- 2. agent.yml immutable keys --------------------------------------------
+- name: Check the converge keeps agent.yml's immutable keys
+  ansible.builtin.include_role:
+    name: cs_agent
+    tasks_from: immutable_check
+
+# --- 3. tailscale ---------------------------------------------------------
+# The membership predicate, in its one spelling (docs/contracts.md §Facts
+# exception). `debug prefs` is read-only; its output is not logged (it is the
+# node's whole tailscale configuration), and the comparison yields only the
+# names of what differs.
+- name: Check tailscale would keep the node's settings
+  when:
+    - ((tailscale_authkey | default('')) | length > 0)
+      and (tailscale_enabled | default(true) | bool)
+  block:
+    - name: Read the node's tailscale settings
+      ansible.builtin.command:
+        argv: [tailscale, debug, prefs]
+      register: node_upgrade_tailscale_prefs
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Compare them with the flags roles/tailscale passes to tailscale up
+      ansible.builtin.set_fact:
+        node_upgrade_tailscale_problems: >-
+          {{ node_upgrade_tailscale_prefs.stdout | default('')
+             | node_upgrade_tailscale_prefs_problems(node_upgrade_tailscale_up_args,
+                                                     tailscale_tags | default([])) }}
+      no_log: true
+
+    - name: Gate - tailscale up must not change the node's tailscale settings
+      ansible.builtin.assert:
+        that:
+          - node_upgrade_tailscale_problems | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} is a tailnet member in the inventory, but `tailscale up`
+          with roles/tailscale's flags ({{ node_upgrade_tailscale_up_args | trim }})
+          would not leave it as it is:
+          {{ node_upgrade_tailscale_problems | join('; ') }}.
+          A node joined by hand has no state file of the tailscale collection, so the
+          converge would run `tailscale up`, which then fails ("requires mentioning all
+          non-default flags") or changes the setting. Make `tailscale_extra_args` (and
+          `tailscale_tags`) describe the node exactly -- `tailscale debug prefs` on the
+          node shows its settings -- and re-run. No hold was taken; nothing was changed.
+        quiet: true

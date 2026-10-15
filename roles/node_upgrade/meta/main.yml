@@ -7,8 +7,11 @@ galaxy_info:
     window: hold the node through cs-agent, record and stop the running tenant
     containers, upgrade the pinned docker packages (and the OS), reboot if
     required, start exactly what was running, release the hold. Resumable
-    from a per-node state file. Also provides tasks_from: detect_live, the
-    "is this node live" probe the site.yml guards share.
+    from a per-node state file. tasks_from: maintain converges a live node
+    inside the same kind of hold (playbooks/maintain-nodes.yml), stopping
+    containers only when dockerd must restart or the node reboot. Also
+    provides tasks_from: detect_live, the "is this node live" probe the
+    site.yml guards share.
   license: MIT
   min_ansible_version: "2.19"
   platforms:

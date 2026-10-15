@@ -1,0 +1,38 @@
+---
+# The `converged` phase of tasks/maintain_cycle.yml, inside the hold: the
+# converge with the tenant containers running, every handler it notified,
+# the wait for cs-agent, and the decision -- written into state.json with the
+# phase (R2), so a resumed run acts on this record and never re-decides from
+# what a later converge reports as changed.
+
+# From here on the node may change, so a failure no longer releases
+# the hold by itself.
+- name: Note that the converge has started
+  ansible.builtin.set_fact:
+    node_upgrade_state: "{{ node_upgrade_state | combine({'converge_started': true}) }}"
+
+- name: Write the maintenance state
+  ansible.builtin.include_tasks: state_save.yml
+
+- name: Converge the node-side roles, containers running
+  ansible.builtin.include_tasks: maintain_converge.yml
+
+# Every handler the converge notified runs NOW, inside the hold: the
+# cs-agent restart, the firewall re-apply, cadvisor/fluentd, sysctl,
+# networkd. docker_tls' restart only records its reason
+# (docker_tls_restart_deferred).
+- name: Run the converge handlers inside the hold
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for cs-agent
+  ansible.builtin.include_tasks: agent_wait.yml
+
+- name: Gather the decision's inputs
+  ansible.builtin.include_tasks: maintain_decide.yml
+
+- name: Record the converge and the decision
+  ansible.builtin.include_tasks: state_phase.yml
+  vars:
+    node_upgrade_phase: converged
+    node_upgrade_state_update:
+      decision: "{{ node_upgrade_maintain_decision }}"

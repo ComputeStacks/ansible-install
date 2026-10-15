@@ -84,3 +84,37 @@ node_upgrade_force: false
 # Seconds to wait after a node is released, before the next node starts, so
 # the controller's HealthCheck has run against it.
 node_upgrade_node_settle: 60
+
+# --- which playbook ---------------------------------------------------------
+# Recorded in state.json (`playbook`). upgrade-docker.yml and
+# maintain-nodes.yml share the state file and these steps but not their order,
+# so each refuses to resume the other's unfinished run (tasks/state_load.yml).
+# maintain-nodes.yml sets `maintain-nodes`; nothing else should set it.
+node_upgrade_playbook: upgrade-docker
+
+# --- maintain-nodes (tasks/maintain.yml) ---------------------------------
+# README.md, "maintain-nodes", has the flow. None of these is read by
+# upgrade-docker.yml.
+
+# Stop the tenant containers (and so apply the pending OS updates, and reboot
+# if they ask for it) even when nothing else requires it. The operator-facing
+# name is `maintain_force_restart` (`-e maintain_force_restart=true`).
+node_upgrade_maintain_force_restart: "{{ maintain_force_restart | default(false) }}"
+
+# Seconds to wait, after the converge's handlers ran, for cs-agent to be
+# active again with the hold still in place (`maintenance status --json`:
+# `agent_active` and `local`). An exit 3 (control.db busy while the agent
+# starts) is retried inside the same window.
+node_upgrade_agent_wait: 300
+node_upgrade_agent_wait_interval: 5
+
+# The flags roles/tailscale passes to `tailscale up`, for the comparison with
+# the node's `tailscale debug prefs` (tasks/maintain_preflight.yml). That
+# role's defaults are not in scope here, so this repeats its composition of
+# `tailscale_up_args` (roles/tailscale/defaults/main.yml) from the same
+# inventory inputs; an inventory that sets tailscale_up_args itself is read
+# as is. tests/maintain_nodes.yml fails if the two spellings drift apart.
+node_upgrade_tailscale_up_args: >-
+  {{ tailscale_up_args
+     | default('--accept-dns=' ~ (tailscale_accept_dns | default(false) | bool | lower)
+               ~ ' ' ~ (tailscale_extra_args | default(''))) }}

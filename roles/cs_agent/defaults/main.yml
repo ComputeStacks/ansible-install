@@ -17,6 +17,12 @@ cs_agent_apt_component: main
 # versions wrote <name>.list, which tasks/install.yml removes.
 cs_agent_apt_sources_filename: computestacks
 
+# Whether the pinned install may move the agent to an OLDER version than the
+# one installed. true keeps a converge convergent with versions.yml in both
+# directions; playbooks/maintain-nodes.yml sets false (never downgrade a live
+# node's agent).
+cs_agent_allow_downgrade: true
+
 # --- paths -----------------------------------------------------------------
 # /etc/computestacks is the ONLY host directory bind-mounted into the borg
 # container, so the borg ssh key has to live under it (docs/contracts.md).

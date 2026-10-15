@@ -1,0 +1,21 @@
+---
+# The files dockerd reads only when it STARTS that this role writes: the
+# daemon certificate, its CA and key, and the ExecStart drop-in. One spelling
+# of the list, from this role's own defaults, for
+# playbooks/maintain-nodes.yml: a file here modified after dockerd last
+# started means dockerd is still running without it, so a restart is due --
+# whichever run wrote it, and even if that run died before recording so.
+#
+#   - ansible.builtin.include_role:
+#       name: docker_tls
+#       tasks_from: restart_files
+#
+# Pure: sets docker_tls_restart_files and nothing else.
+
+- name: List the files dockerd only reads when it starts
+  ansible.builtin.set_fact:
+    docker_tls_restart_files:
+      - "{{ docker_tls_cert_file }}"
+      - "{{ docker_tls_ca_file }}"
+      - "{{ docker_tls_key_file }}"
+      - "{{ docker_tls_dropin_path }}"

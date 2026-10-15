@@ -1,0 +1,154 @@
+---
+# The real maintain-nodes run for one node. Each step runs only while its
+# phase is missing from state.json's phases_done, so a re-run resumes:
+#
+#   download   apt-get update + --download-only, containers running, no hold
+#   hold       `cs-agent maintenance on --wait` (fresh run only)      -> held
+#              state.json then records `converge_started`
+#   converge   tasks/maintain_converge.yml, tenants RUNNING; handlers flushed
+#              inside the hold; cs-agent awaited; decision taken     -> converged
+#              (the decision and its inputs are written with the phase: R2)
+#   only when the decision says stop:
+#     record / stop / packages (OS updates + docker pins)          -> recorded,
+#     docker restart (when required) / reboot (when required)         stopped,
+#     services / start -- the upgrade-docker steps, unchanged         packages,
+#                                                                     docker_restarted,
+#                                                                     rebooted, started
+#   release    handlers flushed again (nothing may fire after `off`),
+#              `maintenance off`, controller confirmation             -> released
+#   archive, settle
+#
+# A failure lands in `rescue`. If it came after this run's hold and before
+# the converge's first task, nothing was changed or stopped, and the hold is
+# released automatically (R5). Otherwise the node stays held and the message
+# (templates/maintain_failed.j2) says what state it is in and what to do.
+
+- name: Maintain the node
+  block:
+    - name: Download everything a stopped window could need, containers still running
+      ansible.builtin.include_tasks: download.yml
+      when: "'packages' not in node_upgrade_phases_done"
+
+    - name: Hold the node
+      ansible.builtin.include_tasks: hold.yml
+
+    # An include with its own `when`, NOT a block: a block's `when` is
+    # re-evaluated for every task inside it, included ones too, and marking
+    # `converged` would skip the very write that records it.
+    - name: Converge inside the hold
+      ansible.builtin.include_tasks: maintain_converge_phase.yml
+      when: "'converged' not in node_upgrade_phases_done"
+
+    - name: Use the decision the interrupted run recorded
+      ansible.builtin.set_fact:
+        node_upgrade_maintain_decision: "{{ node_upgrade_state.decision }}"
+        node_upgrade_maintain_from_state: true
+      when: node_upgrade_maintain_decision is not defined
+
+    - name: List the pending OS updates
+      ansible.builtin.include_tasks: maintain_os_updates.yml
+
+    - name: Report the decision
+      ansible.builtin.include_tasks: maintain_report.yml
+
+    - name: Restart in a stopped window
+      when: node_upgrade_maintain_decision.stop | bool
+      block:
+        - name: Record the running containers
+          ansible.builtin.include_tasks: record.yml
+          when: "'recorded' not in node_upgrade_phases_done"
+
+        - name: Stop the recorded containers
+          ansible.builtin.include_tasks: stop.yml
+          when:
+            - "'stopped' not in node_upgrade_phases_done"
+            - "'packages' not in node_upgrade_phases_done"
+            - "'started' not in node_upgrade_phases_done"
+
+        - name: Apply the OS updates and the docker pins
+          ansible.builtin.include_tasks: packages.yml
+          when: "'packages' not in node_upgrade_phases_done"
+
+        - name: Restart docker if the converge required it
+          ansible.builtin.include_tasks: docker_restart.yml
+          when:
+            - node_upgrade_maintain_decision.docker_restart_required | bool
+            - "'docker_restarted' not in node_upgrade_phases_done"
+            - "'started' not in node_upgrade_phases_done"
+
+        - name: Reboot if required
+          ansible.builtin.include_tasks: reboot.yml
+          when: "'rebooted' not in node_upgrade_phases_done"
+
+        - name: Wait for the node's services
+          ansible.builtin.include_tasks: services.yml
+          when: "'started' not in node_upgrade_phases_done"
+
+        - name: Start the recorded containers
+          ansible.builtin.include_tasks: start.yml
+          when: "'started' not in node_upgrade_phases_done"
+
+    # Nothing is notified after the converge, so this is a no-op -- and the
+    # guarantee that no handler can run after `cs-agent maintenance off`.
+    - name: Run any handler still pending, inside the hold
+      ansible.builtin.meta: flush_handlers
+
+    - name: Release the node
+      ansible.builtin.include_tasks: release.yml
+      when: "'released' not in node_upgrade_phases_done"
+
+    - name: Archive the maintenance state
+      ansible.builtin.include_tasks: archive.yml
+
+    - name: Let the controller see the node before the next one
+      ansible.builtin.pause:
+        seconds: "{{ node_upgrade_node_settle | int }}"
+      when: node_upgrade_node_settle | int > 0
+
+  rescue:
+    - name: Look for the maintenance state
+      ansible.builtin.stat:
+        path: "{{ node_upgrade_state_file }}"
+      register: node_upgrade_rescue_state
+
+    # R5: this run placed the hold (state.json exists, written right after
+    # `on --wait` succeeded) and failed before the converge's first task:
+    # nothing on the node changed and nothing was stopped.
+    - name: Decide whether the hold can be released automatically
+      ansible.builtin.set_fact:
+        node_upgrade_rescue_release: >-
+          {{ node_upgrade_rescue_state.stat.exists
+             and not (node_upgrade_state.converge_started | default(false) | bool)
+             and not (node_upgrade_state.releasing | default(false) | bool)
+             and (node_upgrade_phases_done | difference(['held']) | length) == 0 }}
+
+    - name: Release the hold this run placed (nothing was changed)
+      ansible.builtin.command:
+        argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, "off", --json]
+      register: node_upgrade_rescue_off
+      changed_when: true
+      failed_when: false
+      when: node_upgrade_rescue_release | bool
+
+    - name: Note whether the automatic release worked
+      ansible.builtin.set_fact:
+        node_upgrade_rescue_released: >-
+          {{ (node_upgrade_rescue_release | bool)
+             and node_upgrade_rescue_off.rc | default(1) == 0
+             and (node_upgrade_rescue_off.stdout | default('') | node_upgrade_cli_json).shape == 'status' }}
+
+    # Out of the way, so a re-run starts fresh instead of reading the missing
+    # hold as an external removal.
+    - name: Set the state of the released run aside
+      ansible.builtin.command:
+        argv:
+          - mv
+          - --
+          - "{{ node_upgrade_state_file }}"
+          - "{{ node_upgrade_state_dir }}/state.aborted.{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}.json"
+        removes: "{{ node_upgrade_state_file }}"
+      when: node_upgrade_rescue_released | bool
+
+    - name: Report the failure and the node's state
+      ansible.builtin.fail:
+        msg: "{{ lookup('ansible.builtin.template', 'maintain_failed.j2') | regex_replace('\\s+', ' ') | trim }}"

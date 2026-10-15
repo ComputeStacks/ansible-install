@@ -200,8 +200,9 @@
 
 # The node_upgrade entry points. `detect_live` is the live-node probe that
 # site.yml's and add-region.yml's docker plays and roles/common's reboot step
-# include; `preflight` is upgrade-docker.yml's fleet-wide first pass; `select`
-# and `classify_on` are the pure rules tests/node_upgrade_select.yml drives.
+# include; `preflight` is upgrade-docker.yml's (and maintain-nodes.yml's)
+# fleet-wide first pass; `select` and `classify_on` are the pure rules
+# tests/node_upgrade_select.yml drives.
 - name: Node upgrade task-file entry points
   hosts: nodes
   gather_facts: false
@@ -225,6 +226,29 @@
       ansible.builtin.include_role:
         name: node_upgrade
         tasks_from: classify_on
+
+    # playbooks/maintain-nodes.yml's two entry points: its fleet-wide
+    # converge preflight, and the per-node maintain run.
+    - name: Run the maintain-nodes converge preflight
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: maintain_preflight
+
+    - name: Maintain a node
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: maintain
+
+    # Included by node_upgrade's maintain preflight and decision.
+    - name: Check the converge keeps agent.yml's immutable keys
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: immutable_check
+
+    - name: List the files dockerd only reads when it starts
+      ansible.builtin.include_role:
+        name: docker_tls
+        tasks_from: restart_files
 
 # The node_storage entry points. `probe` (read-only) and `classify` (pure) are
 # what preflight, validate and upgrade-docker.yml include to check the data

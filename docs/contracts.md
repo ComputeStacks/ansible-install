@@ -59,9 +59,11 @@ hosts and backup hosts; unset everywhere means the single site called
    bump does NOT roll there on a re-run of `site.yml` or `add-region.yml` —
    those skip docker's packages on that node and warn — and a pending reboot
    is not taken there either. Both roll through `make upgrade-docker
-   ENV=<env>` (`playbooks/upgrade-docker.yml`) in a maintenance window,
-   because restarting dockerd or rebooting stops tenant containers that have
-   no restart policy. A node that is not live, and every other host, still
+   ENV=<env>` (`playbooks/upgrade-docker.yml`) or `make maintain-nodes
+   ENV=<env>` (`playbooks/maintain-nodes.yml`, which also converges the
+   node-side roles, §Live-node converge) in a maintenance window, because
+   restarting dockerd or rebooting stops tenant containers that have no
+   restart policy. A node that is not live, and every other host, still
    converges on re-run.
 4. **Every version pinned** in `playbooks/group_vars/all/versions.yml`. No
    `latest`, `stable` or `main` tags. A bump notes the date and source it was
@@ -424,7 +426,19 @@ spelling:
       and (tailscale_enabled | default(true) | bool)
       and not (tailscale_access_only | default(false) | bool)
 
-(`hostvars[h].` in front of each term for another host.) Membership gates
+(`hostvars[h].` in front of each term for another host.)
+
+Tailnet members that `maintain-nodes.yml` maintains are access-only
+(`tailscale_access_only: true`): a live node's control plane stays on its
+`primary_ip`, so neither a tailnet outage nor a re-join moves the addresses
+the controller and the containers dial. Flipping the routing predicate on a
+live node changes `metadata.listen_addr`, which the maintain run refuses
+(§Live-node converge); it also compares `tailscale debug prefs` with the
+role's `tailscale up` flags before the hold and refuses on any difference, so
+a node joined by hand must have its flags described in
+`tailscale_extra_args` / `tailscale_tags` first.
+
+Membership gates
 the `tailscale` role, the firewall's anti-spoof rules and its UDP 41641
 accept, and preflight's opt-out warning; routing gates everything that picks
 an address or a `tailscale0` accept: the manifest's `node.agent_host` and
@@ -432,6 +446,37 @@ an address or a `tailscale0` accept: the manifest's `node.agent_host` and
 accepts, the agent's `metadata.listen_addr`, and validate's probes. The
 variable has no role default — it must read the same from every host's
 `hostvars`, so it is always spelled with `| default(false)`.
+
+### Live-node converge (`maintain-nodes.yml`)
+
+`playbooks/maintain-nodes.yml` runs the node-side roles on LIVE nodes, with
+their tenant containers running, inside a cs-agent maintenance hold the run
+places and releases (roles/node_upgrade/README.md, "maintain-nodes"). Every
+role it includes keeps these rules, and `tests/maintain_nodes.yml` checks the
+first three statically:
+
+* **No dockerd restart from a handler.** A handler that restarts or stops
+  dockerd carries `when: not (docker_tls_restart_deferred | bool)` and has a
+  sibling that records the reason instead (`docker_tls` is the pattern). The
+  maintenance cycle restarts dockerd itself, only with the recorded
+  containers stopped. A reload (SIGHUP, `docker_config`) is not a restart.
+* **Handlers stay inside the hold.** The cycle flushes them after the
+  converge, before it waits for the agent and decides, and again before
+  `cs-agent maintenance off`; no task after the converge notifies one.
+* **No reboot outside the cycle.** `roles/common` is included with
+  `common_allow_reboot: false`.
+* **agent.yml's immutable keys never change on a live node** —
+  `store.data_dir`, `metadata.admin_token_hash`, `metadata.listen_addr`,
+  `backups.key`, `backups.borg.ssh.{user, host, port, host_path}`. The run
+  compares the render with the node's file (digests, no values) and refuses
+  before the hold (`roles/cs_agent` `tasks_from: immutable_check`).
+* **The converge reaches only the controller and the node's backup host off
+  the node** (plus the tailnet, Ubuntu Pro, registries and mirrors a node
+  converge always reaches); the playbook refuses a `--limit` that drops
+  either of those two, rather than skipping or failing on them inside the
+  hold.
+* **No OS upgrade with tenants running.** Roles install at `present` (or a
+  pin); pending OS updates are applied only in a stopped window.
 
 ### Container network placement
 

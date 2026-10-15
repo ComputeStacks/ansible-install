@@ -90,7 +90,11 @@
   ansible.builtin.apt:
     name: "{{ cs_agent_package }}={{ cs_agent_apt_version }}"
     state: present
-    allow_downgrade: true
+    # true by default, so a pin moved back in versions.yml rolls back on a
+    # site.yml re-run. playbooks/maintain-nodes.yml sets it false: a live
+    # node's agent is never downgraded, and its preflight refuses a pin below
+    # what is installed before anything is held (README.md).
+    allow_downgrade: "{{ cs_agent_allow_downgrade | bool }}"
     update_cache: true
   notify: Restart cs-agent
 

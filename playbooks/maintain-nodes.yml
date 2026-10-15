@@ -1,0 +1,224 @@
+---
+# Converge LIVE nodes, one at a time, each inside a cs-agent maintenance hold.
+# CUSTOMER-IMPACTING: every node it touches goes into maintenance (the
+# controller stops placing, health-checking and recovering on it, and
+# customer power actions are refused) for the length of its run. Tenant
+# containers are stopped -- and started again -- ONLY when the node needs
+# dockerd restarted or a reboot:
+#
+#   * docker drifts from its pins in versions.yml;
+#   * the converge changed what dockerd only reads at start (docker_tls'
+#     certificate or ExecStart drop-in);
+#   * /var/run/reboot-required already exists;
+#   * -e maintain_force_restart=true.
+#
+# Pending OS updates are never a reason on their own; they are applied only
+# inside a stopped window that happens anyway. Run it in a scheduled window.
+#
+#   make maintain-nodes ENV=<env>                            (every node)
+#   make maintain-nodes ENV=<env> ARGS='--check --diff'      (preview, no hold)
+#   make maintain-nodes ENV=<env> LIMIT='<node>:controller:<its backup host>'
+#
+# Per node (roles/node_upgrade/README.md, "maintain-nodes", has the full
+# account; docs/maintain-nodes.md the operator's view): preflight; hold
+# (`cs-agent maintenance on --wait`); converge the node-side roles with the
+# containers RUNNING (common, node_exporter, tailscale, ubuntu_pro,
+# docker_config, docker_tls, node_kernel, haproxy, node_observability,
+# firewall, cs_agent -- cs-agent is upgraded inside the hold); run every
+# handler inside the hold; wait for the agent; decide; only if needed record
+# / stop / packages / docker restart / reboot / start; release; validate the
+# node; settle 60s; next node.
+#
+# THE FIRST FAILURE STOPS THE RUN and leaves the node as the message says. A
+# node part-way through keeps its state in
+# /var/lib/computestacks/upgrade/state.json, and re-running resumes it.
+# upgrade-docker.yml shares that file and refuses to resume a maintain run
+# (and vice versa).
+#
+# --check --diff previews every node with NO hold: the preflight, the
+# converge's diffs, and "would stop containers: yes/no because ...".
+#
+# Scope: `nodes` minus every `existing_env` (v1-built) host. Off the nodes,
+# the converge reads the CONTROLLER (the agent token hash; docker_tls'
+# vault) and may write one authorized_keys entry on the node's BACKUP host
+# (README.md lists every off-node write). So those hosts must be in the run:
+# a LIMIT that leaves them out is REFUSED, not silently narrowed -- the first
+# play says which to add.
+
+# Pure inventory: which nodes this run maintains, and which shared hosts the
+# converge reaches for them. No connection is made here.
+- name: Select the nodes this playbook maintains
+  hosts: nodes:controller:backup
+  gather_facts: false
+  tasks:
+    - name: Group the provisioner-built nodes
+      ansible.builtin.group_by:
+        key: maintain_node_targets
+      when:
+        - "'nodes' in group_names"
+        - not (existing_env | default(false) | bool)
+      changed_when: false
+
+    # cs_site_backup_hosts references hostvars, so it is read on the node
+    # itself (docs/contracts.md rule 10); the result is a plain fact the
+    # run_once tasks below may read across hosts.
+    - name: Note each node's backup host
+      ansible.builtin.set_fact:
+        maintain_backup_host: "{{ cs_site_backup_hosts.get(cs_site, '') }}"
+      when:
+        - "'nodes' in group_names"
+        - not (existing_env | default(false) | bool)
+
+    - name: Work out the shared hosts the converge reaches
+      ansible.builtin.set_fact:
+        maintain_shared_hosts: >-
+          {{ ((groups['controller'] | default([]))[:1]
+              + (groups['maintain_node_targets'] | default([])
+                 | map('extract', hostvars, 'maintain_backup_host')
+                 | select | list))
+             | unique | sort }}
+      run_once: true
+
+    - name: Refuse a run that leaves out a shared host the converge needs
+      ansible.builtin.assert:
+        that:
+          - maintain_missing | length == 0
+        fail_msg: >-
+          The converge of these nodes reaches {{ maintain_missing | join(', ') }}, which
+          this run does not include (a LIMIT that left them out). maintain-nodes reads the
+          controller (each node's agent token hash, and its vault when a docker
+          certificate is due) and adds the node's borg key to its site's backup host,
+          and it refuses rather than skip that or fail on it inside a maintenance hold.
+          Add them to LIMIT, e.g. LIMIT='{{ (groups['maintain_node_targets'] | default(['<node>']) | first) }}:{{ maintain_shared_hosts | join(':') }}'.
+          Nothing was changed.
+        quiet: true
+      vars:
+        maintain_missing: >-
+          {{ (groups['maintain_node_targets'] | default([]) | length > 0)
+             | ternary(maintain_shared_hosts | difference(ansible_play_hosts_all), []) }}
+      run_once: true
+
+    - name: Group the shared hosts the converge reaches
+      ansible.builtin.group_by:
+        key: maintain_shared_targets
+      when:
+        - (groups['maintain_node_targets'] | default([])) | length > 0
+        - inventory_hostname in hostvars[ansible_play_hosts_all | first].maintain_shared_hosts
+      changed_when: false
+
+# Before anything gathers facts: ansible drops an unreachable host and
+# carries on without it, so this fails the run instead, naming every host
+# that did not answer (roles/preflight/README.md).
+- name: Every targeted host is reachable
+  hosts: maintain_node_targets:maintain_shared_targets
+  gather_facts: false
+  tasks:
+    - name: Check every targeted host answers over ssh
+      ansible.builtin.import_role:
+        name: preflight
+        tasks_from: reachable
+      tags: [always]
+
+# The inventory preflight, on the nodes and the shared hosts alike, as
+# site.yml runs it, minus what this playbook does not touch: the load
+# balancer DNS and the controller image are not checked, and the node data
+# disk is checked by the next play the way upgrade-docker.yml checks it
+# (`ready`, or refuse). The registry logins ARE verified: docker_config logs
+# in again during the converge, inside the hold.
+- name: Preflight validation
+  hosts: maintain_node_targets:maintain_shared_targets
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    preflight_check_app_domain_dns: false
+    preflight_check_node_storage: false
+    preflight_verify_controller_image: false
+  roles:
+    - preflight
+  tasks:
+    - name: Run the attach-mode inventory checks
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: attach
+      when: hostvars[groups['controller'] | first].existing_env | default(false) | bool
+
+# Every targeted node, in parallel, before any of them is held: storage, the
+# agent, the pins, the agent.yml immutable keys, tailscale.
+- name: Preflight every targeted node
+  hosts: maintain_node_targets
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  vars:
+    node_upgrade_playbook: maintain-nodes
+    node_upgrade_reason: maintain-nodes
+  tasks:
+    - name: Probe and classify the container data disk
+      vars:
+        node_storage_classify_fail: false
+      block:
+        - name: Probe the container data disk
+          ansible.builtin.include_role:
+            name: node_storage
+            tasks_from: probe
+
+        - name: Classify the container data disk
+          ansible.builtin.include_role:
+            name: node_storage
+            tasks_from: classify
+
+    - name: Assert every targeted node keeps docker and containerd on its data disk
+      ansible.builtin.assert:
+        that:
+          - (maintain_storage_not_ready | length) == 0
+        fail_msg: >-
+          {{ maintain_storage_not_ready | length }} node(s) do not keep docker and
+          containerd on a data disk:
+          {% for n in maintain_storage_not_ready %}{{ n }}
+          ({{ hostvars[n].node_storage_state | default('not probed') }}{{ ': ' ~ hostvars[n].node_storage_reason
+             if hostvars[n].node_storage_reason | default('') | length > 0 else '' }}){{ '; ' if not loop.last else '' }}{% endfor %}.
+          maintain-nodes never sets up a data disk under a live node. Nothing was
+          changed on any node.
+        success_msg: "every targeted node keeps docker and containerd on its data disk"
+      vars:
+        maintain_storage_not_ready: >-
+          {{ groups['maintain_node_targets'] | default([])
+             | reject('in', groups['maintain_node_targets'] | default([])
+                            | map('extract', hostvars)
+                            | selectattr('node_storage_state', 'defined')
+                            | selectattr('node_storage_state', 'equalto', 'ready')
+                            | map(attribute='inventory_hostname') | list)
+             | list | sort }}
+      run_once: true
+
+    - name: Preflight checks
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: preflight
+
+    - name: Preflight the converge
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: maintain_preflight
+
+# One node at a time: maintain, then validate, before the next node starts.
+# docker_tls_restart_deferred is a PLAY var so that docker_tls' handlers see
+# it: a certificate or drop-in change records "docker restart required"
+# instead of restarting dockerd under the tenants.
+- name: Maintain the nodes, one at a time
+  hosts: maintain_node_targets
+  serial: 1
+  any_errors_fatal: true
+  max_fail_percentage: 0
+  vars:
+    node_upgrade_playbook: maintain-nodes
+    node_upgrade_reason: maintain-nodes
+    docker_tls_restart_deferred: true
+  tasks:
+    - name: Maintain the node
+      ansible.builtin.include_role:
+        name: node_upgrade
+        tasks_from: maintain
+
+    - name: Validate the node
+      ansible.builtin.include_role:
+        name: validate

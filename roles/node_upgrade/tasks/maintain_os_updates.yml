@@ -1,0 +1,26 @@
+---
+# List the pending OS updates, for the report only: they are never a reason
+# to stop (R3), and they are applied only inside a stopped window
+# (tasks/packages.yml). A simulation (`-s`): it reads apt's lists as they are
+# on the node -- after tasks/download.yml's `apt-get update` in a real run,
+# as last updated by unattended-upgrades in --check -- takes no lock and
+# changes nothing.
+#
+# Sets: node_upgrade_os_updates  {count, packages, reboot_packages, reboot_hint}
+
+- name: Simulate the OS upgrade
+  ansible.builtin.command:
+    argv: [apt-get, -s, -o, "Debug::NoLocking=1", upgrade, --with-new-pkgs]
+  environment:
+    LC_ALL: C
+  register: node_upgrade_os_sim
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Note the pending OS updates
+  ansible.builtin.set_fact:
+    node_upgrade_os_updates: >-
+      {{ (node_upgrade_os_sim.stdout | node_upgrade_parse_apt_sim)
+         if node_upgrade_os_sim.rc == 0
+         else {'count': -1, 'packages': [], 'reboot_packages': [], 'reboot_hint': false} }}

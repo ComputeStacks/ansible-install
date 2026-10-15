@@ -1,0 +1,23 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following NEW packages will be installed:
+  linux-image-6.20.0-11-generic linux-modules-6.20.0-11-generic
+The following packages have been kept back:
+  containerd.io docker-ce
+The following packages will be upgraded:
+  libc6 libc-bin openssl
+3 upgraded, 2 newly installed, 0 to remove and 2 not upgraded.
+Inst libc6 [2.43-2ubuntu1] (2.43-2ubuntu2 Ubuntu:26.04/resolute-updates [amd64])
+Inst libc-bin [2.43-2ubuntu1] (2.43-2ubuntu2 Ubuntu:26.04/resolute-updates [amd64])
+Inst openssl [3.5.1-1ubuntu1] (3.5.1-1ubuntu2 Ubuntu:26.04/resolute-security [amd64])
+Inst linux-modules-6.20.0-11-generic (6.20.0-11.11 Ubuntu:26.04/resolute-updates [amd64])
+Inst linux-image-6.20.0-11-generic (6.20.0-11.11 Ubuntu:26.04/resolute-updates [amd64])
+Conf libc6 (2.43-2ubuntu2 Ubuntu:26.04/resolute-updates [amd64])
+Conf libc-bin (2.43-2ubuntu2 Ubuntu:26.04/resolute-updates [amd64])
+Conf openssl (3.5.1-1ubuntu2 Ubuntu:26.04/resolute-security [amd64])

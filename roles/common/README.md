@@ -9,6 +9,7 @@ root's SSH directory. Sole owner of `/etc/update-motd.d/50-computestacks`
 | --- | --- | --- |
 | `site.yml` | "Base system" | `all` |
 | `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; never runs on an existing shared host, and
@@ -32,6 +33,10 @@ itself when a node has a reboot pending.
   window by `make upgrade-docker ENV=<env>`, which reboots when one is
   required. A node with no tenants yet (a first build) and every non-node
   host reboot as before.
+- Never reboots in `maintain-nodes.yml` either: that playbook includes the
+  role with `common_allow_reboot: false`, because its maintenance cycle owns
+  the reboot (taken only with the tenant containers recorded and stopped).
+  A pending reboot found there is one of its reasons to stop and reboot.
 - Hardens sshd: `PasswordAuthentication no` (restarts `ssh` on change).
 - Ensures `chrony` is installed, enabled, and running.
 - Installs and enables `unattended-upgrades` (periodic + unattended apt

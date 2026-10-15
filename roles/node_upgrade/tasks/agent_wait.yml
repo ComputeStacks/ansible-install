@@ -1,0 +1,56 @@
+---
+# After the converge's handlers ran -- the cs-agent package install and its
+# restart among them -- wait until the agent is active again and the hold
+# this run placed is still in place, before anything else is decided. The
+# hold lives in control.db and survives the restart; a restarted agent comes
+# up paused. Read through `cs-agent maintenance status --json` (filter
+# node_upgrade_agent_status has the rules):
+#
+#   ready           agent_active and a local hold      -> carry on
+#   agent_inactive  the service is still starting       -> keep polling
+#   unavailable     exit 3, control.db busy             -> keep polling
+#   no_output       the binary is being replaced        -> keep polling
+#   unheld          NO local hold                       -> stop at once
+#   error           any other error document            -> stop at once
+#
+# `controller_acked` is not read: right after a restart it can read false on
+# a node that is still held.
+
+- name: Wait for cs-agent to be back with the hold in place
+  ansible.builtin.command:
+    argv: ["{{ node_upgrade_cs_agent_bin }}", maintenance, status, --json]
+  register: node_upgrade_agent_poll
+  changed_when: false
+  failed_when: false
+  retries: "{{ ((node_upgrade_agent_wait | int) / (node_upgrade_agent_wait_interval | int)) | round(0, 'ceil') | int }}"
+  delay: "{{ node_upgrade_agent_wait_interval | int }}"
+  until: (node_upgrade_agent_poll.stdout | default('') | node_upgrade_agent_status(node_upgrade_agent_poll.rc | default(none))).done
+  # Running out of retries marks the task failed whatever failed_when says;
+  # the gate below turns that into a message that says what state the node
+  # is in.
+  ignore_errors: true
+
+- name: Read the last status
+  ansible.builtin.set_fact:
+    node_upgrade_agent_verdict: >-
+      {{ node_upgrade_agent_poll.stdout | default('') | node_upgrade_agent_status(node_upgrade_agent_poll.rc | default(none)) }}
+
+- name: Gate - cs-agent must be back with the node still held
+  ansible.builtin.assert:
+    that:
+      - node_upgrade_agent_verdict.ready
+    fail_msg: >-
+      {% if node_upgrade_agent_verdict.state == 'unheld' %}THE MAINTENANCE HOLD ON {{ inventory_hostname }}
+      IS GONE after the converge (cs-agent maintenance status shows no local hold). Somebody ran
+      `cs-agent maintenance off`, or an admin override cleared it; the controller may be acting on
+      the node again. No container was stopped by this run. Check the node in the admin UI before
+      anything else; then either re-hold it (`cs-agent maintenance on --reason {{ node_upgrade_reason }}`)
+      and re-run to resume, or move {{ node_upgrade_state_file }} aside.
+      {%- else %}cs-agent on {{ inventory_hostname }} is not back after {{ node_upgrade_agent_wait }}s
+      (last status: {{ node_upgrade_agent_verdict.state }}{{ (', ' ~ node_upgrade_agent_verdict.error) if node_upgrade_agent_verdict.error else '' }};
+      rc {{ node_upgrade_agent_poll.rc | default('?') }}). The node IS HELD (the hold is in
+      control.db and outlives the agent) and no container was stopped. Look at
+      `systemctl status cs-agent` and `journalctl -u cs-agent` on the node, fix it, then re-run
+      this playbook for the node: it resumes inside the same hold. Do NOT run
+      `cs-agent maintenance off` while the agent is down.{% endif %}
+    quiet: true

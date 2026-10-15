@@ -1,0 +1,19 @@
+---
+# Managed by the provisioner. Placeholder values only.
+host:
+  iptables-cmd: "iptables"
+  ip6tables-cmd: "ip6tables"
+
+store:
+  data_dir: "/var/lib/cs-agent"
+
+metadata:
+  listen_addr: "10.100.0.21:8500"
+  admin_token_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+queue:
+  numworkers: 3
+
+backups:
+  enabled: true
+  key: "EXAMPLE-passphrase-not-real"

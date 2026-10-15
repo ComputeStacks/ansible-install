@@ -1,0 +1,67 @@
+{#- The re-raised failure of tasks/maintain_cycle.yml's block (maintain-nodes),
+    in the style of cycle_failed.j2. Says whether the node is held, whether its
+    containers run, and what to do. `cs-agent maintenance off` is suggested
+    only while no container has been stopped. -#}
+{%- set task = ansible_failed_task.name | default('') -%}
+{%- set res = ansible_failed_result | default({}) -%}
+{%- set why = res.msg | default('') | string -%}
+{%- if res.results is defined -%}
+{%- set why = why ~ ' ' ~ (res.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('defined') | unique | join('; ')) -%}
+{%- endif -%}
+{%- if res.stderr | default('') -%}
+{%- set why = why ~ ' -- ' ~ (res.stderr | string | trim)[-600:] -%}
+{%- endif -%}
+{%- set backup = cs_site_backup_hosts.get(cs_site, '') if cs_site_backup_hosts is defined else '' -%}
+{%- set rerun = 'make maintain-nodes ENV=<env> LIMIT=' ~ inventory_hostname ~ ':' ~ (groups['controller'] | first)
+                ~ ((':' ~ backup) if backup else '') -%}
+{%- set phases = node_upgrade_phases_done | default([]) -%}
+{%- if node_upgrade_rescue_released | default(false) | bool -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+The maintenance hold this run placed has been RELEASED automatically: it failed before the
+converge started, so nothing on the node was changed and no container was stopped. Its state
+was set aside as state.aborted.*.json in {{ node_upgrade_state_dir }}. Fix the cause, then re-run.
+{%- elif node_upgrade_rescue_release | default(false) | bool -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+Nothing on the node was changed and no container was stopped, but releasing the hold
+automatically failed ({{ (node_upgrade_rescue_off.stdout | default('') | node_upgrade_cli_json).doc.error
+| default(node_upgrade_rescue_off.stderr | default('') | trim, true) }}). The node IS HELD.
+Re-run `{{ rerun }}` (it resumes inside the hold), or clear it by hand with
+`cs-agent maintenance off` and move {{ node_upgrade_state_file }} aside.
+{%- elif task is search('Gate - ') -%}
+Stopped at "{{ task }}" on {{ inventory_hostname }}; its message above says what state the node is in and what to do.
+{%- if node_upgrade_rescue_state.stat.exists %} To resume: `{{ rerun }}`.{% endif %}
+{%- elif not node_upgrade_rescue_state.stat.exists -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+No maintenance state was written, so this run holds nothing and changed nothing on the node.
+Run `cs-agent maintenance status` on the node: if it shows a local hold with reason
+`{{ node_upgrade_reason }}` that this run placed, clear it with `cs-agent maintenance off`.
+Fix the cause, then re-run.
+{%- elif node_upgrade_state.releasing | default(false) -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+The node had already been RELEASED (`cs-agent maintenance off` ran). Re-run `{{ rerun }}`:
+it resumes at the release confirmation, archives {{ node_upgrade_state_file }} and moves on.
+{%- elif 'recorded' not in phases -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+NODE STATE: {{ inventory_hostname }} IS HELD in maintenance and its tenant containers are
+RUNNING -- nothing was stopped. {% if 'converged' in phases %}The converge finished (decision:
+{{ 'stop' if (node_upgrade_state.decision.stop | default(false)) else 'no stop' }}).{% else %}The
+converge started and may have changed the node's configuration part-way; a dockerd restart it
+needs, if any, has not happened yet.{% endif %}
+Fix the cause, then re-run `{{ rerun }}`: it resumes inside the same hold
+({{ 'and converges again' if 'converged' not in phases else 'from the recorded decision' }}).
+To abandon instead: `cs-agent maintenance off` on the node is safe for the tenants (nothing was
+stopped); then move {{ node_upgrade_state_file }} aside. A deferred docker restart is detected
+again by the next run (a docker_tls file newer than the running dockerd).
+{%- else -%}
+"{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
+NODE STATE: {{ inventory_hostname }} IS HELD in maintenance, part-way through its stopped
+window (phases done: {{ phases | join(', ') }}; state {{ node_upgrade_state_file }}).
+{% if 'started' in phases %}The containers recorded there have been started again.
+{% elif 'stopped' in phases %}The containers recorded there ARE STOPPED, and nothing
+will start them until this playbook does.
+{% else %}Some of the containers recorded there may already be stopped.
+{% endif %}
+Fix the cause, then re-run `{{ rerun }}`: it resumes from the last completed phase. Do NOT
+clear the hold with `cs-agent maintenance off` -- the controller would start recovering the
+node mid-window, and marks a container inactive after three failed starts in an hour.
+{%- endif -%}
