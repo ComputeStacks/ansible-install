@@ -155,7 +155,9 @@
       az. Set `public_ipv6` on the node to that address (roles/controller_seed
       adds it to the load balancer on the next run), add it on the controller
       by hand (admin UI, load balancer -> addresses, role public), or remove
-      the AAAA.
+      the AAAA. If the controller already marked the domain INVALID, have it
+      re-check from the admin UI (save the load balancer's domain, or deploy
+      it) once the address is listed: adding an address does not.
   when:
     - validate_lb_public_aaaa.rc == 0
     - validate_lb_public_aaaa_unknown | length > 0

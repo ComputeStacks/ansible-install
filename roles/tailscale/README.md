@@ -176,5 +176,13 @@ the consumers, not by this role).
   referenced and can be deleted. The collection's `tailscale up` idempotency
   state is the same file and hash as the standalone role's, so an already
   joined host is not re-authenticated (a spent one-off auth key stays safe).
+- **A host joined outside this role.** With no collection state file on the
+  host (`artis3n-tailscale/state` under the facts user's `XDG_STATE_HOME`,
+  usually `/root/.local/state`), the first converge runs `tailscale up` with this role's flags (`--accept-dns=false`
+  plus `tailscale_extra_args`). tailscale refuses an `up` that drops a
+  non-default setting the host was joined with ("requires mentioning all
+  non-default flags"), and the run fails. Run `tailscale debug prefs` on the
+  host first and make `tailscale_extra_args` carry every non-default
+  setting it shows (`--ssh`, `--advertise-tags=…`, and so on).
 - The collection role installs from `pkgs.tailscale.com` keyed on the Ubuntu
   codename; a brand-new Ubuntu release can briefly have no repo there.

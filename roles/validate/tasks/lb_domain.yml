@@ -167,6 +167,26 @@
     quiet: true
 
 - name: Assert this az's load balancer validated its domain
+  vars:
+    validate_lb_domain_has_ipv6: "{{ (public_ipv6 | default('', true) | string) | length > 0 }}"
+    # The seed adds public_ipv6 as a LoadBalancerAddr after its apply, but
+    # the apply's save already queued ValidateDomainWorker, which can resolve
+    # the apex first. Re-running the seed then saves nothing and re-checks
+    # nothing (roles/controller_seed README, "Load balancer public IPv6").
+    validate_lb_domain_ipv6_set: >-
+      This node sets public_ipv6 {{ public_ipv6 | default('') }}, which the
+      seed adds as a public address only AFTER its apply, while the
+      controller checks the domain as soon as the apply saves the load
+      balancer: it may have checked before the address existed, and
+      re-running the seed does not make it check again. Confirm
+      {{ public_ipv6 | default('') }} is listed under the load balancer's
+      addresses in the admin UI, then have the controller re-check the
+      domain from the admin UI (below). Any other AAAA on the apex must be
+      added there too, or removed.
+    validate_lb_domain_ipv6_unset: >-
+      Set the node's `public_ipv6` to the AAAA's address and re-run the seed
+      (roles/controller_seed adds it as a public address), then have the
+      controller re-check the domain (below); or remove the AAAA.
   ansible.builtin.assert:
     that:
       - validate_lb_domain_fields[2] == 'yes'
@@ -189,11 +209,8 @@
       and AAAA record on '{{ validate_lb_domain_fields[1] }}': each must be
       this load balancer's public_ip, a node's public_ip, or one of its
       `public` (or `proxy`) addresses on the controller (admin UI, load
-      balancer -> addresses). An IPv6 apex is the usual culprit: set the
-      node's `public_ipv6` to the AAAA's address and re-run the seed
-      (roles/controller_seed adds it as a public address), or remove the
-      AAAA.{{ ' This node sets public_ipv6 ' ~ public_ipv6 ~ ', so any other AAAA there is the one to look at.'
-      if (public_ipv6 | default('', true) | string) | length > 0 else '' }}
+      balancer -> addresses). An IPv6 apex is the usual culprit.
+      {{ validate_lb_domain_ipv6_set if validate_lb_domain_has_ipv6 else validate_lb_domain_ipv6_unset }}
       Read the load balancer's event log in the admin UI for which one fired,
       fix the zone or the addresses, have the controller check again (it
       re-checks when the load balancer's domain is saved or it is deployed

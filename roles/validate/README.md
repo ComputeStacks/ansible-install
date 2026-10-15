@@ -158,6 +158,12 @@ one of the load balancer's public addresses (event `510806d5621c97d5`) — an
 AAAA nobody added to the load balancer is the usual IPv6 cause — and how to
 fix it: set the node's `public_ipv6` and re-run the seed
 (roles/controller_seed adds it as a `public` address), or remove the AAAA.
+When the node already sets `public_ipv6`, re-running the seed does not help:
+the controller checks the domain when the apply saves the load balancer, which
+can be before the seed's later step adds that address, and nothing makes it
+check again. The message then says to confirm the address is listed on the
+load balancer in the admin UI and have the controller re-check the domain from
+there (save the load balancer's domain, or deploy it).
 
 **It does not assert that the row's `domain` equals `cs_app_domain`.** A load
 balancer's domain is operator-owned controller-side — it is edited in the

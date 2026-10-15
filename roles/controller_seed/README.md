@@ -366,8 +366,16 @@ neither runs.
 
 Adding the row does not make the controller re-check the domain; it checks
 when the load balancer's domain is saved or the load balancer is deployed.
-On an existing az that is already marked INVALID for an AAAA, re-run the seed
-with `public_ipv6` set and then have it re-checked from the admin UI.
+That makes a race on every run that adds an address: the apply saves the
+load balancer, whose `after_save` queues `ValidateDomainWorker`, and the
+worker can resolve the apex before this later step adds the IPv6 address —
+on a fresh az as much as an existing one. If the apex has an AAAA, the
+load balancer is then marked INVALID for an address it now holds, and
+re-running the seed does not help: the address is already there, so nothing
+is saved and nothing re-checks. Confirm the address is listed on the load
+balancer in the admin UI, then have the controller re-check the domain from
+there (save the domain, or deploy the load balancer); `validate --tags
+lb_domain` says the same when it finds the domain INVALID.
 
 The program and the reading of its output are pure
 (`tasks/lb_public_ipv6_plan.yml`) and covered by `tests/lb_public_ipv6.yml`;

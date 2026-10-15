@@ -56,16 +56,16 @@
     controller_host: "{{ groups['controller'] | first }}"
     acme_expected: >-
       {{ controller_acme_address
-         | default(hostvars[controller_host].tailscale_ip if (both_routed | bool)
+         | default(hostvars[controller_host].tailscale_ip if both_routed
                    else hostvars[controller_host].primary_ip) }}
   ansible.builtin.assert:
     that:
-      - (agent_over_tailnet | length > 0) == (both_routed | bool)
-      - (agent_by_address | length > 0) != (both_routed | bool)
+      - (agent_over_tailnet | length > 0) == both_routed
+      - (agent_by_address | length > 0) != both_routed
       - (cs_agent_listen_addr | trim)
         == ((':' if (tailscale_routing_self | bool) else primary_ip ~ ':') ~ cs_ports.agent_http)
       - (validate_agent_dial_address | trim)
-        == (tailscale_ip if (both_routed | bool) else primary_ip)
+        == (tailscale_ip if both_routed else primary_ip)
       - (validate_acme_address | trim) == (acme_expected | trim)
     fail_msg: >-
       {{ tailscale_routing_scenario.name }}: {{ inventory_hostname }} —
