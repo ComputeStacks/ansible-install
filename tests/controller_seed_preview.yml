@@ -161,6 +161,18 @@
           - (apr_run1 | map('regex_replace', '$', apr_cr) | list) != apr_run1
         quiet: true
 
+    # Sidekiq's client logs to stdout, timestamped, the first time the apply
+    # touches a queue (seen on the first smoke run of the two-step attach).
+    - name: "Assert: a Sidekiq client log line is dropped, whatever its time"
+      vars:
+        apr_sidekiq: "\e[1;34mINFO \e[0m 2026-10-15T20:06:24.024Z pid=1 tid=1v5: Sidekiq 8.0.10 connecting to Redis with options {size: 10}"
+        apr_sidekiq_later: "INFO 2026-10-15T20:08:48.859Z pid=1 tid=2ab: Sidekiq 8.0.10 connecting to Redis with options {size: 10}"
+      ansible.builtin.assert:
+        that:
+          - (apr_run1[:3] + [apr_sidekiq] + apr_run1[3:]) | controller_seed_preview_sha256 == apr_sha1
+          - (apr_run1[:3] + [apr_sidekiq_later] + apr_run1[3:]) | controller_seed_preview_sha256 == apr_sha1
+        quiet: true
+
     - name: "Assert: every real change moves the fingerprint"
       ansible.builtin.assert:
         that:

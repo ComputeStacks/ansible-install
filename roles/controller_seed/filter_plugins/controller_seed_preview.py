@@ -51,6 +51,14 @@ and the before-side of a diff line are real database values and are kept,
 as is every other number (`BillingResourcePrice #<id>` names a price that
 already exists). Trailing carriage returns are dropped, in case the wrapper
 ever runs under a tty.
+
+One more thing reaches stdout that Recorder does not write: Sidekiq's client
+logger, which prints a timestamped `INFO <time> pid=<n> tid=<x>: Sidekiq …
+connecting to Redis` line (colored) the first time the apply touches a job
+queue. It differs on every run, so log lines of exactly that shape -- an
+optional color code, a level word, an ISO 8601 UTC time, `pid=` -- are
+dropped before hashing. Found on the first smoke run of the two-step attach;
+Recorder lines never start that way.
 """
 
 import hashlib
@@ -64,6 +72,12 @@ _DIFF_ID = re.compile(r"^( {13}[a-z_]+_id: .* → )\d+$")
 _DRIFT_ID = re.compile(r"^( {13}[a-z_]+_id: database .*, manifest )\d+$")
 # Recorder#link from ApplyService#apply_dns_product_module.
 _LINK_DRIVER = re.compile(r"^(  \[link  \] .* → ProvisionDriver #)\d+$")
+
+# Sidekiq::Logger's pretty format, possibly colored by the terminal formatter.
+_LOG_LINE = re.compile(
+    r"^(?:\x1b\[[0-9;]*m)?(?:DEBUG|INFO|WARN|ERROR|FATAL)\s*(?:\x1b\[[0-9;]*m)?\s+"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+pid=\d+"
+)
 
 ID_PLACEHOLDER = "<id>"
 
@@ -84,6 +98,8 @@ def controller_seed_preview_normalize(output):
     out = []
     for line in _lines(output):
         line = line.rstrip("\r")
+        if _LOG_LINE.match(line):
+            continue
         for pattern in (_DIFF_ID, _DRIFT_ID, _LINK_DRIVER):
             line = pattern.sub(lambda m: m.group(1) + ID_PLACEHOLDER, line)
         out.append(line)
