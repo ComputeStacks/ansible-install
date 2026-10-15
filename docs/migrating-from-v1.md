@@ -481,8 +481,9 @@ itself over SSH (DockerSSH); the role only prepares `/computestacks-mnt` and
 v1 had no tailnet. v1's `local_dns` role has no v2 counterpart: the control
 plane dials addresses (per-az `acme_server` addresses in the manifest) rather
 than names, and the tailnet is joined with `--accept-dns=false` so MagicDNS
-never rewrites a host's resolver. Attach mode defaults tailscale off, because
-existing v1 hosts are not on a tailnet unless the operator joined them first.
+never rewrites a host's resolver. Tailscale is off unless a host says
+`tailscale_enabled: true`, so existing v1 hosts are not treated as tailnet
+members unless the operator joined them and says so.
 
 
 ## validate (v1: roles/validate)

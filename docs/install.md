@@ -263,11 +263,15 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
 
 ### Optional inputs worth deciding now
 
-* **Tailscale.** Set `tailscale_authkey` in `secrets.yml` and every host joins
-  a tailnet; the controller then dials each node's agent over it and
-  prometheus scrapes over it, instead of sending an admin Bearer token and
-  exporter scrapes in cleartext across the public internet. Opt a same-L2
-  region out with `tailscale_enabled: false` on the host or group, or keep it
+* **Tailscale.** Set `tailscale_enabled: true` (in `group_vars/all` for every
+  host, or per host or group) and those hosts join a tailnet; the controller
+  then dials each node's agent over it and prometheus scrapes over it,
+  instead of sending an admin Bearer token and exporter scrapes in cleartext
+  across the public internet. The first run that joins a host needs a
+  short-lived `tailscale_authkey` in `secrets.yml`; once a host is logged in
+  no run needs a key again, so let it expire (roles/tailscale/README.md,
+  "Joining once"). Leave a same-L2 region off with `tailscale_enabled: false`
+  on the host or group, or keep it
   on the tailnet for operator access only with `tailscale_access_only: true`
   (control-plane traffic then stays on `primary_ip`). Without a
   tailnet, a remote region's control-plane traffic is cleartext — a supported

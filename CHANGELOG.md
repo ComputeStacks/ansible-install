@@ -2,6 +2,23 @@
 
 ## October 15, 2026
 
+* **Breaking: tailnet membership is `tailscale_enabled` alone, default
+  false.** A host is on the tailnet only when `tailscale_enabled` is true for
+  it; `tailscale_authkey` no longer turns tailscale on, and `site.yml`'s old
+  default of `true` is gone. Preflight refuses a host that has a
+  `tailscale_authkey` and no `tailscale_enabled`. **Fix:** add
+  `tailscale_enabled: true` to `group_vars/all` to keep today's members (a
+  host that already says `tailscale_enabled: false` stays off).
+* **The tailscale auth key is for the first join only.** The tailscale role
+  joins a member only while it is not logged in to the tailnet, with a
+  short-lived `tailscale_authkey` given to that run; on a logged-in member it
+  never runs `tailscale up` and needs no key. If a logged-in member's
+  settings differ from the inventory's flags, the run stops before changing
+  anything and prints the differing settings and the `tailscale set …` that
+  fixes them. maintain-nodes needs no auth key: it refuses, before the hold,
+  a member that is not logged in (maintenance never joins a node). A
+  non-member is never touched, even with tailscale installed on it, and its
+  firewall has no tailnet rules.
 * **`make maintain-nodes`** (`playbooks/maintain-nodes.yml`) brings live
   nodes up to date one at a time inside a cs-agent maintenance hold, which
   it places itself (`cs-agent maintenance on --wait`) and releases. It
@@ -12,8 +29,9 @@
   updates are applied only in that stopped window. Customer-impacting: run
   it in a maintenance window. `--check --diff` previews it without a hold.
   It refuses, before any hold, a run that would change a node's cs-agent
-  identity or `backups_key`, downgrade cs-agent, or re-join a hand-joined
-  tailnet node with different flags. See docs/maintain-nodes.md.
+  identity or `backups_key`, downgrade cs-agent, or touch a tailnet member
+  that is not logged in or whose settings differ from the inventory's flags.
+  See docs/maintain-nodes.md.
 * **Two-step attach.** `add-region.yml -e controller_seed_stop_after_preview=true`
   stops after the controller seed's DRY_RUN preview and prints its
   fingerprint; a second run with

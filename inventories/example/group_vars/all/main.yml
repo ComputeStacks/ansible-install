@@ -60,16 +60,22 @@ acme_account_email: admin@example.com
 # acme_eab_hmac_key: in secrets.yml  # Trust Services; optional for ZeroSSL.
 # acme_dns_provider: <see docs/acme-providers.md>; default HTTP-01 webroot
 
-# Tailscale: enabled globally when tailscale_authkey is set in secrets.yml.
-# Opt out per host/group with `tailscale_enabled: false` (same-L2 regions).
+# Tailscale (optional): a host is on the tailnet if and only if
+# `tailscale_enabled` is true for it (default false). Uncomment to put every
+# host on it, and set `tailscale_enabled: false` on hosts or groups that stay
+# off (same-L2 regions):
+# tailscale_enabled: true
+# A member that is not logged in to the tailnet yet joins with a SHORT-LIVED
+# `tailscale_authkey` given to that one run (secrets.yml, or a vaulted
+# host_vars/<host>/tailscale.yml); once it is logged in, no run needs a key
+# again. A host with an auth key must declare `tailscale_enabled` either way,
+# or preflight refuses the run.
 # Or keep a host/group on the tailnet for operator access only (Tailscale SSH;
 # add "--ssh" to tailscale_extra_args) while every control-plane leg to or
 # from it stays on the private addresses:
 # tailscale_access_only: true
-# In ATTACH mode the default flips: add-region.yml requires every host to
-# declare `tailscale_enabled` explicitly when an auth key is present, because
-# an existing v1 controller and metrics host are not on a tailnet until you
-# join them yourself.
+# In ATTACH mode, an existing v1 controller and metrics host are not on a
+# tailnet until you join them yourself: leave `tailscale_enabled` false there.
 
 # Ubuntu Pro (optional): enabled when ubuntu_pro_token is set in secrets.yml.
 

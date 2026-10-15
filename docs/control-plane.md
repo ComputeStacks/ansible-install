@@ -44,10 +44,12 @@ Firewalling narrows *who* can connect; it does not encrypt. Whenever a region
 has no private path to the controller and the metrics host, the per-node admin
 Bearer (#3) and every scrape (#9) cross the public internet in the clear.
 
-The answer is tailscale, enabled fleet-wide when `tailscale_authkey` is set
-(controller, metrics host and every node that has not opted out with
-`tailscale_enabled: false`). Where a region shares an L2 with the controller,
-opting out is reasonable and the two legs ride the LAN. A remote region with
+The answer is tailscale, on every host with `tailscale_enabled: true`
+(controller, metrics host and each node that should be on it; set it in
+`group_vars/all` for the whole fleet). Each host joins once, with a
+short-lived `tailscale_authkey` for that run. Where a region shares an L2
+with the controller, leaving it off is reasonable and the two legs ride the
+LAN. A remote region with
 tailscale disabled sends the admin Bearer and scrapes in cleartext: an
 explicit operator choice, documented rather than prevented.
 

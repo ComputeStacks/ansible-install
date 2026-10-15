@@ -157,14 +157,30 @@ The playbook asserts this: an unflagged shared host stops the run with a
 pointer to `site.yml`. The new node must **not** be flagged — that flag is
 exactly what `cs_new_nodes` subtracts to work out which node this run builds.
 
-**Tailscale is off by default.** An existing v1 controller and metrics host
-are not on a tailnet, and joining them is an operator action taken *before*
-this playbook runs. If `tailscale_authkey` is set in the secrets, the playbook
-requires every host in the run to declare `tailscale_enabled` explicitly —
-otherwise the firewall, the prometheus fragment and the manifest would all
-derive tailnet addresses for a tailnet nobody joined. Set
-`tailscale_enabled: false` on the existing hosts (and on the new node, unless
-you really are extending a tailnet).
+**Tailscale is off by default.** A host is on the tailnet only with
+`tailscale_enabled: true` (docs/contracts.md §Tailnet membership). An existing
+v1 controller and metrics host are not on a tailnet, and joining them is an
+operator action taken *before* this playbook runs. Any host that carries a
+`tailscale_authkey` must also declare `tailscale_enabled`, or preflight
+refuses the run.
+
+To put the new node on the tailnet, set `tailscale_enabled: true` on it and
+give **this run** a short-lived auth key for its first join — for example a
+vaulted per-node file, `host_vars/<node>/tailscale.yml`:
+
+```yaml
+tailscale_authkey: !vault |
+  $ANSIBLE_VAULT;1.1;AES256
+  ...
+```
+
+The key is used once, to join the node while it is not logged in to the
+tailnet, and never again: a later run (a re-run of this playbook, a
+`site.yml` converge, `maintain-nodes.yml`) finds the node logged in, never
+runs `tailscale up` on it, and needs no key — remove the file once the node
+has joined, or leave the expired key there; it is never read. A node already
+logged in whose tailscale settings differ from the inventory's flags is
+refused, not re-joined (roles/tailscale/README.md, "Joining once").
 
 ## What it writes on the existing hosts
 

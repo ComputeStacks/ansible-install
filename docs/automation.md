@@ -75,7 +75,7 @@ ansible-playbook -i inventories/ci playbooks/site.yml \
   --vault-password-file .vault-pass   # or nothing, if secrets.yml is plaintext
 ```
 
-* **Leave tailscale off** (no `tailscale_authkey` in the secrets): every run
+* **Leave tailscale off** (`tailscale_enabled` unset or false): every run
   would otherwise enroll N devices into a real tailnet. If a tailnet run is
   ever wanted, use an *ephemeral* auth key so the devices remove themselves.
 * **Port 80** must still reach the controller, metrics and registry hosts for

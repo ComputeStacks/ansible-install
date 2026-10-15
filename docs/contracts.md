@@ -400,18 +400,43 @@ fact cache (`ansible.cfg`: `fact_caching`, `.ansible_facts_cache/`); a fresh
 clone must converge each host once before a `--limit`ed render can see that
 host's tailnet address. The tailscale role owns the `tailscale_ip` key in
 `/etc/ansible/facts.d/computestacks.fact` and MERGES into that file, never
-overwrites. Tailnet MEMBERSHIP remains a pure-inventory predicate — only the
-address VALUE uses this exception. The membership predicate has exactly ONE
+overwrites (on every member, on every run — the first join and every run
+after it). Tailnet MEMBERSHIP remains a pure-inventory predicate (§Tailnet
+membership) — only the address VALUE uses this exception.
+
+### Tailnet membership
+A host is on the tailnet if and only if `tailscale_enabled` is true for it.
+That variable is the single source of truth; it has no role default and
+reads as false when unset. The membership predicate has exactly ONE
 spelling, everywhere, in tasks and templates alike:
 
-    ((tailscale_authkey | default('')) | length > 0)
-      and (tailscale_enabled | default(true) | bool)
+    (tailscale_enabled | default(false) | bool)
 
-(`hostvars[h].` in front of both terms when asking about another host). Not
-`tailscale_authkey is defined`: an authkey defined as an empty string is NOT
-tailnet membership, and a mixture of spellings makes roles disagree about the
-same host — the agent binding `:8500` on all interfaces while the firewall,
-metrics and manifest all treat the node as off-tailnet.
+(`hostvars[h].tailscale_enabled` when asking about another host). Nothing
+else is membership: not `tailscale_authkey`, not an installed or logged-in
+tailscale, not a `tailscale_ip` fact. A mixture of spellings makes roles
+disagree about the same host — the agent binding `:8500` on all interfaces
+while the firewall, metrics and manifest all treat the node as off-tailnet.
+
+`tailscale_authkey` is used ONLY to join a member that is not logged in to
+the tailnet yet — its first join, typically at attach. Operators issue a
+short-lived key for that one run; it expires, and no later run needs it. A
+run never needs a key for a member that is already logged in, and never
+runs `tailscale up --authkey` (or any `tailscale up`) against one: the
+`tailscale` role reads the login state first (`tailscale status --json`,
+`BackendState == "Running"`), and on a logged-in member compares its
+settings with the role's flags and refuses on any difference instead
+(roles/tailscale/README.md, "Joining once").
+
+A non-member is never touched by the `tailscale` role, even when tailscale
+is installed and logged in on it (a host someone joined by hand): its
+firewall carries no tailnet rules and no pairwise address uses its tailnet
+address, as the boolean says.
+
+Preflight refuses a host with a non-empty `tailscale_authkey` and no
+`tailscale_enabled` (roles/preflight `tasks/tailscale.yml`): before this
+rule such a host was a member, under it the host is not, and the run would
+silently drop it from the tailnet's firewall rules and addresses.
 
 ### Tailscale access-only mode
 `tailscale_access_only: true` (per host or group, default `false`) keeps a
@@ -422,8 +447,7 @@ tailnet to or from it. Every pairwise consumer therefore asks a second,
 narrower question, the ROUTING predicate, which also has exactly one
 spelling:
 
-    ((tailscale_authkey | default('')) | length > 0)
-      and (tailscale_enabled | default(true) | bool)
+    (tailscale_enabled | default(false) | bool)
       and not (tailscale_access_only | default(false) | bool)
 
 (`hostvars[h].` in front of each term for another host.)
@@ -433,14 +457,17 @@ Tailnet members that `maintain-nodes.yml` maintains are access-only
 `primary_ip`, so neither a tailnet outage nor a re-join moves the addresses
 the controller and the containers dial. Flipping the routing predicate on a
 live node changes `metadata.listen_addr`, which the maintain run refuses
-(§Live-node converge); it also compares `tailscale debug prefs` with the
-role's `tailscale up` flags before the hold and refuses on any difference, so
-a node joined by hand must have its flags described in
-`tailscale_extra_args` / `tailscale_tags` first.
+(§Live-node converge). Before the hold it also refuses a member that is not
+logged in to the tailnet — maintenance never joins a node, so no maintain run
+needs an auth key — and one whose `tailscale debug prefs` differ from the
+role's flags, so a node joined by hand must have its flags described in
+`tailscale_extra_args` / `tailscale_tags` (or be changed with `tailscale
+set`) first.
 
 Membership gates
 the `tailscale` role, the firewall's anti-spoof rules and its UDP 41641
-accept, and preflight's opt-out warning; routing gates everything that picks
+accept, preflight's partial-tailnet warning, and maintain's logged-in and
+settings checks; routing gates everything that picks
 an address or a `tailscale0` accept: the manifest's `node.agent_host` and
 `acme_server`, prometheus scrape addresses, the firewall's tailnet-path
 accepts, the agent's `metadata.listen_addr`, and validate's probes. The

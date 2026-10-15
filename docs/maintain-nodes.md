@@ -101,12 +101,19 @@ node's hold — when:
   IFS= read -rs K && printf %s "$K" | ansible-vault encrypt_string --stdin-name backups_key; unset K
   ```
 
-* on a tailnet member, `tailscale up` with the inventory's flags would change
-  the node's tailscale settings — typically a node joined by hand with
-  `--ssh` or tags the inventory does not carry. `tailscale debug prefs` on the
-  node shows them; describe them in `tailscale_extra_args` /
-  `tailscale_tags`. Such nodes are expected to be `tailscale_access_only:
-  true` (docs/contracts.md §Tailscale access-only mode);
+* a tailnet member (`tailscale_enabled: true`) is not logged in to the
+  tailnet. Maintenance never joins a node, so a maintain run needs no
+  `tailscale_authkey` at all; join the node outside a maintenance run (by
+  hand, or at attach with a short-lived key for that run), or set
+  `tailscale_enabled: false` if it is not meant to be on the tailnet;
+* a tailnet member's tailscale settings differ from the inventory's flags —
+  typically a node joined by hand with `--ssh` or tags the inventory does not
+  carry. The message names each setting and the `tailscale set …` that makes
+  the node match; or describe the node in `tailscale_extra_args` /
+  `tailscale_tags` (`tailscale debug prefs` on the node shows its settings).
+  The run never re-runs `tailscale up` on a logged-in node. Such nodes are
+  expected to be `tailscale_access_only: true` (docs/contracts.md §Tailscale
+  access-only mode);
 * the controller already holds the node, or someone else holds it locally;
 * the node has an unfinished `upgrade-docker` run (finish that first).
 
