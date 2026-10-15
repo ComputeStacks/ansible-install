@@ -286,5 +286,6 @@ otherwise print them.
 **Attach mode:** `backup_host_path` and `backup_borg_remote_path` are
 *required* inventory inputs describing the existing environment (v1 servers:
 `/mnt` and `/usr/bin/borg`), the backup host's `ssh_port` is required when
-its sshd is not on `cs_ports.ssh`, and `backups_key` must be the existing
-environment's value.
+its sshd is not on `cs_ports.ssh`, and `backups_key` is the node's borg
+passphrase: the environment's value or one of the node's own, never changed
+once the node has backups.

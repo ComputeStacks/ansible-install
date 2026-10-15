@@ -183,8 +183,9 @@ below unless there is something to compare.
   `config/config.go`, not the upstream `agent.sample.yml`).
 - Attaching to a v1 backup server needs `backup_host_path` (v1: `/mnt`) and
   `backup_borg_remote_path` (v1: `/usr/bin/borg`) set, plus that server's
-  `ssh_port` host var when its sshd is not on `cs_ports.ssh`; `backups_key` must be the
-  existing environment's value.
+  `ssh_port` host var when its sshd is not on `cs_ports.ssh`; `backups_key` is the node's
+  borg passphrase (the environment's value or the node's own), never changed
+  once the node has backups.
 
 
 ## docker_config (v1: roles/docker)

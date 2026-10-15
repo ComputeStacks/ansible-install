@@ -8,6 +8,7 @@ vaulted secrets file, so an environment without a token never runs it.
 | --- | --- | --- |
 | `site.yml` | "Tailscale mesh and Ubuntu Pro" | `all` |
 | `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; the existing shared hosts are never attached.

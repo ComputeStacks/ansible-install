@@ -204,6 +204,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_public_ipv6.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/controller_seed_preview.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/maintain_nodes.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
@@ -218,6 +219,7 @@ check:
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
 	@echo "       public_ipv6 is validated and seeded as a load balancer address,"
+	@echo "       the two-step attach stops after the seed preview and pins its fingerprint,"
 	@echo "       node upgrade container selection and cs-agent result classification hold,"
 	@echo "       maintain-nodes decides, compares and defers docker restarts as specified,"
 	@echo "       node data disk classification formats only a provably blank disk,"

@@ -11,6 +11,7 @@ verified on 2026-10-14 against galaxy.ansible.com and GitHub
 | --- | --- | --- |
 | `site.yml` | "Tailscale mesh and Ubuntu Pro" | `all` |
 | `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 Both plays gate it on `tailscale_authkey` being set in the vaulted secrets

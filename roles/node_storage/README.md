@@ -10,6 +10,7 @@ validate and the docker upgrade use.
 | `site.yml` | "Node container storage" | `nodes` |
 | `add-region.yml` | "New node container storage" | `nodes` (the new node) |
 | `upgrade-docker.yml` (`tasks_from: probe`, `classify`) | "Preflight every targeted node" | `node_upgrade_targets` |
+| `maintain-nodes.yml` (`tasks_from: probe`, `classify`) | "Preflight every targeted node" | `maintain_node_targets` |
 | `roles/preflight` (`tasks_from: probe`, `classify`) | "Preflight validation" / "Preflight validation and attach-mode inventory checks" | `nodes`, not `existing_env` |
 | `roles/validate` (`tasks_from: probe`, `classify`) | `storage` check, wherever validate runs | `nodes`, not `existing_env` |
 | `unseal.yml` | not run | — |

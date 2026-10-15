@@ -1,5 +1,29 @@
 # Changelog
 
+## October 15, 2026
+
+* **`make maintain-nodes`** (`playbooks/maintain-nodes.yml`) brings live
+  nodes up to date one at a time inside a cs-agent maintenance hold, which
+  it places itself (`cs-agent maintenance on --wait`) and releases. It
+  converges the node-side roles (including the cs-agent upgrade) with
+  containers running, and stops and restarts tenant containers only when
+  docker drifts from its pins, docker must restart (a renewed docker TLS
+  certificate), a reboot is pending, or `maintain_force_restart` is set; OS
+  updates are applied only in that stopped window. Customer-impacting: run
+  it in a maintenance window. `--check --diff` previews it without a hold.
+  It refuses, before any hold, a run that would change a node's cs-agent
+  identity or `backups_key`, downgrade cs-agent, or re-join a hand-joined
+  tailnet node with different flags. See docs/maintain-nodes.md.
+* **Two-step attach.** `add-region.yml -e controller_seed_stop_after_preview=true`
+  stops after the controller seed's DRY_RUN preview and prints its
+  fingerprint; a second run with
+  `-e controller_seed_expect_preview_sha256=<fingerprint>` applies only that
+  preview (docs/attach-mode.md).
+* **`backups_key` may be per node.** The docs no longer say every node must
+  share the environment's passphrase; a node's passphrase must never change
+  once it has backups.
+* upgrade-docker's state file records which playbook owns it; upgrade-docker
+  and maintain-nodes refuse to resume each other's run.
 ## October 14, 2026
 
 * **`make deps` reinstalls galaxy roles** (`--force`), so a changed pin

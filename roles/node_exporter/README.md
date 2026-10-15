@@ -7,6 +7,7 @@ running on every host. Nothing else.
 | --- | --- | --- |
 | `site.yml` | "Base system" | `all` |
 | `add-region.yml` | "New node base system" | `nodes` (the new node) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** new node only; existing hosts keep the exporter they have.

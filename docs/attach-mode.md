@@ -66,7 +66,7 @@ one in the new node's `site` — see below):
 | `backup_host_path` | `/mnt` | Where repositories live on that server. |
 | `backup_borg_remote_path` | `/usr/bin/borg` | v2's default is `/opt/computestacks/bin/borg`, which does not exist there — every backup on the new node would fail with "command not found". |
 | `ssh_port` (on the backup host) | that server's sshd port | Defaults to `cs_ports.ssh` (22). A server whose sshd listens elsewhere needs it, or every backup on the new node fails to connect. `backup_ssh_port` still overrides it, for a port that differs from sshd's own (a forward in between). |
-| `backups_key` (secrets) | the environment's existing value | The borg passphrase. A new one makes the node's repositories unreadable alongside everyone else's. |
+| `backups_key` (secrets) | the environment's value, or the node's own | The borg passphrase for this node's repositories. Each node may have its own (a host var, e.g. a per-node vaulted file); it must never change once the node has backups, or its existing repositories become unreadable. |
 
 **Everything else in the inventory must describe the environment that
 exists, not a new one.** Attach mode never re-renders a shared host's

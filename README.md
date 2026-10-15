@@ -12,8 +12,9 @@ Two entry points:
 | `playbooks/site.yml` | A whole environment, from bare Ubuntu 26.04 hosts. |
 | `playbooks/add-region.yml` | A new region/AZ/node attached to an environment that already exists. |
 
-and three narrow ones for an environment already built:
-`playbooks/upgrade-docker.yml` (see [Upgrades](#upgrades)),
+and four narrow ones for an environment already built:
+`playbooks/maintain-nodes.yml` and `playbooks/upgrade-docker.yml` (see
+[Upgrades](#upgrades)),
 `playbooks/firewall.yml` (see [Changing the firewall](#changing-the-firewall))
 and `playbooks/unseal.yml`.
 
@@ -52,7 +53,8 @@ a `requirements.yml` bump.
 
 The `Makefile` is a thin wrapper around exactly these commands and the
 playbook runs below — `make deps`, `make site ENV=prod`,
-`make add-region ENV=prod`, `make upgrade-docker ENV=prod`,
+`make add-region ENV=prod`, `make maintain-nodes ENV=prod`,
+`make upgrade-docker ENV=prod`,
 `make validate ENV=prod`, `make lint`,
 `make check`. Every playbook target requires `ENV` (there is no default
 inventory) and honors `LIMIT=`, `ARGS=` and `VAULT=`; `make help` lists them.
@@ -357,6 +359,15 @@ releases the hold. The first failure stops the run, and re-running resumes.
 It needs cs-agent >= 3.4.0 on every node and controller >= 9.8.0.
 `roles/node_upgrade/README.md` has the flow and every failure's fix.
 
+**Bringing live nodes up to date** — a changed pin or setting in a node-side
+role, a cs-agent upgrade, the docker pins — is `make maintain-nodes`. It
+runs the same hold and release per node, converges the node's roles with
+containers running, and stops and restarts tenant containers only when
+docker drifts from its pins, docker must restart, or a reboot is pending.
+It is customer-impacting; run it in a maintenance window, and preview it
+first with `ARGS='--check --diff'`. A `LIMIT` must keep the controller and
+the node's backup host in the run. `docs/maintain-nodes.md` has the details.
+
 `site.yml` and `add-region.yml` no longer do either on a **live** node (one
 with tenant containers): a docker pin that differs from what is installed
 there, or a pending reboot, is left alone with a warning that points at
@@ -415,10 +426,11 @@ is not a recoverable environment.
 
 ```
 ansible.cfg                     roles_path, collections_path, ssh settings
-Makefile                        thin wrapper: deps, site, add-region, upgrade-docker, firewall, validate, lint, check
+Makefile                        thin wrapper: deps, site, add-region, maintain-nodes, upgrade-docker, firewall, validate, lint, check
 requirements.yml                pinned galaxy roles and collections
 playbooks/site.yml              greenfield converge
 playbooks/add-region.yml        attach mode
+playbooks/maintain-nodes.yml    bring live nodes up to date inside a maintenance hold, one at a time
 playbooks/upgrade-docker.yml    docker upgrades on the nodes, one at a time
 playbooks/firewall.yml          re-render and apply the host firewalls and nothing else
 playbooks/unseal.yml            unseal the controller's vault and nothing else
