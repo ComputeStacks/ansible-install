@@ -273,8 +273,7 @@
       {{ hostvars[item].tailscale_ip
          | default(hostvars[item].ansible_local.computestacks.tailscale_ip | default('')) }}
     controller_seed_node_tailnet: >-
-      {{ ((tailscale_authkey | default('')) | length > 0)
-         and (hostvars[item].tailscale_enabled | default(true) | bool)
+      {{ (hostvars[item].tailscale_enabled | default(false) | bool)
          and not (hostvars[item].tailscale_access_only | default(false) | bool)
          and ((controller_seed_node_ts | trim) | length > 0) }}
 

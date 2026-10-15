@@ -1,0 +1,119 @@
+---
+# Is this member logged in to the tailnet, and would the role's flags leave
+# it as it is? Read-only and check-mode safe: it starts nothing, joins
+# nothing and writes nothing. tasks/main.yml runs it before anything else;
+# roles/node_upgrade's maintain preflight runs it as `tasks_from: status`
+# before a maintenance hold.
+#
+# Sets:
+#   tailscale_backend_state  BackendState of `tailscale status --json`, or
+#                            NotInstalled (no tailscale binary)
+#   tailscale_logged_in      true when it is Running
+#
+# Fails on a state the role does not act on (Stopped, NeedsMachineAuth, an
+# unreadable status, ...), and on a logged-in node whose settings differ from
+# the role's flags -- naming the settings and the `tailscale set` that
+# reconciles them. See README "Joining once".
+
+- name: Look for the tailscale binary
+  ansible.builtin.stat:
+    path: "{{ tailscale_binary }}"
+  register: tailscale_binary_stat
+
+- name: Read tailscale's login state
+  ansible.builtin.command:
+    argv: [tailscale, status, --json]
+  register: tailscale_status_result
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  # tailscaled reports Starting for a moment after it starts (a reboot, the
+  # package install); wait that out rather than refusing on it.
+  until: (tailscale_status_result.stdout | default('') | tailscale_backend_state) != 'Starting'
+  retries: 12
+  delay: 5
+  when: tailscale_binary_stat.stat.exists
+
+- name: Record the login state
+  ansible.builtin.set_fact:
+    tailscale_backend_state: >-
+      {{ (tailscale_status_result.stdout | default('') | tailscale_backend_state)
+         if tailscale_binary_stat.stat.exists else 'NotInstalled' }}
+    tailscale_logged_in: >-
+      {{ tailscale_binary_stat.stat.exists
+         and (tailscale_status_result.stdout | default('') | tailscale_backend_state) == 'Running' }}
+
+- name: Refuse a tailscale state this role does not act on
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is a tailnet member (tailscale_enabled: true), but
+      {% if tailscale_backend_state == '' %}`tailscale status --json` could not be read
+      (rc {{ tailscale_status_result.rc | default('?') }}:
+      {{ tailscale_status_result.stderr | default('') | trim }}). Is tailscaled running?
+      {% elif tailscale_backend_state == 'Stopped' %}tailscale is logged in but stopped
+      (`tailscale down`). This role never runs `tailscale up` on a logged-in node; bring
+      it up by hand on the node (`tailscale up` with the node's own flags -- no auth key,
+      it is still logged in) and re-run.
+      {% elif tailscale_backend_state == 'NeedsMachineAuth' %}the node is logged in and
+      waiting for approval in the tailnet's admin console. Approve it there and re-run.
+      {% else %}tailscale is in state {{ tailscale_backend_state }}, which this role does
+      not act on. Check `tailscale status` on the node and re-run.
+      {% endif %}
+      Nothing was changed.
+  when:
+    - not (tailscale_logged_in | bool)
+    - tailscale_backend_state not in ['NeedsLogin', 'NoState', 'NotInstalled']
+
+# A logged-in node is never re-joined, so a difference between its settings
+# and the role's flags is never reconciled by `tailscale up`: refuse instead,
+# before anything changes. `debug prefs` is the node's whole tailscale
+# configuration (key material included), so it is never logged; the
+# comparison yields only names and the inventory's own flag values.
+- name: Compare a logged-in node's settings with the role's flags
+  when: tailscale_logged_in | bool
+  block:
+    - name: Read the node's tailscale settings
+      ansible.builtin.command:
+        argv: [tailscale, debug, prefs]
+      register: tailscale_prefs_result
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Compare them with the role's flags
+      ansible.builtin.set_fact:
+        tailscale_prefs_differences: >-
+          {{ tailscale_prefs_result.stdout | default('')
+             | tailscale_prefs_problems(tailscale_up_args | trim, tailscale_tags | default([])) }}
+        tailscale_prefs_fix: >-
+          {{ tailscale_prefs_result.stdout | default('')
+             | tailscale_set_args(tailscale_up_args | trim, tailscale_tags | default([])) }}
+      no_log: true
+
+    - name: Spell out how to make the node match
+      ansible.builtin.set_fact:
+        tailscale_prefs_fix_steps: >-
+          {{ (['`tailscale set ' ~ (tailscale_prefs_fix.set | join(' ')) ~ '` on the node']
+              if (tailscale_prefs_fix.set | length > 0) else [])
+             + (['by hand, since no `tailscale set` flag covers it: '
+                 ~ (tailscale_prefs_fix.manual | join('; '))]
+                if (tailscale_prefs_fix.manual | length > 0) else []) }}
+        tailscale_flags_described: >-
+          {{ (tailscale_up_args | trim)
+             ~ ((', tailscale_tags ' ~ (tailscale_tags | join(',')))
+                if (tailscale_tags | default([]) | length > 0) else '') }}
+
+    - name: Gate - a logged-in node's settings must match the role's flags
+      ansible.builtin.assert:
+        that:
+          - tailscale_prefs_differences | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} is logged in to the tailnet, but its tailscale settings
+          differ from the role's flags ({{ tailscale_flags_described }}):
+          {{ tailscale_prefs_differences | join('; ') }}.
+          The role never re-runs `tailscale up` on a logged-in node, so nothing was changed.
+          Either make the node match the inventory -- {{ tailscale_prefs_fix_steps | join(', and ') }} --
+          or make tailscale_extra_args and tailscale_tags describe the node exactly
+          (`tailscale debug prefs` on the node shows its settings). Then re-run.
+        quiet: true

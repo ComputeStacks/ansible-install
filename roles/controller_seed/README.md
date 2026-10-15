@@ -534,7 +534,7 @@ Consumed, not owned: `cs_portal_domain`, `cs_registry_domain`,
 `cs_metrics_domain`, `cs_app_zone`, `cs_admin_email`, `cs_admin_password`,
 `currency`, `dns_driver`, `pdns_api_key`, `pdns_web_key`,
 `prometheus_basic_auth_password`, `loki_basic_auth_password`,
-`secret_key_base`, `tailscale_authkey`, `existing_env`, `cs_ports`, the
+`secret_key_base`, `tailscale_enabled`, `tailscale_access_only`, `existing_env`, `cs_ports`, the
 site contract (`playbooks/group_vars/all/sites.yml`): `cs_site`,
 `cs_site_metrics_domains`, `cs_site_metrics_credentials`,
 `cs_metrics_credentials_default`, `cs_new_nodes` — and the app-domain contract

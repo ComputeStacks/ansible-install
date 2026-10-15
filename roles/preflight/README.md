@@ -37,9 +37,9 @@ maintenance hold.
 
 `tasks/attach.yml` holds the attach-mode inventory checks: every host in
 `controller`, `metrics`, `backup` or `registry` is flagged `existing_env`, no
-node is, and with `tailscale_authkey` set every host declares
-`tailscale_enabled` explicitly. They are kept out of `main.yml` because a
-greenfield inventory fails the first by design.
+node is. They are kept out of `main.yml` because a greenfield inventory fails
+the first by design. (Tailnet membership needs no attach-only check:
+`tasks/tailscale.yml`, run by `main.yml`, covers every playbook.)
 
 **Attach mode:** runs on every host, existing ones included, and changes
 nothing; the OS, data-disk, registry-login and controller-image checks skip
@@ -172,10 +172,13 @@ change nothing.
   generates these values** — they are immutable install inputs
   (docs/contracts.md rule 8); rotating them later destroys every encrypted
   credential in the controller.
-- If `tailscale_authkey` is set, hosts with `tailscale_enabled: false` are
-  reported via a `debug` warning (not a failure) — same-L2 regions
-  legitimately opt out, but the operator should see the list and confirm it's
-  intentional.
+- Tailnet membership (`tasks/tailscale.yml`, docs/contracts.md §Tailnet
+  membership): a host with a non-empty `tailscale_authkey` and no
+  `tailscale_enabled` is refused — under the old rules it was a member, under
+  the new default (`false`) it is not, so the operator must say which. When
+  some hosts are members and others are not, the non-members are reported
+  via a `debug` warning (not a failure) — same-L2 regions legitimately stay
+  off, but the operator should see the list and confirm it's intentional.
 - Every registry in `docker_registries` accepts its credentials, checked from
   each docker host (`preflight_docker_groups`) that is not flagged
   `existing_env` — in attach mode only the new nodes ever log in.

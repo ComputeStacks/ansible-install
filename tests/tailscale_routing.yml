@@ -1,7 +1,7 @@
 ---
-# Does every pairwise tailnet consumer agree on which legs ride the tailnet,
-# with and without `tailscale_access_only`? (docs/contracts.md §Tailscale
-# access-only mode.) A consumer that disagrees with the others is a dead leg:
+# Does every pairwise tailnet consumer agree on which hosts are on the tailnet
+# and which legs ride it, with and without `tailscale_access_only`?
+# (docs/contracts.md §Tailnet membership, §Tailscale access-only mode.) A consumer that disagrees with the others is a dead leg:
 # the controller dialing a tailnet address the node's firewall no longer
 # accepts, or a firewall still trusting tailscale0 for a host that was meant
 # to be reachable only for operator access.
@@ -10,8 +10,9 @@
 #
 # (run by `make check`). Every host gets a stand-in auth key and a stand-in
 # tailnet address (100.64.0.0/10, shared address space; nothing is joined),
-# then each scenario sets `tailscale_access_only` on a subset of hosts and the
-# checks re-derive, on each host:
+# then each scenario sets `tailscale_enabled` (membership) and
+# `tailscale_access_only` on subsets of hosts and the checks re-derive, on
+# each host:
 #
 #   * its firewall (the real template, with roles/firewall/tasks/tailnet.yml
 #     deriving the same lists a converge would);
@@ -26,16 +27,31 @@
     tailscale_routing_scenarios:
       - name: every host routes over the tailnet
         access_only: []
+        non_members: []
       - name: every host access-only
         access_only: "{{ groups['all'] }}"
+        non_members: []
       - name: controller access-only
         access_only: "{{ groups['controller'] }}"
+        non_members: []
       - name: metrics access-only
         access_only: "{{ groups['metrics'] | default([]) }}"
+        non_members: []
       - name: one node access-only
         access_only: "{{ [groups['nodes'] | sort | first] }}"
+        non_members: []
+      # An auth key is not membership: every host below still carries one.
+      - name: no host is a member
+        access_only: []
+        non_members: "{{ groups['all'] }}"
+      - name: controller not a member
+        access_only: []
+        non_members: "{{ groups['controller'] }}"
+      - name: one node not a member, another access-only
+        access_only: "{{ [groups['nodes'] | sort | last] }}"
+        non_members: "{{ [groups['nodes'] | sort | first] }}"
   tasks:
-    - name: Stand in for the tailscale role (a key's length, an address)
+    - name: Stand in for the tailscale role (an auth key, an address)
       ansible.builtin.set_fact:
         tailscale_authkey: "tskey-auth-stand-in-not-a-key"
         tailscale_ip: "100.64.0.{{ (groups['all'] | sort).index(inventory_hostname) + 1 }}"

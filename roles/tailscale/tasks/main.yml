@@ -1,16 +1,63 @@
 ---
-# Join this host to the tailnet, then record its tailnet address so the plays
-# that need PAIRWISE derivation (prometheus scrape targets, manifest
-# node.agent_host) can read it out of hostvars. See README.
+# Keep a tailnet member installed and joined, then record its tailnet address
+# so the plays that need PAIRWISE derivation (prometheus scrape targets,
+# manifest node.agent_host) can read it out of hostvars. See README.
+#
+# The node's login state decides everything (README "Joining once"):
+#   * not logged in -- the first join: `tailscale up` with the short-lived
+#     tailscale_authkey this run carries, through the collection role;
+#   * logged in -- never joined again and never `up` with a key: its settings
+#     are compared with the role's flags (tasks/status.yml, which refuses on
+#     any difference), and the collection role only keeps the package.
 
-- name: Assert a tailscale auth key is present
+- name: Assert this host is a tailnet member
   ansible.builtin.assert:
     that:
-      - (tailscale_authkey | default('')) | length > 0
+      - tailscale_enabled | default(false) | bool
     fail_msg: >-
-      The tailscale role ran without a 'tailscale_authkey'. site.yml gates this
-      role on the key being set in the vaulted secrets file; set it, or set
-      'tailscale_enabled: false' on the hosts that must stay off the tailnet.
+      The tailscale role ran on {{ inventory_hostname }}, which is not a tailnet
+      member: membership is `tailscale_enabled: true` (docs/contracts.md
+      §Tailnet membership), and the playbooks gate this role on it.
+    quiet: true
+
+# A node joined earlier whose tailscaled is stopped would read as "not logged
+# in" and be joined again with a key. Start an installed daemon first, so the
+# state read below is the node's real one.
+- name: Look for an installed tailscale
+  ansible.builtin.stat:
+    path: "{{ tailscale_binary }}"
+  register: tailscale_installed
+
+- name: Start an installed tailscaled before reading its state
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    state: started
+  when: tailscale_installed.stat.exists
+
+- name: Read the login state and check a logged-in node's settings
+  ansible.builtin.include_tasks: status.yml
+
+- name: Gate - this run may join a node
+  ansible.builtin.assert:
+    that:
+      - tailscale_logged_in | bool or (tailscale_join_allowed | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} is a tailnet member (tailscale_enabled: true) but is not
+      logged in to the tailnet (state {{ tailscale_backend_state }}), and this run never
+      joins a node. Join it outside a maintenance run -- add-region.yml or site.yml with a
+      short-lived tailscale_authkey for that run -- or by hand, then re-run.
+    quiet: true
+
+- name: Gate - the first join needs an auth key
+  ansible.builtin.assert:
+    that:
+      - tailscale_logged_in | bool or ((tailscale_authkey | default('')) | length > 0)
+    fail_msg: >-
+      {{ inventory_hostname }} is a tailnet member (tailscale_enabled: true) but is not
+      logged in to the tailnet yet (state {{ tailscale_backend_state }}). The first join
+      needs a short-lived tailscale_authkey for this run (for example a vaulted
+      host_vars/{{ inventory_hostname }}/tailscale.yml); it is never needed again.
+      Nothing was changed.
     quiet: true
 
 - name: Remove the apt source the standalone artis3n.tailscale role wrote
@@ -24,7 +71,8 @@
     state: absent
   loop: "{{ tailscale_legacy_apt_files }}"
 
-- name: Install and join tailscale
+# Two includes, exactly one of which runs.
+- name: Install tailscale and join this node with the run's auth key
   ansible.builtin.include_role:
     name: artis3n.tailscale.machine
   vars:
@@ -33,6 +81,21 @@
     # tailscale_up_timeout already carry the upstream names.
     state: "{{ tailscale_package_state }}"
     tailscale_args: "{{ tailscale_up_args | trim }}"
+  when: not (tailscale_logged_in | bool)
+
+# A logged-in node: `tailscale_up_skip` turns the collection's `tailscale up`
+# task off outright (its state-file and online checks never get a say), and
+# the key is blanked so nothing in the collection can use one. It installs or
+# keeps the package and the service, nothing more.
+- name: Keep tailscale installed on a logged-in node, without joining
+  ansible.builtin.include_role:
+    name: artis3n.tailscale.machine
+  vars:
+    state: "{{ tailscale_package_state }}"
+    tailscale_args: "{{ tailscale_up_args | trim }}"
+    tailscale_up_skip: true
+    tailscale_authkey: ""
+  when: tailscale_logged_in | bool
 
 - name: Read this host's tailnet IPv4 address
   ansible.builtin.command:

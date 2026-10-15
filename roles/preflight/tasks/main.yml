@@ -495,29 +495,8 @@
     success_msg: "user_auth_secret is present and >= 128 characters"
   run_once: true
 
-- name: Determine hosts with tailscale explicitly disabled
-  ansible.builtin.set_fact:
-    preflight_tailscale_disabled_hosts: "{{ preflight_tailscale_disabled_hosts | default([]) + [item] }}"
-  loop: "{{ groups['all'] }}"
-  loop_control:
-    label: "{{ item }}"
-  when: not (hostvars[item].tailscale_enabled | default(true) | bool)
-  run_once: true
-
-- name: Warn when tailscale_authkey is set but some hosts opt out
-  ansible.builtin.debug:
-    msg: >-
-      tailscale_authkey is set, but these hosts have 'tailscale_enabled:
-      false' and will NOT join the tailnet:
-      {{ preflight_tailscale_disabled_hosts | default([]) | join(', ') }}.
-      Control-plane traffic to/from them (controller -> agent Bearer,
-      metrics scrape) will ride the LAN/public network in cleartext instead
-      of the tailnet. Confirm this is intentional (documented same-L2
-      opt-out) before proceeding.
-  when:
-    - (tailscale_authkey | default('')) | length > 0
-    - (preflight_tailscale_disabled_hosts | default([])) | length > 0
-  run_once: true
+- name: Check tailnet membership is explicit
+  ansible.builtin.include_tasks: tailscale.yml
 
 # Here rather than only in roles/controller: that role's copy is the backstop,
 # and it does not run until the sixth play, by which time docker, vault,

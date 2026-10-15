@@ -33,23 +33,8 @@
       metal; an already-provisioned node does not belong in this run.
   when: "'nodes' in group_names"
 
-# Attach mode defaults tailscale OFF (docs/contracts.md §attach): the
-# existing controller and metrics host are not on a tailnet, and joining
-# them is an operator action taken BEFORE this playbook runs. Every
-# consumer of the pairwise derivations (firewall, metrics file_sd,
-# cs_agent, controller_seed) reads `tailscale_enabled | default(true)`,
-# so leaving it unset while an auth key is present would tell those roles
-# the fleet is on a tailnet that this playbook never joined.
-- name: Assert tailnet membership is explicit on every host
-  ansible.builtin.assert:
-    that:
-      - tailscale_enabled is defined
-    fail_msg: >-
-      `tailscale_authkey` is set, so every host in an attach run must
-      declare `tailscale_enabled` explicitly — {{ inventory_hostname }}
-      does not. Attach mode defaults tailscale OFF: the existing hosts are
-      not on a tailnet unless you joined them yourself first. Set
-      `tailscale_enabled: false` on the existing hosts (and on the new node
-      unless you really are extending a tailnet), or drop
-      `tailscale_authkey` from this inventory's secrets.
-  when: (tailscale_authkey | default('')) | length > 0
+# Tailnet membership needs no attach-specific check: it is
+# `tailscale_enabled` alone, default false, so an existing controller or
+# metrics host is never assumed to be on a tailnet, and tasks/tailscale.yml
+# (run by main.yml) already refuses a host with an auth key and no explicit
+# `tailscale_enabled`.

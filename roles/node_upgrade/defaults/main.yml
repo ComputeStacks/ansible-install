@@ -117,14 +117,3 @@ node_upgrade_maintain_force_restart: "{{ maintain_force_restart | default(false)
 # starts) is retried inside the same window.
 node_upgrade_agent_wait: 300
 node_upgrade_agent_wait_interval: 5
-
-# The flags roles/tailscale passes to `tailscale up`, for the comparison with
-# the node's `tailscale debug prefs` (tasks/maintain_preflight.yml). That
-# role's defaults are not in scope here, so this repeats its composition of
-# `tailscale_up_args` (roles/tailscale/defaults/main.yml) from the same
-# inventory inputs; an inventory that sets tailscale_up_args itself is read
-# as is. tests/maintain_nodes.yml fails if the two spellings drift apart.
-node_upgrade_tailscale_up_args: >-
-  {{ tailscale_up_args
-     | default('--accept-dns=' ~ (tailscale_accept_dns | default(false) | bool | lower)
-               ~ ' ' ~ (tailscale_extra_args | default(''))) }}

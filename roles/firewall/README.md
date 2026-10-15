@@ -250,11 +250,14 @@ address it has — tailnet traffic is matched by interface. Membership is
 therefore computed from inventory alone:
 
 ```
-((hostvars[h].tailscale_authkey | default('')) | length > 0)
-  and (hostvars[h].tailscale_enabled | default(true) | bool)
+(hostvars[h].tailscale_enabled | default(false) | bool)
 ```
 
-which mirrors `site.yml`'s gate (`firewall_tailnet_hosts`). It decides the
+the membership predicate of docs/contracts.md §Tailnet membership, which
+`site.yml`'s gate also uses (`firewall_tailnet_hosts`). An auth key is not
+membership, and neither is tailscale installed or logged in on a host: a
+host with `tailscale_enabled` false or unset gets no tailnet rules at all,
+even one someone joined by hand. It decides the
 anti-spoof drops and the UDP 41641 accept. The `tailscale0` accepts follow the
 narrower routing predicate (`firewall_tailnet_routed_hosts`), which adds
 `and not (hostvars[h].tailscale_access_only | default(false) | bool)` and
@@ -379,8 +382,7 @@ Current status of every port in the matrix that is served by a container:
 | `firewall_v1_script` | `/usr/local/bin/cs-recover_iptables` | Attach-mode target. |
 
 Consumed, not owned: `cs_ports`, `primary_ip`, `public_ip`, `existing_env`,
-`tailscale_authkey`, `tailscale_enabled`, `tailscale_access_only`,
-`group_names`, `groups`.
+`tailscale_enabled`, `tailscale_access_only`, `group_names`, `groups`.
 
 `firewall_tailscale_udp_port` is deliberately **not** in `cs_ports`: that file
 is the control-plane graph (who dials whom on the ComputeStacks control plane),

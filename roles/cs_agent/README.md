@@ -277,7 +277,7 @@ containers.
 
 Consumed, not owned: `hostname`, `primary_ip` (inventory), `backups_key`,
 `sentry_dsn`, `s3_export_*` (secrets), `cs_portal_domain`, `cs_ports`,
-`borg_image`, `borg_binary_path`, `tailscale_authkey`/`tailscale_enabled`/
+`borg_image`, `borg_binary_path`, `tailscale_enabled`/
 `tailscale_access_only`,
 `cs_site` and `cs_site_backup_hosts` (`playbooks/group_vars/all/sites.yml` —
 frozen spellings, local reads only).

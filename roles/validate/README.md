@@ -348,7 +348,7 @@ Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
 nameservers),
 `cs_app_domain` and `cs_new_nodes`
 (`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`), `dns_driver`,
-`borg_version`, `borg_image`, `existing_env`, `tailscale_authkey` /
+`borg_version`, `borg_image`, `existing_env`,
 `tailscale_enabled` / `tailscale_access_only`, `controller_acme_address`, and
 the frozen site contract
 `cs_site`, `cs_site_backup_hosts`, `cs_site_metrics_domains`,

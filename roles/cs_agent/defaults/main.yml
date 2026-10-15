@@ -40,8 +40,7 @@ cs_agent_backup_keyfile: "{{ cs_agent_backup_ssh_dir }}/id_ed25519"
 # primary_ip. It is NEVER the tailscale address itself — containers reach the
 # agent through metadata.internal, which resolves to primary_ip.
 cs_agent_tailnet_routed: >-
-  {{ ((tailscale_authkey | default('')) | length > 0)
-     and (tailscale_enabled | default(true) | bool)
+  {{ (tailscale_enabled | default(false) | bool)
      and not (tailscale_access_only | default(false) | bool) }}
 cs_agent_listen_addr: >-
   {{ (':' ~ cs_ports.agent_http) if (cs_agent_tailnet_routed | bool)

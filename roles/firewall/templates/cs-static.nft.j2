@@ -38,7 +38,7 @@
   accept_from(hosts, rule) — the pairwise accept helper. DO NOT reduce it to the
   address half: see the header note above. `tailnet_routed_self` and the
   routing membership of each peer are pure-inventory predicates
-  (tailscale_authkey set + tailscale_enabled + not tailscale_access_only), so
+  (tailscale_enabled and not tailscale_access_only), so
   this stays correct under --limit where other hosts have no facts.
 #}
 {% macro accept_from(hosts, rule) %}

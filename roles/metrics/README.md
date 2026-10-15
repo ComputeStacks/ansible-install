@@ -127,10 +127,9 @@ tailnet** (members, neither with `tailscale_access_only: true`); otherwise
 metrics_scrape_address = (hostvars[node].tailscale_ip
                           | default(hostvars[node].ansible_local.computestacks.tailscale_ip
                                     | default(hostvars[node].primary_ip)))
-                          if (((tailscale_authkey | default('')) | length > 0)
-                              and (tailscale_enabled | default(true))          # this host
+                          if ((tailscale_enabled | default(false) | bool)             # this host
                               and not (tailscale_access_only | default(false) | bool)
-                              and (hostvars[node].tailscale_enabled | default(true))  # target node
+                              and (hostvars[node].tailscale_enabled | default(false) | bool)  # target node
                               and not (hostvars[node].tailscale_access_only | default(false) | bool))
                           else hostvars[node].primary_ip
 ```
@@ -253,9 +252,8 @@ name on the certificate.
 | `metrics_container_cpu_limit` / `metrics_container_memory_limit` | `95` / `92` | v1 parity (cpu_limit is defined but, as in v1, not currently referenced by any shipped alert expression). |
 
 Consumed, not owned: `cs_ports.*`, `prometheus_image` / `alertmanager_image`
-(`versions.yml`), `cs_portal_domain`, `tailscale_authkey` /
-`tailscale_enabled` / `tailscale_access_only` (global secret + per-host
-opt-out and access-only mode), `hostname` /
+(`versions.yml`), `cs_portal_domain`, `tailscale_enabled` /
+`tailscale_access_only` (per-host membership and access-only mode), `hostname` /
 `primary_ip` / `az` on every node (inventory, preflight-asserted), and the
 site contract `cs_site` / `cs_new_nodes` (`playbooks/group_vars/all/
 sites.yml`, spellings frozen — this role re-derives neither).

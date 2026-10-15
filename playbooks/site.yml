@@ -52,18 +52,17 @@
     # nodes via per-AZ file_sd and the infrastructure groups statically.
     - node_exporter
 
-# Membership is the pure-inventory predicate (docs/contracts.md): an auth key
-# in the vaulted secrets, minus per-host/group opt-outs for same-L2 regions.
-# A member with `tailscale_access_only: true` still joins here; the consumers
+# Membership is the pure-inventory predicate (docs/contracts.md §Tailnet
+# membership): `tailscale_enabled: true` on the host or its group, nothing
+# else. The auth key only joins a member that is not logged in yet. A member
+# with `tailscale_access_only: true` still joins here; the consumers
 # (firewall, cs_agent, metrics file_sd, controller_seed) just route none of
 # its control-plane traffic over the tailnet.
 - name: Tailscale mesh and Ubuntu Pro
   hosts: all
   roles:
     - role: tailscale
-      when:
-        - (tailscale_authkey | default('')) | length > 0
-        - tailscale_enabled | default(true) | bool
+      when: tailscale_enabled | default(false) | bool
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
 

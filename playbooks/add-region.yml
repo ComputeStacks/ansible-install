@@ -121,9 +121,7 @@
     - common
     - node_exporter
     - role: tailscale
-      when:
-        - (tailscale_authkey | default('')) | length > 0
-        - tailscale_enabled | default(false) | bool
+      when: tailscale_enabled | default(false) | bool
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
 

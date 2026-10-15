@@ -12,13 +12,12 @@
   ansible.builtin.set_fact:
     firewall_tailnet_hosts: >-
       {{ firewall_tailnet_hosts
-         + ([item] if ((hostvars[item].tailscale_authkey | default('')) | length > 0)
-                      and (hostvars[item].tailscale_enabled | default(true) | bool)
+         + ([item] if (hostvars[item].tailscale_enabled | default(false) | bool)
             else []) }}
   loop: "{{ groups['all'] }}"
-  # Pure inventory derivation (mirrors site.yml's gate) so it stays correct
-  # under --limit, where un-targeted hosts have no facts at all. Only the LENGTH of the authkey is
-  # ever evaluated, so no secret reaches the output.
+  # The membership predicate (docs/contracts.md §Tailnet membership), pure
+  # inventory like site.yml's gate, so it stays correct under --limit, where
+  # un-targeted hosts have no facts at all.
 
 - name: Determine which tailnet members carry control-plane traffic over it
   ansible.builtin.set_fact:

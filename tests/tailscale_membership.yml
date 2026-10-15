@@ -1,0 +1,156 @@
+---
+# Tailnet membership and the join-once model (docs/contracts.md §Tailnet
+# membership, roles/tailscale/README.md "Joining once"), proven without a node.
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/tailscale_membership.yml
+#
+# (run by `make check`).
+#
+# PURE RULES. roles/tailscale/filter_plugins/tailscale.py (loaded here
+# through the tests/filter_plugins/tailscale.py symlink, so nothing of the
+# role runs on this machine), fed canned copies of what a node prints
+# (tests/fixtures/tailscale/, placeholders only):
+#   * `tailscale status --json` -> BackendState (who is logged in);
+#   * `tailscale debug prefs` against the role's `tailscale up` flags, and
+#     the `tailscale set` that reconciles a difference.
+#
+# PREFLIGHT. roles/preflight/tasks/tailscale.yml, which is pure inventory:
+# a host with an auth key must say whether it is a member.
+#
+# STATIC. The maintain converge never lets the tailscale role join.
+
+- name: The tailscale filters
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ts_fixtures: "{{ playbook_dir }}/fixtures/tailscale"
+  tasks:
+    - name: "Assert: the login state is read from tailscale status"
+      vars:
+        ts_running: '{"BackendState": "Running", "Self": {"Online": true}}'
+        ts_needs_login: '{"BackendState": "NeedsLogin"}'
+        ts_stopped: '{"BackendState": "Stopped"}'
+        ts_no_state: '{"Version": "1.0"}'
+      ansible.builtin.assert:
+        that:
+          - (ts_running | tailscale_backend_state) == 'Running'
+          - (ts_needs_login | tailscale_backend_state) == 'NeedsLogin'
+          - (ts_stopped | tailscale_backend_state) == 'Stopped'
+          - (ts_no_state | tailscale_backend_state) == ''
+          - ('failed to connect to local tailscaled' | tailscale_backend_state) == ''
+          - ('' | tailscale_backend_state) == ''
+          - ('[]' | tailscale_backend_state) == ''
+        quiet: true
+
+    - name: "Assert: tailscale settings comparison"
+      vars:
+        ts_default: "{{ lookup('ansible.builtin.file', ts_fixtures ~ '/prefs_default.json') }}"
+        ts_hand: "{{ lookup('ansible.builtin.file', ts_fixtures ~ '/prefs_hand_joined.json') }}"
+        ts_out: "{{ lookup('ansible.builtin.file', ts_fixtures ~ '/prefs_logged_out.json') }}"
+        ts_ok: "{{ ts_default | tailscale_prefs_problems('--accept-dns=false ', []) }}"
+        ts_hand_plain: "{{ ts_hand | tailscale_prefs_problems('--accept-dns=false', []) }}"
+        ts_hand_flags: "{{ ts_hand | tailscale_prefs_problems('--accept-dns=false --ssh', ['cs-node']) }}"
+        ts_dns: "{{ ts_default | tailscale_prefs_problems('--accept-dns=true', []) }}"
+        ts_unknown: "{{ ts_default | tailscale_prefs_problems('--accept-dns=false --webclient', []) }}"
+        ts_logged_out: "{{ ts_out | tailscale_prefs_problems('--accept-dns=false', []) }}"
+      ansible.builtin.assert:
+        that:
+          - ts_ok == []
+          # joined by hand with --ssh and a tag the inventory does not carry
+          - ts_hand_plain | length == 2
+          - ts_hand_plain | select('search', 'RunSSH') | list | length == 1
+          - ts_hand_plain | select('search', 'AdvertiseTags') | list | length == 1
+          # the inventory describing the hand join exactly: accepted
+          - ts_hand_flags == []
+          - ts_dns | length == 1 and ts_dns[0] is search('CorpDNS')
+          - ts_unknown | length == 1 and ts_unknown[0] is search('--webclient')
+          - ts_logged_out | select('search', 'not logged in') | list | length == 1
+          - ('not json' | tailscale_prefs_problems('--accept-dns=false', [])) | length == 1
+          # nothing from the prefs' key material ever reaches a message
+          - (ts_hand_plain + ts_dns + ts_logged_out) | to_json is not search('privkey|nlpriv')
+        fail_msg: "{{ [ts_ok, ts_hand_plain, ts_hand_flags, ts_dns, ts_unknown, ts_logged_out] | to_json }}"
+        quiet: true
+
+    - name: "Assert: the fix names `tailscale set` flags where they exist, and the rest by hand"
+      vars:
+        ts_default: "{{ lookup('ansible.builtin.file', ts_fixtures ~ '/prefs_default.json') }}"
+        ts_hand: "{{ lookup('ansible.builtin.file', ts_fixtures ~ '/prefs_hand_joined.json') }}"
+        ts_fix_hand: "{{ ts_hand | tailscale_set_args('--accept-dns=false', []) }}"
+        ts_fix_dns: "{{ ts_default | tailscale_set_args('--accept-dns=true --accept-routes', []) }}"
+        ts_fix_none: "{{ ts_default | tailscale_set_args('--accept-dns=false', []) }}"
+        ts_fix_host: "{{ ts_default | tailscale_set_args('--accept-dns=false --hostname=node-a', []) }}"
+      ansible.builtin.assert:
+        that:
+          # --ssh can be turned off with `set`; tags cannot (they need a re-auth)
+          - ts_fix_hand.set == ['--ssh=false']
+          - ts_fix_hand.manual | length == 1 and ts_fix_hand.manual[0] is search('AdvertiseTags')
+          - ts_fix_dns.set == ['--accept-dns=true', '--accept-routes=true']
+          - ts_fix_dns.manual == []
+          - ts_fix_none.set == [] and ts_fix_none.manual == []
+          - ts_fix_host.set == ['--hostname=node-a']
+          - (ts_fix_hand | to_json) is not search('privkey|nlpriv')
+        fail_msg: "{{ [ts_fix_hand, ts_fix_dns, ts_fix_none, ts_fix_host] | to_json }}"
+        quiet: true
+
+    - name: "Assert: the maintain converge includes tailscale on members only, and never to join"
+      vars:
+        ts_converge: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/node_upgrade/tasks/maintain_converge.yml')
+             | from_yaml }}
+        ts_include: "{{ ts_converge | selectattr('name', 'equalto', 'Converge tailscale') | first }}"
+      ansible.builtin.assert:
+        that:
+          - ts_include['ansible.builtin.include_role'].name == 'tailscale'
+          - ts_include.vars.tailscale_join_allowed is false
+          - "'tailscale_enabled | default(false) | bool' in ts_include.when"
+          - (ts_include | to_json) is not search('tailscale_authkey')
+        fail_msg: "{{ ts_include | to_json }}"
+        quiet: true
+
+- name: The preflight membership guard
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: No auth key and no tailscale_enabled is fine (not a member)
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: tailscale
+
+    - name: An auth key with no tailscale_enabled is refused
+      block:
+        - name: Give this host an auth key
+          ansible.builtin.set_fact:
+            tailscale_authkey: "tskey-auth-stand-in-not-a-key"
+
+        - name: Run the guard
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: tailscale
+
+        - name: The guard should have refused
+          ansible.builtin.set_fact:
+            ts_guard_refused: false
+      rescue:
+        - name: Record the refusal
+          ansible.builtin.set_fact:
+            ts_guard_refused: true
+            ts_guard_message: "{{ ansible_failed_result.msg | default('') }}"
+
+    - name: "Assert: the guard refused, and says how to fix it"
+      ansible.builtin.assert:
+        that:
+          - ts_guard_refused | bool
+          - "ts_guard_message is search('tailscale_enabled: true')"
+          - "ts_guard_message is search('tailscale_enabled: false')"
+          - ts_guard_message is not search('stand-in-not-a-key')
+        fail_msg: "{{ ts_guard_message | default('the guard did not refuse') }}"
+        quiet: true
+
+    - name: Say which, explicitly
+      ansible.builtin.set_fact:
+        tailscale_enabled: false
+
+    - name: An auth key with an explicit tailscale_enabled is accepted
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: tailscale

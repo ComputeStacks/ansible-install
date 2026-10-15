@@ -2,8 +2,9 @@
 # One scenario of tests/tailscale_routing.yml, on every host at once (the
 # linear strategy keeps hosts in step, so each set_fact below is visible in
 # every other host's hostvars by the next task).
-- name: "Apply the scenario's access-only set — {{ tailscale_routing_scenario.name }}"
+- name: "Apply the scenario's members and access-only set — {{ tailscale_routing_scenario.name }}"
   ansible.builtin.set_fact:
+    tailscale_enabled: "{{ inventory_hostname not in tailscale_routing_scenario.non_members }}"
     tailscale_access_only: "{{ inventory_hostname in tailscale_routing_scenario.access_only }}"
 
 - name: Derive the firewall's tailnet lists exactly as a converge does
@@ -11,13 +12,16 @@
 
 - name: Work out what this scenario expects of this host
   ansible.builtin.set_fact:
-    tailscale_routing_self: "{{ not (tailscale_access_only | bool) }}"
+    tailscale_routing_member: "{{ tailscale_enabled | bool }}"
+    tailscale_routing_self: "{{ tailscale_enabled | bool and not (tailscale_access_only | bool) }}"
     tailscale_routing_controller: >-
-      {{ not (hostvars[groups['controller'] | first].tailscale_access_only | bool) }}
+      {{ hostvars[groups['controller'] | first].tailscale_enabled | bool
+         and not (hostvars[groups['controller'] | first].tailscale_access_only | bool) }}
     tailscale_routing_any_metrics: >-
       {{ (groups['metrics'] | default([])
-          | map('extract', hostvars, 'tailscale_access_only')
-          | reject | list | length) > 0 }}
+          | reject('in', tailscale_routing_scenario.non_members)
+          | reject('in', tailscale_routing_scenario.access_only)
+          | list | length) > 0 }}
     tailscale_routing_firewall: >-
       {{ lookup('ansible.builtin.template',
                 playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').splitlines()
@@ -31,9 +35,13 @@
          | select('search', 'iifname \"tailscale0\" tcp dport ' ~ cs_ports.node_exporter ~ ' accept') | list }}
   ansible.builtin.assert:
     that:
-      # Membership: WireGuard and the anti-spoof drops, access-only or not.
-      - tailscale_routing_firewall | select('search', 'udp dport ' ~ firewall_tailscale_udp_port ~ ' accept') | list | length == 1
-      - tailscale_routing_firewall | select('search', 'saddr ' ~ firewall_tailscale_v4_range ~ ' iifname != ') | list | length == 1
+      # Membership: WireGuard and the anti-spoof drops, access-only or not,
+      # and neither on a non-member (auth key or no auth key).
+      - (tailscale_routing_firewall | select('search', 'udp dport ' ~ firewall_tailscale_udp_port ~ ' accept') | list | length)
+        == (1 if tailscale_routing_member | bool else 0)
+      - (tailscale_routing_firewall | select('search', 'saddr ' ~ firewall_tailscale_v4_range ~ ' iifname != ') | list | length)
+        == (1 if tailscale_routing_member | bool else 0)
+      - (inventory_hostname in firewall_tailnet_hosts) == (tailscale_routing_member | bool)
       # Routing: no tailscale0 accept at all on an access-only host.
       - tailscale_routing_self | bool or (tailnet_accepts | length == 0)
       # The exporter scrape rides the tailnet exactly when both ends route.
@@ -87,7 +95,7 @@
     manifest: >-
       {{ lookup('ansible.builtin.template',
                 playbook_dir ~ '/../roles/controller_seed/templates/manifest.yml.j2') }}
-    node_routed: "{{ not (hostvars[item].tailscale_access_only | bool) }}"
+    node_routed: "{{ hostvars[item].tailscale_enabled | bool and not (hostvars[item].tailscale_access_only | bool) }}"
   ansible.builtin.assert:
     that:
       - (controller_seed_controller_tailnet | bool) == (tailscale_routing_self | bool)

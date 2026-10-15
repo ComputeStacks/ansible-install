@@ -92,7 +92,8 @@ help:
 	@echo "                                  decision, agent.yml and tailscale comparisons and"
 	@echo "                                  deferred docker restarts, the node data"
 	@echo "                                  disk classification, the reachability verdict,"
-	@echo "                                  the tailnet routing of every pairwise consumer"
+	@echo "                                  the tailnet routing of every pairwise consumer,"
+	@echo "                                  tailnet membership and the join-once checks"
 	@echo "                                  and the cs-agent backup export settings"
 	@echo "check-pins                        confirm every pin in versions.yml and requirements.yml"
 	@echo "                                  exists upstream (network; not part of check)"
@@ -214,6 +215,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_kernel_uplink_ra.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/tailscale_routing.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_membership.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
@@ -227,6 +229,7 @@ check:
 	@echo "       every ssh port consumer reads the listening host's own ssh_port,"
 	@echo "       the uplink's IPv6 RA fix matches who manages the link,"
 	@echo "       every tailnet consumer agrees on which legs ride the tailnet,"
+	@echo "       tailnet membership is tailscale_enabled, and a logged-in node is never re-joined,"
 	@echo "       cs-agent's backup export block renders only with a bucket and is checked"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and

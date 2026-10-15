@@ -192,7 +192,7 @@ view.
 | Step | File | Phase written | What happens |
 | --- | --- | --- | --- |
 | preflight | `preflight.yml` | — | As upgrade-docker (agent >= 3.4.0, status readable, pins on the mirror, no docker downgrade), plus R7: a state.json of the other playbook is refused. |
-| converge preflight | `maintain_preflight.yml` | — | `cs_agent_apt_version` not below the installed agent (never downgrade); `cs_agent` `tasks_from: immutable_check` (R4, reads the controller); on a tailnet member, `tailscale debug prefs` against the role's `tailscale up` flags (R8). Before ANY hold: fleet-wide in the preflight play, and again per node. |
+| converge preflight | `maintain_preflight.yml` | — | `cs_agent_apt_version` not below the installed agent (never downgrade); `cs_agent` `tasks_from: immutable_check` (R4, reads the controller); on a tailnet member (`tailscale_enabled: true`), `roles/tailscale` `tasks_from: status`: the node must be logged in (maintenance never joins a node, so no maintain run needs an auth key) and its `tailscale debug prefs` must match the role's flags (R8). Before ANY hold: fleet-wide in the preflight play, and again per node. |
 | download | `download.yml` | — | `apt-get update`, `--download-only` of the OS upgrade and the drifting pins, containers running, no hold. |
 | hold | `hold.yml` | `held` | `cs-agent maintenance on --reason maintain-nodes --wait ...`; resume requires the existing hold. state.json gets `playbook: maintain-nodes`. |
 | converge | `maintain_converge_phase.yml` → `maintain_converge.yml` | — | `converge_started` saved first. Then, containers RUNNING: common (its reboot off), node_exporter, tailscale (members), ubuntu_pro (token), docker_config, docker_tls (restart deferred), node_kernel, haproxy, node_observability, firewall, cs_agent (pin installed, never downgraded). |
@@ -214,7 +214,8 @@ records its reason), the decision, the pending OS updates, and per node
 "would stop containers: yes/no because ...". NO hold. A docker certificate due
 for renewal is reported, not issued, and counts as "docker restart required".
 The tailscale role is not previewed (the collection's own status read cannot
-run in check mode); its `tailscale up` was compared in preflight. An
+run in check mode); preflight already proved the node logged in with the
+role's settings. An
 unfinished run whose converge is done is previewed from its recorded
 decision.
 
@@ -285,7 +286,7 @@ else (the playbook refuses a LIMIT that leaves the first two out):
 | controller | `cs_agent` enroll (preflight and converge) | `cstacks runner` read of the node's agent token hash -- a read |
 | controller | `docker_tls` (only when the node's certificate is missing, within `docker_tls_renew_days` of expiry, or its SANs changed) | `vault-bootstrap`: inspect; `docker start` it if stopped; unseal it if sealed; `vault write pki/docker/issue/server` (a new leaf certificate) |
 | the node's backup host | `cs_agent` | `authorized_key` entry `cs-agent <hostname>` for `cstacks` -- only if missing |
-| the tailnet's coordination server | `tailscale` (members) | `tailscale up` only when the collection's state file is new or changed or the node is offline -- prefs compared first (R8) |
+| the tailnet's coordination server | `tailscale` (members) | nothing beyond the running daemon: the converge never runs `tailscale up` (the node is logged in, `tailscale_join_allowed: false`) |
 | Ubuntu Pro | `ubuntu_pro` (token set) | `pro attach` only if not attached; `pro enable` of missing services |
 | the registries in `docker_registries` | `docker_config`, `node_observability` | `docker login`; pulls of pinned images not present |
 | apt mirrors, the cs-agent repository | several | package lists, packages |
@@ -325,7 +326,6 @@ drift, reboot_pending, force}`; `docker_restarted` with that phase.
 | `node_upgrade_playbook` | `upgrade-docker` | recorded in state.json (R7); `maintain-nodes.yml` sets `maintain-nodes` |
 | `node_upgrade_maintain_force_restart` | `maintain_force_restart`, else false | maintain-nodes: stop (and so apply OS updates, reboot if they ask) even with no other reason |
 | `node_upgrade_agent_wait` / `_interval` | 300 / 5 (s) | maintain-nodes: wait for cs-agent after the converge |
-| `node_upgrade_tailscale_up_args` | roles/tailscale's composition | maintain-nodes: the flags the prefs are compared with |
 
 ## `tasks_from: detect_live`
 

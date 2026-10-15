@@ -15,7 +15,6 @@
 #     `controller_acked`, exit 3 and error documents;
 #   * agent.yml's immutable keys (cs_agent_immutable_changes), including a
 #     backups_key that gained a trailing newline, and that no value leaks;
-#   * `tailscale debug prefs` against the role's `tailscale up` flags;
 #   * the pending OS updates, dockerd's start time and the docker_tls files
 #     newer than it;
 #   * which playbook owns a state.json (R7).
@@ -32,9 +31,10 @@
 #     except docker_tls', by `role : name`, and none that restarts dockerd;
 #   * the converge includes exactly the intended roles -- never node_storage,
 #     geerlingguy.docker, ssh_trust or the controller-side roles -- with
-#     common's reboot off and cs-agent downgrades off;
-#   * node_upgrade's copy of roles/tailscale's `tailscale up` flag
-#     composition still matches the original.
+#     common's reboot off and cs-agent downgrades off.
+#
+# The tailscale settings comparison the maintain preflight relies on lives
+# with roles/tailscale and is tested in tests/tailscale_membership.yml.
 
 - name: The maintain-nodes rules and guards
   hosts: localhost
@@ -170,38 +170,6 @@
           - (mn_newline + mn_many + mn_listen) | to_json is not search('EXAMPLE-passphrase')
           - (mn_newline + mn_many + mn_listen) | to_json is not search('aaaaaaaa|bbbbbbbb|10\.100\.0\.')
         fail_msg: "{{ [mn_same, mn_listen, mn_newline, mn_noborg, mn_many] | to_json }}"
-        quiet: true
-
-    # ======================================================================
-    # tailscale debug prefs vs the role's flags
-    # ======================================================================
-    - name: "Assert: tailscale settings comparison"
-      vars:
-        mn_default: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_default.json') }}"
-        mn_hand: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_hand_joined.json') }}"
-        mn_out: "{{ lookup('ansible.builtin.file', mn_fixtures ~ '/ts_prefs_logged_out.json') }}"
-        mn_ok: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=false ', []) }}"
-        mn_hand_plain: "{{ mn_hand | node_upgrade_tailscale_prefs_problems('--accept-dns=false', []) }}"
-        mn_hand_flags: "{{ mn_hand | node_upgrade_tailscale_prefs_problems('--accept-dns=false --ssh', ['cs-node']) }}"
-        mn_dns: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=true', []) }}"
-        mn_unknown: "{{ mn_default | node_upgrade_tailscale_prefs_problems('--accept-dns=false --webclient', []) }}"
-        mn_logged_out: "{{ mn_out | node_upgrade_tailscale_prefs_problems('--accept-dns=false', []) }}"
-      ansible.builtin.assert:
-        that:
-          - mn_ok == []
-          # joined by hand with --ssh and a tag the inventory does not carry
-          - mn_hand_plain | length == 2
-          - mn_hand_plain | select('search', 'RunSSH') | list | length == 1
-          - mn_hand_plain | select('search', 'AdvertiseTags') | list | length == 1
-          # the inventory describing the hand join exactly: accepted
-          - mn_hand_flags == []
-          - mn_dns | length == 1 and mn_dns[0] is search('CorpDNS')
-          - mn_unknown | length == 1 and mn_unknown[0] is search('--webclient')
-          - mn_logged_out | select('search', 'not logged in') | list | length == 1
-          - ('not json' | node_upgrade_tailscale_prefs_problems('--accept-dns=false', [])) | length == 1
-          # nothing from the prefs' key material ever reaches a message
-          - (mn_hand_plain + mn_dns + mn_logged_out) | to_json is not search('privkey|nlpriv')
-        fail_msg: "{{ [mn_ok, mn_hand_plain, mn_hand_flags, mn_dns, mn_unknown, mn_logged_out] | to_json }}"
         quiet: true
 
     # ======================================================================
@@ -383,25 +351,4 @@
           - mn_names | intersect(['node_storage', 'geerlingguy.docker', 'ssh_trust', 'controller', 'controller_seed',
                                   'controller_post_enroll', 'metrics', 'backup_server', 'powerdns', 'vault']) == []
         fail_msg: "{{ mn_included | to_json }}"
-        quiet: true
-
-    - name: "Assert: node_upgrade's copy of the tailscale up flags matches roles/tailscale"
-      vars:
-        mn_ts_defaults: "{{ lookup('ansible.builtin.file', mn_roles ~ '/tailscale/defaults/main.yml') }}"
-        mn_nu_defaults: "{{ lookup('ansible.builtin.file', mn_roles ~ '/node_upgrade/defaults/main.yml') }}"
-        # Regexes over the two files' raw text (no braces are ever templated here).
-        mn_ts_up_rx: 'tailscale_up_args: >-\n  --accept-dns=\{\{ tailscale_accept_dns \| bool \| lower \}\}\n  \{\{ tailscale_extra_args \}\}\n'
-        mn_ts_dns_rx: '\ntailscale_accept_dns: false\n'
-        mn_nu_dns_rx: "'--accept-dns=' ~ \\(tailscale_accept_dns \\| default\\(false\\) \\| bool \\| lower\\)"
-        mn_nu_extra_rx: "~ ' ' ~ \\(tailscale_extra_args \\| default\\(''\\)\\)"
-      ansible.builtin.assert:
-        that:
-          - mn_ts_defaults is search(mn_ts_up_rx)
-          - mn_ts_defaults is search(mn_ts_dns_rx)
-          - mn_nu_defaults is search(mn_nu_dns_rx)
-          - mn_nu_defaults is search(mn_nu_extra_rx)
-        fail_msg: >-
-          roles/tailscale composes tailscale_up_args differently from
-          node_upgrade_tailscale_up_args (roles/node_upgrade/defaults/main.yml);
-          change both together.
         quiet: true

@@ -36,15 +36,18 @@
   ansible.builtin.include_role:
     name: node_exporter
 
-# Its `tailscale up` was compared with the node's settings in preflight. Not
+# On a member only (the membership predicate). Never joins: preflight proved
+# the node logged in with the role's settings, and tailscale_join_allowed:
+# false makes the role refuse rather than join if that changed since. Not
 # previewed in --check: the collection's own status read is a command that
 # check mode skips, and the role cannot continue without it.
 - name: Converge tailscale
   ansible.builtin.include_role:
     name: tailscale
+  vars:
+    tailscale_join_allowed: false
   when:
-    - ((tailscale_authkey | default('')) | length > 0)
-      and (tailscale_enabled | default(true) | bool)
+    - tailscale_enabled | default(false) | bool
     - not ansible_check_mode
 
 - name: Converge Ubuntu Pro

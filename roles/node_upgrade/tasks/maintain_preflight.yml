@@ -8,8 +8,8 @@
 #      installed (the converge installs the pin inside the hold).
 #   2. The agent.yml the converge would render keeps every immutable key
 #      (roles/cs_agent tasks_from: immutable_check -- reads the controller).
-#   3. On a tailnet member, `tailscale up` with the role's flags would leave
-#      the node's tailscale settings as they are.
+#   3. A tailnet member is logged in, and its tailscale settings match the
+#      role's flags.
 
 # --- 1. cs-agent pin --------------------------------------------------------
 # tasks/preflight.yml has already proved an agent >= the minimum is
@@ -41,62 +41,29 @@
     tasks_from: immutable_check
 
 # --- 3. tailscale ---------------------------------------------------------
-# A node that says it is on the tailnet but has no auth key in the run would
-# be converged as a non-member: tailscale untouched, and its firewall
-# rewritten without the tailnet rules. Refuse instead of silently dropping
-# them on a live node.
-- name: Refuse a tailnet node whose auth key is missing from the run
-  ansible.builtin.assert:
-    that:
-      - not (tailscale_enabled is defined and (tailscale_enabled | bool)
-             and ((tailscale_authkey | default('')) | length == 0))
-    fail_msg: >-
-      {{ inventory_hostname }} sets tailscale_enabled: true but this run has no
-      tailscale_authkey, so maintain-nodes would treat it as a non-member and
-      rewrite its firewall without the tailnet rules. Add tailscale_authkey to
-      the vaulted secrets, or set tailscale_enabled: false if the node is
-      really off the tailnet. Nothing was changed.
-    quiet: true
-
-
-# The membership predicate, in its one spelling (docs/contracts.md §Facts
-# exception). `debug prefs` is read-only; its output is not logged (it is the
-# node's whole tailscale configuration), and the comparison yields only the
-# names of what differs.
-- name: Check tailscale would keep the node's settings
-  when:
-    - ((tailscale_authkey | default('')) | length > 0)
-      and (tailscale_enabled | default(true) | bool)
+# Membership is `tailscale_enabled` alone (docs/contracts.md §Tailnet
+# membership); a non-member's tailscale is never looked at. A member must
+# already be logged in -- maintenance never joins a node, so no maintain run
+# needs an auth key -- and its settings must match roles/tailscale's flags,
+# because the converge never re-runs `tailscale up` on it. roles/tailscale's
+# own read-only status check answers both, and refuses a mismatch itself.
+- name: Check a tailnet member is logged in, with the role's settings
+  when: tailscale_enabled | default(false) | bool
   block:
-    - name: Read the node's tailscale settings
-      ansible.builtin.command:
-        argv: [tailscale, debug, prefs]
-      register: node_upgrade_tailscale_prefs
-      changed_when: false
-      failed_when: false
-      check_mode: false
-      no_log: true
+    - name: Read the member's tailscale state and settings
+      ansible.builtin.include_role:
+        name: tailscale
+        tasks_from: status
 
-    - name: Compare them with the flags roles/tailscale passes to tailscale up
-      ansible.builtin.set_fact:
-        node_upgrade_tailscale_problems: >-
-          {{ node_upgrade_tailscale_prefs.stdout | default('')
-             | node_upgrade_tailscale_prefs_problems(node_upgrade_tailscale_up_args,
-                                                     tailscale_tags | default([])) }}
-      no_log: true
-
-    - name: Gate - tailscale up must not change the node's tailscale settings
+    - name: Gate - maintenance never joins a node to the tailnet
       ansible.builtin.assert:
         that:
-          - node_upgrade_tailscale_problems | length == 0
+          - tailscale_logged_in | bool
         fail_msg: >-
-          {{ inventory_hostname }} is a tailnet member in the inventory, but `tailscale up`
-          with roles/tailscale's flags ({{ node_upgrade_tailscale_up_args | trim }})
-          would not leave it as it is:
-          {{ node_upgrade_tailscale_problems | join('; ') }}.
-          A node joined by hand has no state file of the tailscale collection, so the
-          converge would run `tailscale up`, which then fails ("requires mentioning all
-          non-default flags") or changes the setting. Make `tailscale_extra_args` (and
-          `tailscale_tags`) describe the node exactly -- `tailscale debug prefs` on the
-          node shows its settings -- and re-run. No hold was taken; nothing was changed.
+          {{ inventory_hostname }} is a tailnet member (tailscale_enabled: true) but is
+          not logged in to the tailnet (state {{ tailscale_backend_state }}), and
+          maintain-nodes never joins a node. Join it outside a maintenance run -- by
+          hand, or at attach with a short-lived tailscale_authkey for that run -- or set
+          tailscale_enabled: false if it is not meant to be on the tailnet. No hold was
+          taken; nothing was changed.
         quiet: true

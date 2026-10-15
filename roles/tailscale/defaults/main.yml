@@ -1,8 +1,16 @@
 ---
 # Thin wrapper around the artis3n.tailscale collection's `machine` role
-# (pinned in requirements.yml).
-# `tailscale_authkey` itself comes from the vaulted secrets file and is the
-# switch that turns the whole feature on (site.yml gates the role on it).
+# (pinned in requirements.yml). The playbooks run it on tailnet members
+# (`tailscale_enabled: true`, docs/contracts.md §Tailnet membership).
+# `tailscale_authkey` is not a default: a short-lived key the run carries
+# only to join a member that is not logged in yet (README "Joining once").
+
+# False makes a run that meets a member that is not logged in fail instead of
+# joining it. maintain-nodes sets it: maintenance never joins a node.
+tailscale_join_allowed: true
+
+# Where the tailscale package puts its CLI; its absence means "not installed".
+tailscale_binary: /usr/bin/tailscale
 
 # Passed to the collection role's `state` variable. 'present' installs the
 # package and leaves it alone; the upstream default of 'latest' would upgrade

@@ -1,7 +1,9 @@
 # tailscale
 
-Joins a host to the tailnet and records its tailnet address (`tailscale_ip`)
-for the roles that derive control-plane addresses pairwise. A thin wrapper
+Keeps a tailnet member installed and joined — joining it once, with a
+short-lived auth key, while it is not logged in — and records its tailnet
+address (`tailscale_ip`) for the roles that derive control-plane addresses
+pairwise. A thin wrapper
 around the `machine` role of the pinned community collection
 `artis3n.tailscale` (`requirements.yml`, `1.2.1` — the latest release,
 verified on 2026-10-14 against galaxy.ansible.com and GitHub
@@ -11,32 +13,85 @@ verified on 2026-10-14 against galaxy.ansible.com and GitHub
 | --- | --- | --- |
 | `site.yml` | "Tailscale mesh and Ubuntu Pro" | `all` |
 | `add-region.yml` | "New node base system" | `nodes` (the new node) |
-| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
+| `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`, with `tailscale_join_allowed: false`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
+| `maintain-nodes.yml`, `tasks_from: status` (via `node_upgrade` `tasks_from: maintain_preflight`; read-only) | "Preflight every targeted node" and "Maintain the nodes, one at a time" | the nodes to maintain, before any hold |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
-Both plays gate it on `tailscale_authkey` being set in the vaulted secrets
-file and on `tailscale_enabled` — a per-host/group opt-out for same-L2
-regions, defaulting to `true` in `site.yml` and to `false` in
-`add-region.yml`. A joined host with `tailscale_access_only: true` is on the
-tailnet for operator access only (see [Access-only mode](#access-only-mode)).
+Every play gates it on membership, `tailscale_enabled: true` for the host
+(docs/contracts.md §Tailnet membership) — nothing else, and in every
+playbook the default is `false`. A member with `tailscale_access_only: true`
+is on the tailnet for operator access only (see
+[Access-only mode](#access-only-mode)).
 
-**Attach mode:** new node only, and only with an explicit
-`tailscale_enabled: true` (see [Gotchas](#gotchas)). **Requires:** —.
+**Attach mode:** new node only, and only with `tailscale_enabled: true` on
+it; its first join takes a short-lived `tailscale_authkey` for that run
+(docs/attach-mode.md). **Requires:** —.
 
 ## What it does
 
-1. Asserts an auth key is present (the playbooks' gate, restated so a direct
+1. Asserts the host is a member (the playbooks' gate, restated so a direct
    role invocation fails clearly).
-2. Removes the apt source the standalone `artis3n.tailscale` role wrote
+2. Starts an installed `tailscaled`, then reads the login state
+   (`tasks/status.yml`, read-only): `tailscale status --json`'s
+   `BackendState`, or `NotInstalled` when there is no `tailscale` binary.
+   `Running` is **logged in**; `NeedsLogin`, `NoState` and `NotInstalled`
+   are **not logged in**; anything else (`Stopped`, `NeedsMachineAuth`, an
+   unreadable status) fails with a message naming the state.
+3. **Logged in:** reads `tailscale debug prefs` (never logged) and compares
+   it with the flags below; any difference fails the run before anything
+   changes, naming each setting and the `tailscale set …` that makes the
+   node match (see [Joining once](#joining-once)).
+4. **Not logged in:** refuses unless the run may join
+   (`tailscale_join_allowed`, false in maintain-nodes) and carries a
+   `tailscale_authkey`.
+5. Removes the apt source the standalone `artis3n.tailscale` role wrote
    (`/etc/apt/sources.list.d/tailscale.list` and its keyring), which would
    otherwise conflict with the collection's deb822 `tailscale.sources`.
-3. Includes `artis3n.tailscale.machine` with `state: present` and
-   `tailscale up --accept-dns=false`.
-4. Reads `tailscale ip -4` and **asserts** it returned a `100.x` address — a
+6. Includes `artis3n.tailscale.machine` with `state: present`. Not logged
+   in: with the key and `tailscale up --accept-dns=false …` — the first
+   join. Logged in: with `tailscale_up_skip: true` and an empty key, so it
+   only installs or keeps the package and the service.
+7. Reads `tailscale ip -4` and **asserts** it returned a `100.x` address — a
    silent non-join would make every consumer fall back to the public path while
    the run stays green.
-5. Sets the play fact `tailscale_ip` and merges the same value into
-   `/etc/ansible/facts.d/computestacks.fact`, then re-gathers `ansible_local`.
+8. Sets the play fact `tailscale_ip` and merges the same value into
+   `/etc/ansible/facts.d/computestacks.fact`, then re-gathers `ansible_local`
+   — on every run, so the persisted address follows the node.
+
+## Joining once
+
+`tailscale_authkey` is used **only** to join a member that is not logged in
+to the tailnet yet — its first join, typically at attach. Issue a
+short-lived (or one-off) key for that run, for example in a vaulted
+`host_vars/<node>/tailscale.yml`; it expires, and nothing needs it again.
+
+A logged-in member is never joined again: no run needs a key for it, and
+no run executes `tailscale up` (with or without `--authkey`) on it. The
+collection role decides to run `up` from its own state file and the node's
+online status; on a logged-in node this role turns that task off outright
+with `tailscale_up_skip`, so neither can trigger it.
+
+What the flags would have changed is checked instead. A node joined by hand
+(`--ssh`, tags, a different `--accept-dns`) or changed since its join keeps
+its settings; the run fails with the differing prefs and either a
+`tailscale set …` for the node or the inventory change
+(`tailscale_extra_args`, `tailscale_tags`) that describes it. The comparison
+is the `tailscale_prefs_problems` / `tailscale_set_args` filters
+(`filter_plugins/tailscale.py`, tested in `tests/tailscale_membership.yml`).
+Tags and a non-default login server cannot be changed with `tailscale set`;
+the message lists those as manual.
+
+| Run meets a member that is | First join (site.yml, add-region.yml) | maintain-nodes |
+| --- | --- | --- |
+| not installed, or installed and not logged in | joins with the run's `tailscale_authkey`; fails without one | refused in preflight, before the hold |
+| logged in, settings match | keeps the package, refreshes `tailscale_ip` | the same |
+| logged in, settings differ | fails before changing anything, with the fix | refused in preflight, before the hold |
+| stopped (`tailscale down`), awaiting approval | fails with the state | refused in preflight |
+
+A **non-member** (`tailscale_enabled` false or unset) is never touched, even
+with tailscale installed and logged in on it (a host someone joined by
+hand): this role does not run, its firewall carries no tailnet rules, and
+no pairwise address uses its tailnet address.
 
 ## Decisions
 
@@ -48,7 +103,8 @@ tailnet for operator access only (see [Access-only mode](#access-only-mode)).
 - **No exit node, no subnet routes, no tags.** The tailnet carries control-plane
   traffic between ComputeStacks hosts and operator access, nothing else.
   Extra `tailscale up` flags go in `tailscale_extra_args`; tags need the
-  collection role's `tailscale_tags` (an OAuth key requires them).
+  collection role's `tailscale_tags` (an OAuth key requires them). Both are
+  applied at the first join and compared on every later run.
 - **`state: present`, not the upstream default `latest`.** `latest` would
   upgrade the tailscale package on every converge, which contradicts
   docs/contracts.md rule 4. The collection role has no version-pin variable, so
@@ -123,26 +179,25 @@ predicates — they need no facts and stay correct under `--limit`. Whether a
 host is on the tailnet at all:
 
 ```jinja
-((hostvars[h].tailscale_authkey | default('')) | length > 0)
-  and (hostvars[h].tailscale_enabled | default(true) | bool)
+(hostvars[h].tailscale_enabled | default(false) | bool)
 ```
 
 and whether it routes control-plane traffic over it (every pairwise address
 derivation asks this one, of both ends):
 
 ```jinja
-((hostvars[h].tailscale_authkey | default('')) | length > 0)
-  and (hostvars[h].tailscale_enabled | default(true) | bool)
+(hostvars[h].tailscale_enabled | default(false) | bool)
   and not (hostvars[h].tailscale_access_only | default(false) | bool)
 ```
 
-These are the canonical spellings recorded in docs/contracts.md ("Facts
-exception", "Tailscale access-only mode"). Membership gates both playbooks,
-`preflight` and the firewall's WireGuard and anti-spoof rules; routing gates
-`cs_agent`'s `cs_agent_tailnet_routed`, `metrics`' scrape-address
-derivation, `controller_seed`'s manifest, the firewall's `tailscale0`
-accepts and `validate`. Never `tailscale_authkey is defined` — an
-empty-string authkey must read as NOT tailnet everywhere.
+These are the canonical spellings recorded in docs/contracts.md ("Tailnet
+membership", "Tailscale access-only mode"). Membership gates every playbook
+that runs this role, `preflight`, maintain-nodes' tailscale checks and the
+firewall's WireGuard and anti-spoof rules; routing gates `cs_agent`'s
+`cs_agent_tailnet_routed`, `metrics`' scrape-address derivation,
+`controller_seed`'s manifest, the firewall's `tailscale0` accepts and
+`validate`. Never the auth key: it says only that a run can join a host,
+not that the host is a member.
 
 ## Variables
 
@@ -155,16 +210,22 @@ empty-string authkey must read as NOT tailnet everywhere.
 | `tailscale_up_timeout` | `"120"` | Collection role's `tailscale up` timeout, seconds (same name upstream). |
 | `tailscale_legacy_apt_files` | `tailscale.list` + its keyring | Apt files of the standalone role, removed before the collection writes its own. |
 | `tailscale_fact_file` | `/etc/ansible/facts.d/computestacks.fact` | Persisted local fact. |
+| `tailscale_join_allowed` | `true` | `false` makes a member that is not logged in fail instead of joining (maintain-nodes sets it). |
+| `tailscale_binary` | `/usr/bin/tailscale` | Its absence reads as "not installed". |
 
-Consumed, not owned: `tailscale_authkey` (vaulted secret, passed through
-under the same name), `tailscale_enabled`, `tailscale_access_only` (read by
-the consumers, not by this role).
+Consumed, not owned: `tailscale_enabled` (membership; the playbooks gate
+this role on it), `tailscale_authkey` (vaulted, short-lived; read only to
+join a member that is not logged in, and passed through under the same
+name), `tailscale_tags` (the collection's; applied at the join, compared
+afterwards), `tailscale_access_only` (read by the consumers, not by this
+role).
 
 ## Gotchas
 
-- **Opting a joined host out later.** `site.yml` skips this role entirely when
-  `tailscale_enabled: false`, so a host that was joined keeps its stale
-  `tailscale_ip` fact. Removing a host from the tailnet means `tailscale
+- **Opting a joined host out later.** Every play skips this role entirely when
+  `tailscale_enabled` is not true, so a host that was joined stays logged in
+  and keeps its stale `tailscale_ip` fact; the firewall drops its tailnet
+  rules on the next converge. Removing a host from the tailnet means `tailscale
   logout` **and** deleting `/etc/ansible/facts.d/computestacks.fact` (or its
   `tailscale_ip` key). The `firewall` role is immune — it derives membership
   from inventory, not from the fact — but a scrape-target template that reads
@@ -174,16 +235,16 @@ the consumers, not by this role).
   them is an operator action taken before `add-region.yml` runs.
 - **Upgrading a checkout from the standalone role.** `make deps` installs the
   collection; the old `galaxy_roles/artis3n.tailscale` directory is no longer
-  referenced and can be deleted. The collection's `tailscale up` idempotency
-  state is the same file and hash as the standalone role's, so an already
-  joined host is not re-authenticated (a spent one-off auth key stays safe).
-- **A host joined outside this role.** With no collection state file on the
-  host (`artis3n-tailscale/state` under the facts user's `XDG_STATE_HOME`,
-  usually `/root/.local/state`), the first converge runs `tailscale up` with this role's flags (`--accept-dns=false`
-  plus `tailscale_extra_args`). tailscale refuses an `up` that drops a
-  non-default setting the host was joined with ("requires mentioning all
-  non-default flags"), and the run fails. Run `tailscale debug prefs` on the
-  host first and make `tailscale_extra_args` carry every non-default
-  setting it shows (`--ssh`, `--advertise-tags=…`, and so on).
+  referenced and can be deleted. Its state file no longer matters: a
+  logged-in host is never re-authenticated, whatever the file says.
+- **A host joined outside this role.** It is logged in, so it is never
+  joined again; its settings are compared with this role's flags
+  (`--accept-dns=false` plus `tailscale_extra_args`, and `tailscale_tags`).
+  A host joined with `--ssh`, tags or MagicDNS fails the run until the
+  inventory describes it (`tailscale debug prefs` on the host shows its
+  settings) or `tailscale set` changes it — the message gives both.
+- **Changing a member's flags later.** Editing `tailscale_extra_args` does
+  not re-run `tailscale up`; the next run fails and prints the `tailscale
+  set …` to apply on the node (tags need a re-join by hand).
 - The collection role installs from `pkgs.tailscale.com` keyed on the Ubuntu
   codename; a brand-new Ubuntu release can briefly have no repo there.

@@ -1,0 +1,47 @@
+---
+# Tailnet membership checks (docs/contracts.md §Tailnet membership). Pure
+# inventory, no facts: tests/tailscale_membership.yml runs this file as is.
+#
+# Membership is `tailscale_enabled` alone, default false. Before that, a host
+# with a non-empty tailscale_authkey was a member unless it said
+# `tailscale_enabled: false`. A host with a key and no `tailscale_enabled`
+# was a member under the old rule and is not one under the new default, so a
+# run would quietly drop it from the tailnet's firewall rules and pairwise
+# addresses. Refuse it and make the operator say which.
+- name: Gate - a host with an auth key must say whether it is a tailnet member
+  ansible.builtin.assert:
+    that:
+      - tailscale_enabled is defined or ((tailscale_authkey | default('')) | length == 0)
+    fail_msg: >-
+      {{ inventory_hostname }} has a tailscale_authkey but no tailscale_enabled.
+      Tailnet membership is now `tailscale_enabled` alone and defaults to false, so
+      this host -- a member under the old rules -- would silently leave the tailnet's
+      firewall rules and addresses. Set `tailscale_enabled: true` (keep it a member;
+      for the old behavior put it in group_vars/all) or `tailscale_enabled: false`.
+      The auth key is needed only for a member's first join; drop it once the
+      member is logged in. Nothing was changed.
+    quiet: true
+
+- name: List the hosts that are not tailnet members
+  ansible.builtin.set_fact:
+    preflight_tailscale_non_members: >-
+      {{ (preflight_tailscale_non_members | default([]) if ansible_loop.index0 > 0 else [])
+         + ([item] if not (hostvars[item].tailscale_enabled | default(false) | bool) else []) }}
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    extended: true
+    label: "{{ item }}"
+  run_once: true
+
+- name: Warn when only part of the environment is on the tailnet
+  ansible.builtin.debug:
+    msg: >-
+      Some hosts are tailnet members and these are not (tailscale_enabled is not
+      true): {{ preflight_tailscale_non_members | join(', ') }}. Control-plane
+      traffic to and from them (controller -> agent Bearer, metrics scrape) rides
+      the LAN/public network instead of the tailnet. Confirm this is intentional
+      (a same-L2 region) before proceeding.
+  when:
+    - preflight_tailscale_non_members | length > 0
+    - preflight_tailscale_non_members | length < groups['all'] | length
+  run_once: true
