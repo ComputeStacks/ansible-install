@@ -32,10 +32,11 @@ Stopped at "{{ task }}" on {{ inventory_hostname }}; its message above says what
 {%- if node_upgrade_rescue_state.stat.exists %} To resume: `{{ rerun }}`.{% endif %}
 {%- elif not node_upgrade_rescue_state.stat.exists -%}
 "{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
-No maintenance state was written, so this run holds nothing and changed nothing on the node.
-Run `cs-agent maintenance status` on the node: if it shows a local hold with reason
-`{{ node_upgrade_reason }}` that this run placed, clear it with `cs-agent maintenance off`.
-Fix the cause, then re-run.
+No maintenance state was written, so this run changed nothing on the node and stopped no
+container, and its hold (if `on` placed one) is NOT released automatically: a re-run refuses
+while it is there. Run `cs-agent maintenance status` and `docker ps` on the node: if it shows a
+local hold with reason `{{ node_upgrade_reason }}` that this run placed, clear it with
+`cs-agent maintenance off` (safe: nothing was stopped or changed). Fix the cause, then re-run.
 {%- elif node_upgrade_state.releasing | default(false) -%}
 "{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
 The node had already been RELEASED (`cs-agent maintenance off` ran). Re-run `{{ rerun }}`:

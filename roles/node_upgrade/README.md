@@ -42,8 +42,9 @@ metrics and registry docker hosts are not covered.
 **Contract dependencies:**
 
 * **cs-agent >= 3.4.0** on every node (`cs-agent maintenance`). Checked by
-  preflight, never installed: an agent install restarts the agent, which is
-  not something to do mid-window.
+  preflight. upgrade-docker never installs it (an agent install restarts the
+  agent, which is not something to do mid-window); maintain-nodes upgrades it
+  to its pin inside the hold, during the converge, and waits for it.
 * **controller >= 9.8.0**, which treats an agent hold as maintenance (no
   heartbeat-driven offline/evacuation, no HealthCheck/RecoverContainer, no
   placement, customer power actions canceled) and, on release, kicks
@@ -60,7 +61,7 @@ metrics and registry docker hosts are not covered.
 | preflight | `preflight.yml` | — | Not `existing_env`; docker-ce installed; cs-agent >= min (`dpkg --compare-versions`); `maintenance status --json` readable; while the package phase is still ahead: `apt-get update` (waits for the dpkg lock), every drifting pin exists on the mirror, no pin is below what is installed. |
 | decide | `main.yml` | — | Run when docker drifts from a pin, `/var/run/reboot-required` exists, a `state.json` exists (resume), or `node_upgrade_force`. Otherwise print "nothing to do" and take no hold. `--check` stops here. |
 | download | `download.yml` | — | `apt-get update`, then `--download-only` of the OS upgrade and the drifting pins — containers still running, so a mirror problem fails before anything is held. |
-| hold | `hold.yml` | `held` | Fresh run only: `cs-agent maintenance on --reason docker-upgrade --wait --timeout 7200s --settle 30s --json` under `async`/`poll`. Resume: requires the existing hold, never calls `on`. |
+| hold | `hold.yml` | `held` | Fresh run only: `cs-agent maintenance on --reason docker-upgrade --wait --timeout 7200s --settle 30s --json` under `async`/`poll`; repeated only while it places no hold (`not_placed`, up to 3 more times, 30s apart). Resume: requires the existing hold, never calls `on`. |
 | record | `record.yml` | `recorded` | `docker container inspect` of every container; the running non-system ones go into `state.json` **before** anything stops. |
 | stop | `stop.yml` | `stopped` | Hold re-check; `docker stop -t 30` the recorded ones still running, 8 at a time; assert none is running. |
 | packages | `packages.yml` | `packages` | Hold re-check; `apt-get upgrade --with-new-pkgs` with the docker packages **held**; then release the holds → install the pins exactly → re-hold (in `always:`); assert no drift remains. |
@@ -140,7 +141,7 @@ different states:
 | --- | --- | --- | --- |
 | status | 0 | ok | held, quiet, controller acked |
 | status | 2 | timeout | held; `running` lists what is still in flight |
-| status, `local` null | 4 | not_placed | not held: no maintenance-capable controller poll in 120s |
+| status, `local` null | 4 | not_placed | not held: no maintenance-capable controller poll in 120s. The only outcome retried: `on` again, up to `node_upgrade_hold_not_placed_retries` (3) times, `node_upgrade_hold_not_placed_delay` (30s) apart (filter `node_upgrade_on_retry`) |
 | status, `local` set | 4 | unconfirmed | held, the controller never confirmed |
 | status, `local` null | 1 | cleared | not held: somebody ran `off` while it waited |
 | status, `local` set | 1 | interrupted | held: the CLI got SIGINT/SIGTERM |
@@ -195,7 +196,7 @@ view.
 | download | `download.yml` | — | `apt-get update`, `--download-only` of the OS upgrade and the drifting pins, containers running, no hold. |
 | hold | `hold.yml` | `held` | `cs-agent maintenance on --reason maintain-nodes --wait ...`; resume requires the existing hold. state.json gets `playbook: maintain-nodes`. |
 | converge | `maintain_converge_phase.yml` → `maintain_converge.yml` | — | `converge_started` saved first. Then, containers RUNNING: common (its reboot off), node_exporter, tailscale (members), ubuntu_pro (token), docker_config, docker_tls (restart deferred), node_kernel, haproxy, node_observability, firewall, cs_agent (pin installed, never downgraded). |
-| handlers | `maintain_converge_phase.yml` | — | `meta: flush_handlers` inside the hold (R1). |
+| handlers | `maintain_converge_phase.yml` | — | On a resumed converge, every lost handler is notified again first (see "Resumed converge" below). Then `meta: flush_handlers` inside the hold (R1). |
 | agent | `agent_wait.yml` | — | Poll `maintenance status --json` until `agent_active` and a local hold (`node_upgrade_agent_wait`, 300s). Exit 3 and no output are retried; no hold, or another error document, fails at once. `controller_acked` is not read. |
 | decide | `maintain_decide.yml` | `converged` | Stop iff docker drifts, dockerd must restart (docker_tls' deferred reason, or a docker_tls file newer than the running dockerd), `/var/run/reboot-required` exists, or `maintain_force_restart`. The decision and its inputs are written with the phase (R2). |
 | report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the pending OS updates (kernel/libc named). |
@@ -225,7 +226,8 @@ decision.
   deferred docker restart" does. `docker_config`'s handler is a SIGHUP reload
   and fires inside the hold. The converge's handlers are flushed right after
   it, before the agent wait and the decision, and again before the release;
-  no task of this role notifies anything. `tests/maintain_nodes.yml` checks
+  no task of this role notifies anything except the resumed converge's
+  re-apply task, and that never a dockerd restart. `tests/maintain_nodes.yml` checks
   all of it statically, including that no handler of a converged role
   restarts dockerd without the gate. `tasks/maintain.yml` refuses to run
   without the play var.
@@ -236,14 +238,38 @@ decision.
   that happens for another reason; never with tenants running (no role in the
   converge runs `apt upgrade`; they install at `present`, the agent and
   node_exporter at their pins).
-* **R5 -- releasing after a failure.** If the run fails after its own hold and
-  before the converge's first task (state.json with only `held`, no
-  `converge_started`), nothing has changed and the hold is released and the
-  state set aside (`state.aborted.<timestamp>.json`). From the converge on,
+* **R5 -- releasing after a failure.** If the run fails after its own hold
+  was RECORDED and before the converge's first task (state.json with only
+  `held`, no `converge_started`), nothing has changed and the hold is
+  released and the state set aside (`state.aborted.<timestamp>.json`). A
+  failure while PLACING the hold (`on --wait` timed out, unconfirmed or
+  interrupted, or the state write after it failed) leaves no state.json, so
+  nothing is released automatically, and a re-run refuses the existing
+  local hold: `hold_failed.j2` / `maintain_failed.j2` say whether the node is
+  held, and since nothing was stopped or changed, `cs-agent maintenance off`
+  (after a look at `cs-agent maintenance status` and `docker ps`) is safe. From the converge on,
   ansible offers no reliable "did any task change something" for included
   roles, so the node stays held and `templates/maintain_failed.j2` says what
   to do: re-run (it resumes inside the hold), or, as long as nothing was
   stopped, `cs-agent maintenance off` is safe for the tenants.
+* **Resumed converge -- no lost handler.** A run that died after a role
+  changed a file but before the flush lost that role's pending handlers, and
+  on resume the same task reports ok. So when the converge phase runs with
+  `converge_started` already in state.json (and `converged` not done), it
+  notifies, after the converge and before the flush, every handler of the
+  converged roles by `role : name`: `common : Restart ssh`,
+  `docker_config : Reload docker` (SIGHUP), `node_kernel : Load node kernel
+  modules`, `node_kernel : Reload sysctl` (`sysctl --system`),
+  `node_kernel : Reload systemd-networkd` (still only when
+  `node_kernel_uplink_ra_reload`), `node_observability : Restart cadvisor` /
+  `Restart fluentd`, `firewall : Reload systemd for the ComputeStacks
+  firewall` / `Apply the ComputeStacks firewall`, and `cs_agent : Restart
+  cs-agent` -- the roles' own handlers, so they behave exactly as in a first
+  run. They run inside the hold, and the agent wait follows the cs-agent
+  restart. docker_tls' handlers are never notified: a lost docker restart is
+  caught by the decision's docker_tls file check (a file newer than the
+  running dockerd) and goes through the stopped window. `tests/maintain_nodes.yml`
+  keeps that list equal to the converged roles' handlers minus docker_tls'.
 * **R7 -- one owner per state file.** `playbook` is recorded in state.json;
   each playbook refuses to resume the other's (a file without the field is
   upgrade-docker's). Their hold reasons differ too (`maintain-nodes` /
@@ -283,6 +309,7 @@ drift, reboot_pending, force}`; `docker_restarted` with that phase.
 | `node_upgrade_cs_agent_min_version` | `3.4.0` | |
 | `node_upgrade_maintenance_timeout` | 7200 (s) | `--timeout`; must be >= 300 (controller polls every 15s) |
 | `node_upgrade_maintenance_settle` | 30 (s) | `--settle` |
+| `node_upgrade_hold_not_placed_retries` / `_delay` | 3 / 30 (s) | repeat `on` when it placed no hold (`not_placed`) |
 | `node_upgrade_reason` | `docker-upgrade` | the hold's reason |
 | `node_upgrade_release_timeout` | 600 (s) | wait for the controller after `off` |
 | `node_upgrade_stop_timeout` | 30 (s) | `docker stop -t` |

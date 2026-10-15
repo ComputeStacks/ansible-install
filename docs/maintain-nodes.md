@@ -45,6 +45,12 @@ for the next window that stops.
 The cs-agent upgrade happens inside the hold with the containers running: the
 agent restarts, keeps its hold, and the run waits until it is back.
 
+A run resumed part-way through its converge restarts cs-agent, cadvisor,
+fluentd and sshd, re-applies the firewall, sysctl and kernel modules, reloads
+docker's configuration (a SIGHUP, which stops nothing) and networkd, all
+inside the hold: whatever the interrupted run changed is then live before the
+node is released.
+
 ## Running it
 
 Preview first. `--check --diff` takes no hold and changes nothing: it runs
@@ -88,8 +94,13 @@ node's hold — when:
   `metadata.admin_token_hash`, `metadata.listen_addr`, `backups.key` or where
   the borg repositories live. Values are never printed. A per-node
   `backups_key` must be byte for byte the node's passphrase, without a
-  trailing newline (`printf %s '<passphrase>' | ansible-vault encrypt_string
-  --stdin-name backups_key`);
+  trailing newline. Encrypt it without echoing it or leaving it in shell
+  history — paste the passphrase at the silent prompt:
+
+  ```sh
+  IFS= read -rs K && printf %s "$K" | ansible-vault encrypt_string --stdin-name backups_key; unset K
+  ```
+
 * on a tailnet member, `tailscale up` with the inventory's flags would change
   the node's tailscale settings — typically a node joined by hand with
   `--ssh` or tags the inventory does not carry. `tailscale debug prefs` on the
@@ -110,8 +121,23 @@ and re-running the same command resumes it — inside the same hold, from the
 last completed step, never stopping a container twice and never re-deciding
 whether to stop.
 
-* Failed before the converge started: the hold is released automatically;
-  nothing changed.
+* Failed before the hold (preflight, the download): nothing is held and
+  nothing changed. Fix the cause and re-run.
+* Failed while placing the hold (`cs-agent maintenance on --wait` timed out
+  waiting for in-flight work, the controller never confirmed it, it was
+  interrupted, or the state file could not be written): no state file exists,
+  so the hold is NOT released automatically, and a re-run refuses because
+  the node already has a local hold. The message says whether the node is
+  held. To recover, on the node run `cs-agent maintenance status` (a local
+  hold with reason `maintain-nodes` is this run's) and `docker ps` (the
+  tenants are still running); then `cs-agent maintenance off` is safe —
+  nothing was stopped or changed — and re-run. (`on` failing only because
+  the controller has not polled the agent with maintenance support in the
+  last 120s places no hold; the run retries that up to 3 times, 30s apart,
+  before it gives up.)
+* Failed after the hold was recorded and before the converge started: the
+  hold is released automatically and the state file set aside; nothing
+  changed.
 * Failed during the converge or before anything was stopped: the node stays
   held with its containers running. Re-run to resume, or, to abandon, run
   `cs-agent maintenance off` on the node (safe: nothing was stopped) and move
