@@ -485,3 +485,37 @@
           - "'command not found' in node_upgrade_on_message"
         fail_msg: "{{ node_upgrade_on_result }} -- {{ node_upgrade_on_message }}"
         quiet: true
+
+    # --- 14. which `on` results tasks/hold.yml repeats: not_placed only
+    - name: "Assert: only not_placed retries `on`"
+      vars:
+        nut_retry_cases:
+          - {file: on_rc4_not_placed.json, rc: 4, retry: true}
+          # the same document under any other rc is not the up-front check
+          - {file: on_rc4_not_placed.json, rc: 0, retry: false}
+          - {file: on_rc4_not_placed.json, rc: 1, retry: false}
+          - {file: on_rc0_ok.json, rc: 0, retry: false}
+          - {file: on_rc1_cleared.json, rc: 1, retry: false}
+          - {file: on_rc1_interrupted.json, rc: 1, retry: false}
+          - {file: on_rc1_usage.json, rc: 1, retry: false}
+          - {file: on_rc2_busy.json, rc: 2, retry: false}
+          - {file: on_rc2_error.json, rc: 2, retry: false}
+          - {file: on_rc3_error.json, rc: 3, retry: false}
+          # rc 4 with an error document: unknown whether a hold was placed
+          - {file: on_rc4_error.json, rc: 4, retry: false}
+          # rc 4 with a hold placed: unconfirmed, never repeated
+          - {file: on_rc4_unconfirmed.json, rc: 4, retry: false}
+      ansible.builtin.assert:
+        that:
+          - (lookup('ansible.builtin.file', nut_fixtures ~ '/' ~ item.file) ~ nut_nl)
+            | node_upgrade_on_retry(item.rc) == item.retry
+        fail_msg: "{{ item | to_json }}"
+        quiet: true
+      loop: "{{ nut_retry_cases }}"
+
+    - name: "Assert: no output is never retried"
+      ansible.builtin.assert:
+        that:
+          - not ('' | node_upgrade_on_retry(4))
+          - not ('' | node_upgrade_on_retry(none))
+        quiet: true

@@ -342,6 +342,16 @@ def classify_on(stdout, rc):
     return res
 
 
+def on_retry(stdout, rc):
+    """True only when a `cs-agent maintenance on --wait --json` exit is
+    classify_on's `not_placed`: the up-front "controller has not polled with
+    maintenance support in the last 120s" check failed and NO hold was placed
+    (status document, rc 4, `local` null). Common right after an agent
+    restart. Repeating `on` is then a fresh attempt; every other outcome is
+    final (tasks/hold.yml's `until`)."""
+    return classify_on(stdout, rc)["outcome"] == "not_placed"
+
+
 # ---------------------------------------------------------------------------
 # playbooks/maintain-nodes.yml
 # ---------------------------------------------------------------------------
@@ -736,6 +746,7 @@ class FilterModule(object):
             "node_upgrade_drift": docker_drift,
             "node_upgrade_cli_json": cli_json,
             "node_upgrade_classify_on": classify_on,
+            "node_upgrade_on_retry": on_retry,
             "node_upgrade_state_owner": state_owner,
             "node_upgrade_agent_status": agent_status,
             "node_upgrade_maintain_decide": maintain_decide,

@@ -28,6 +28,10 @@
   every OS upgrade.
 * upgrade-docker's state file records which playbook owns it; upgrade-docker
   and maintain-nodes refuse to resume each other's run.
+* upgrade-docker and maintain-nodes retry `cs-agent maintenance on` up to 3
+  times, 30s apart, when it placed no hold because the controller had not
+  polled the agent with maintenance support yet (common right after an agent
+  restart). Every other outcome fails as before.
 ## October 14, 2026
 
 * **`make deps` reinstalls galaxy roles** (`--force`), so a changed pin

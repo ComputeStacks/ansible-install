@@ -18,7 +18,8 @@ is still in place: this playbook never adopts a hold it did not record placing.
 {%- elif r.outcome == 'not_placed' -%}
 {{ host }} is NOT held: cs-agent placed no hold, because the controller has not polled it with
 maintenance support in the last 120s (a controller older than 9.8.0, or one that is not reaching
-this node's agent). {{ nothing }} Check the controller's version and its connection to the node,
+this node's agent), and still had not after {{ node_upgrade_hold_not_placed_retries }} more attempts
+{{ node_upgrade_hold_not_placed_delay }}s apart. {{ nothing }} Check the controller's version and its connection to the node,
 then re-run.
 {%- elif r.outcome == 'unconfirmed' -%}
 {{ host }} IS HELD locally and quiet, but the controller did not confirm the hold within

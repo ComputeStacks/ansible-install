@@ -16,9 +16,12 @@ node_upgrade_state_file: "{{ node_upgrade_state_dir }}/state.json"
 node_upgrade_state_keep: 5
 
 # --- cs-agent ---------------------------------------------------------------
-# `cs-agent maintenance` first shipped in v3.4.0. The playbook never installs
-# the agent (a package install restarts it, which is not something to do in
-# the middle of a window); it refuses to touch a node whose agent is older.
+# `cs-agent maintenance` first shipped in v3.4.0; both playbooks refuse to
+# touch a node whose agent is older. upgrade-docker.yml never installs the
+# agent (a package install restarts it, which is not something to do in the
+# middle of its window). maintain-nodes.yml does upgrade it, to
+# cs_agent_apt_version, inside the hold during the converge -- never
+# downgrading -- and waits for it to come back (tasks/agent_wait.yml).
 node_upgrade_cs_agent_min_version: "3.4.0"
 node_upgrade_cs_agent_bin: cs-agent
 
@@ -28,6 +31,13 @@ node_upgrade_cs_agent_bin: cs-agent
 # 15s, so anything under 300 risks failing a healthy node; the 2h default
 # waits out backups.
 node_upgrade_maintenance_timeout: 7200
+# `cs-agent maintenance on` exits 4 placing NO hold (classify_on's
+# `not_placed`) when the controller has not polled the agent with
+# maintenance support in the last 120s -- common right after an agent
+# restart. That outcome alone is retried, this many times, this many seconds
+# apart; every other outcome is final.
+node_upgrade_hold_not_placed_retries: 3
+node_upgrade_hold_not_placed_delay: 30
 # `--settle`, in seconds: once quiesced, wait this long and look again, so
 # work that was about to start is caught.
 node_upgrade_maintenance_settle: 30

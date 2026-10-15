@@ -83,9 +83,10 @@
           {{ '%Y-%m-%dT%H:%M:%SZ' | strftime(node_upgrade_hold_status_doc.doc.local.since | default(0), utc=true) }}),
           and no upgrade state file. This playbook never adopts a hold it did not
           place. If it belongs to someone working on the node, wait for them. If it
-          is left from an upgrade-docker run that failed before recording anything
-          (reason `{{ node_upgrade_reason }}`), nothing was stopped -- clear it with
-          `cs-agent maintenance off` on the node and re-run.
+          is left from a {{ node_upgrade_playbook }} run that failed while placing it,
+          before recording anything (reason `{{ node_upgrade_reason }}`), nothing was
+          stopped or changed: check `docker ps` on the node, clear it with
+          `cs-agent maintenance off` and re-run.
         quiet: true
 
     # A controller-side hold (admin UI / API) cannot be released from here, so
@@ -127,6 +128,14 @@
     # async + poll: the wait can last the whole timeout (backups are waited
     # out), and a dropped ssh connection must not kill the CLI half-way. The
     # job keeps running on the node either way; poll only collects it.
+    #
+    # `not_placed` (exit 4, `local` null: the controller has not polled this
+    # agent with maintenance support in the last 120s, common right after an
+    # agent restart) placed NO hold, so `on` is simply tried again, up to
+    # node_upgrade_hold_not_placed_retries times. Any other outcome ends the
+    # loop at once and is classified below exactly as before. Running out of
+    # retries marks the task failed whatever failed_when says; ignore_errors
+    # lets the gate below report it as `not_placed`.
     - name: Hold the node and wait until it is quiet
       ansible.builtin.command:
         argv:
@@ -146,6 +155,10 @@
       poll: 15
       changed_when: true
       failed_when: false
+      retries: "{{ node_upgrade_hold_not_placed_retries | int }}"
+      delay: "{{ node_upgrade_hold_not_placed_delay | int }}"
+      until: not (node_upgrade_on.stdout | default('') | node_upgrade_on_retry(node_upgrade_on.rc | default(none)))
+      ignore_errors: true
 
     - name: Classify the hold result
       ansible.builtin.include_tasks: classify_on.yml
