@@ -2,6 +2,9 @@
 
 ## October 14, 2026
 
+* **`make deps` reinstalls galaxy roles** (`--force`), so a changed pin
+  in `requirements.yml` actually lands; before, an installed role was kept
+  at its old version.
 * **geerlingguy.docker 8.0.0 and ansible.posix 2.2.2** (were 7.4.7 and
   1.6.2); run `make deps`. The docker role now writes its source as deb822
   (`/etc/apt/sources.list.d/docker.sources`) and deletes the `docker.list`

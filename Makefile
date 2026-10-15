@@ -98,7 +98,7 @@ help:
 
 # Paths match ansible.cfg's roles_path/collections_path; both are gitignored.
 deps:
-	$(ANSIBLE_GALAXY) role install -r requirements.yml -p galaxy_roles
+	$(ANSIBLE_GALAXY) role install --force -r requirements.yml -p galaxy_roles
 	$(ANSIBLE_GALAXY) collection install -r requirements.yml -p collections
 
 site:
