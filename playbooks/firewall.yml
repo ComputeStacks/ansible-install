@@ -7,7 +7,8 @@
 #
 # For an inventory change that only the firewall reads — `firewall_allow_ssh_from`,
 # `firewall_extra_allowed_ipv4` / `_ipv6`, `firewall_extra_input_rules`, a
-# host's `ssh_port`, a peer's `primary_ip` / `public_ip`, tailnet membership —
+# host's `ssh_port`, a peer's `primary_ip` / `public_ip`, tailnet membership
+# or `tailscale_access_only` —
 # applied without a full site.yml or add-region.yml run. roles/firewall reads
 # inventory vars only (never facts), so what it renders here is exactly what
 # the next full converge would render.
@@ -27,12 +28,14 @@
 #                          never reaches an existing_env host from here; that
 #                          host's firewall is not this repository's.
 #
-# Preflight runs first, as in the other entry points, with its network checks
-# (registries, load balancer DNS) and the node data disk probe turned off: none
-# of them bear on the firewall, and a firewall fix must not wait on an expired
-# registry token. The inventory assertions -- ssh_port, ansible_port, the node
-# vars, root connection -- all still run, and an attach inventory also gets
-# add-region.yml's attach-mode checks.
+# As in the other entry points, every targeted host must first answer a ping
+# (roles/preflight/tasks/reachable.yml), then preflight runs with its network
+# checks (registries, load balancer DNS), the node data disk probe and the
+# checks of settings the firewall never reads (public_ipv6, backup export)
+# turned off: none of them bear on the firewall, and a firewall fix must not
+# wait on an expired registry token. The inventory assertions -- ssh_port,
+# ansible_port, the node vars, root connection -- all still run, and an
+# attach inventory also gets add-region.yml's attach-mode checks.
 #
 # `--limit` is safe and meaningful: every rule is rendered from inventory, so
 # a limited host's table still lists every peer. Limit to the hosts whose OWN
@@ -54,13 +57,32 @@
 # backup server). Moving sshd itself is not done here -- see the README,
 # "Changing the firewall".
 
+# First, before anything gathers facts: ansible drops an unreachable host
+# from the play and carries on without it, so this fails the run instead,
+# naming every host that did not answer (roles/preflight/README.md).
+- name: Every targeted host is reachable
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check every targeted host answers over ssh
+      ansible.builtin.import_role:
+        name: preflight
+        tasks_from: reachable
+      tags: [always]
+
+# `any_errors_fatal` here regardless of ansible.cfg (which sets it for every
+# play): one host failing preflight must stop the run before any host's
+# firewall is changed.
 - name: Preflight validation
   hosts: all
   gather_facts: true
+  any_errors_fatal: true
   vars:
     preflight_verify_registries: false
     preflight_check_app_domain_dns: false
     preflight_check_node_storage: false
+    preflight_check_public_ipv6: false
+    preflight_check_backup_export: false
   roles:
     - preflight
   tasks:

@@ -29,8 +29,8 @@
   own `ansible.cfg`, copy the setting.
 * **`make firewall ENV=<env>` applies a firewall change on its own**
   (`playbooks/firewall.yml`). After editing `firewall_allow_ssh_from`, a
-  host's `ssh_port`, extra allowed addresses or a peer's address, it runs
-  preflight's inventory checks and re-renders each host's firewall exactly as
+  host's `ssh_port`, extra allowed addresses or a peer's address, it checks
+  every targeted host is reachable, runs preflight's inventory checks and re-renders each host's firewall exactly as
   `site.yml` or `add-region.yml` would, without the rest of the converge.
   Existing shared hosts in an attach inventory still only receive node address
   appends. `--limit` and `--check --diff` are supported. The README's

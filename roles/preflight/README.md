@@ -13,18 +13,20 @@ to a host.
 | `add-region.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | `all` |
 | `add-region.yml` | "Preflight validation and attach-mode inventory checks" | `all` |
 | `add-region.yml` (`tasks_from: attach`) | "Preflight validation and attach-mode inventory checks" | `all` |
+| `firewall.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | `all` |
 | `firewall.yml` | "Preflight validation" | `all` |
 | `firewall.yml` (`tasks_from: attach`, attach inventory only) | "Preflight validation" | `all` |
 | `upgrade-docker.yml` | "Every targeted node is reachable" (`tasks_from: reachable`) | `node_upgrade_targets` |
 | `unseal.yml` | not run | — |
 
-The reachability play runs first in `site.yml`, `add-region.yml` and
-`upgrade-docker.yml`, with `gather_facts: false`; the preflight play follows
-with `gather_facts: true` and `any_errors_fatal: true`, so a host failing any
-check stops every host. `firewall.yml` turns off
-the registry, load balancer DNS and data disk checks
-(`preflight_verify_registries`, `preflight_check_app_domain_dns`,
-`preflight_check_node_storage`), none of which bear on a firewall change.
+The reachability play runs first in every playbook, with `gather_facts:
+false`; the preflight play follows with `gather_facts: true` and
+`any_errors_fatal: true`, so a host failing any check stops every host.
+`firewall.yml` turns off the registry, load balancer DNS, data disk,
+`public_ipv6` and backup export checks (`preflight_verify_registries`,
+`preflight_check_app_domain_dns`, `preflight_check_node_storage`,
+`preflight_check_public_ipv6`, `preflight_check_backup_export`), none of
+which bear on a firewall change.
 
 `tasks/attach.yml` holds the attach-mode inventory checks: every host in
 `controller`, `metrics`, `backup` or `registry` is flagged `existing_env`, no
@@ -289,6 +291,8 @@ not earn.
 | `preflight_reachable_hosts` / `preflight_reachable_hostvars` | `ansible_play_hosts_all` / `hostvars` | What `tasks/reachable_assert.yml` judges. Set only by `tests/preflight_reachable.yml`, to feed it canned ping results. |
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
 | `preflight_check_node_storage` | `true` | The data disk probe and its run-wide assert. False only for a run that never touches docker or the disk (`firewall.yml`). |
+| `preflight_check_public_ipv6` | `true` | The `public_ipv6` format check. False only in `firewall.yml`, which never reads it. |
+| `preflight_check_backup_export` | `true` | The backup export check and its run-wide assert. False only in `firewall.yml`, which never configures cs-agent. |
 | `preflight_storage_refused_nodes` | derived | Nodes whose `node_storage_state` fact is `refuse`. A plain fact, so the cross-host read is safe (docs/contracts.md rule 10). |
 | `preflight_site_hint` | see `defaults/main.yml` | What a `site` is and where to set it, as an operator-facing sentence. Shared by all three site assertions. |
 | `preflight_node_sites` | derived | Distinct `cs_site` values across `groups['nodes']`. |

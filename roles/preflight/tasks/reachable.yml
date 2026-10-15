@@ -1,7 +1,7 @@
 ---
 # Can ansible reach and run a module on every targeted host? Run as the
 # FIRST play of every entry point (site.yml, add-region.yml,
-# upgrade-docker.yml), with `gather_facts: false`, before anything else
+# upgrade-docker.yml, firewall.yml), with `gather_facts: false`, before anything else
 # connects.
 #
 # Why this exists: an unreachable host is not an error ansible stops for.

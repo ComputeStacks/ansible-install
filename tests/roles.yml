@@ -138,6 +138,11 @@
         name: preflight
         tasks_from: attach
 
+    - name: Check every targeted host answers over ssh
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: reachable
+
     - name: Append new node addresses to an existing host's firewall
       ansible.builtin.include_role:
         name: firewall

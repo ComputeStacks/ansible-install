@@ -260,8 +260,9 @@ make firewall ENV=prod                          # apply it
 make firewall ENV=prod LIMIT=node1001           # one host
 ```
 
-`playbooks/firewall.yml` runs preflight's inventory checks (not its registry,
-DNS or data disk checks), then re-renders and applies the `inet cs_static`
+`playbooks/firewall.yml` checks every targeted host is reachable, runs
+preflight's inventory checks (not its registry, DNS, data disk, `public_ipv6`
+or backup export checks), then re-renders and applies the `inet cs_static`
 table on each host exactly as the playbook that built it would: every host on
 a greenfield inventory; on an attach inventory, the nodes only, with the
 existing controller, metrics and backup hosts receiving the same additive node

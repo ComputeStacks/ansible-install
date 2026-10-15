@@ -167,6 +167,14 @@ preflight_wildcard_domain_overrides: >-
 # built before the data-disk requirement can still have its firewall changed.
 preflight_check_node_storage: true
 
+# The public_ipv6 format check (tasks/public_ipv6.yml) and the backup export
+# check (roles/cs_agent's export_check). Both are pure inventory, but they
+# validate inputs only roles/controller_seed, roles/powerdns and roles/cs_agent
+# consume. Off only in playbooks/firewall.yml, so a firewall fix never waits on
+# a setting the firewall does not read.
+preflight_check_public_ipv6: true
+preflight_check_backup_export: true
+
 # Nodes whose container data disk roles/node_storage refused (classify.yml
 # sets `node_storage_state` as a plain fact on each node it probes). A fact,
 # not a hostvars-built variable, so reading it across hosts is safe

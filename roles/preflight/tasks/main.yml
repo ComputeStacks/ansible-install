@@ -80,6 +80,7 @@
 # (tasks/public_ipv6.yml).
 - name: Check every public_ipv6 that is set
   ansible.builtin.include_tasks: public_ipv6.yml
+  when: preflight_check_public_ipv6 | bool
 
 - name: Assert exactly one node per availability zone
   ansible.builtin.assert:
@@ -627,6 +628,7 @@
   vars:
     cs_agent_export_check_fail: false
   when:
+    - preflight_check_backup_export | bool
     - "'nodes' in group_names"
     - not (existing_env | default(false) | bool)
 
@@ -642,6 +644,7 @@
       {{ hostvars[n].cs_agent_export_problems | join(' ') }}{{ ' ' if not loop.last else '' }}{% endfor %}
       See roles/cs_agent/README.md, "Backup export to S3".
     success_msg: "every new node's backup export settings are valid (or export is off)"
+  when: preflight_check_backup_export | bool
   run_once: true
 
 # DNS before the registry: both are network checks, but this one fails on an
