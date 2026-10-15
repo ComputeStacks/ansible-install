@@ -7,8 +7,12 @@
   ansible.builtin.command: sysctl --system
   changed_when: false
 
-# Re-reads .network files and drop-ins; only links whose configuration
-# changed are reconfigured, in place (the link is not set down).
+# Re-reads .network files and drop-ins and reconfigures the links whose
+# configuration changed: here the uplink. The link is not set down, but its
+# reconfiguration can briefly drop and re-learn RA-derived IPv6 addresses
+# and routes on it. node_kernel_uplink_ra_reload: false skips this; the
+# drop-in then takes effect at the next reboot or networkd restart.
 - name: Reload systemd-networkd
   ansible.builtin.command: networkctl reload
   changed_when: true
+  when: node_kernel_uplink_ra_reload | bool

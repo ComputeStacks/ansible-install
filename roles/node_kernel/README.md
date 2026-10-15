@@ -66,8 +66,13 @@ Which fix applies depends on who handles RAs on the uplink, and the role asks
   leaves it in force, and the operator's netplan YAML is never edited. (A
   netplan `accept-ra: true` override was rejected: it has to repeat the
   operator's netplan id to merge, and applying it means `netplan apply`.)
-  A change runs `networkctl reload`, which reconfigures only the uplink, in
-  place, without setting it down. The role also removes
+  A change runs `networkctl reload`, which reconfigures the uplink (only
+  links whose configuration changed). The link is not set down, but on a
+  live node the reconfiguration can briefly drop and re-learn the
+  RA-derived IPv6 addresses and routes on it; IPv4 on another interface is
+  unaffected. With `node_kernel_uplink_ra_reload: false` the drop-in is
+  written without the reload and takes effect at the next reboot or
+  networkd restart. The role also removes
   `/etc/sysctl.d/61-cs-node-ipv6.conf` there (written by earlier versions of
   this role), so a later `sysctl --system` cannot set `accept_ra=2` and have
   the kernel process RAs alongside networkd.
@@ -76,6 +81,15 @@ Which fix applies depends on who handles RAs on the uplink, and the role asks
   `/etc/sysctl.d/61-cs-node-ipv6.conf` with
   `net.ipv6.conf.<uplink_interface>.accept_ra = 2` (accept RAs even while
   forwarding) and reloads sysctl.
+
+The drop-in sets `IPv6AcceptRA=yes` even where the operator's netplan says
+`accept-ra: false` (for example a statically addressed IPv6 uplink), since a
+drop-in overrides the generated `.network` file. Where RAs must stay off, set
+`node_kernel_uplink_accept_ra: false`: the role then writes neither the
+drop-in nor the sysctl and removes either one it wrote before (a removed
+sysctl file leaves the kernel's `accept_ra` as is until the next boot). The
+RA-learned default route is then the operator's concern; a static IPv6
+default route is unaffected by forwarding.
 
 networkd never touches the forwarding sysctls docker sets: netplan renders
 no `IPv6Forwarding=`, and with it unset in both the `.network` file and
@@ -91,6 +105,8 @@ converge writes the new one. The decision is
 | `node_kernel_conntrack_hashsize` | `"250000"` | nf_conntrack module hashsize (module option, not sysctl). |
 | `node_kernel_sysctls` | see `defaults/main.yml` | Full sysctl key/value map written to `60-cs-node.conf`. |
 | `node_kernel_accept_ra_dropin` | `60-cs-node-accept-ra.conf` | Name of the networkd drop-in that sets `IPv6AcceptRA=yes` on the uplink. |
+| `node_kernel_uplink_accept_ra` | `true` | `false` leaves router advertisements on the uplink to the host's own network config: no drop-in, no sysctl, and any this role wrote before are removed. |
+| `node_kernel_uplink_ra_reload` | `true` | `false` writes the networkd drop-in without running `networkctl reload`; it takes effect at the next reboot or networkd restart. |
 
 Consumed, not owned: `uplink_interface` (host var, no default — when unset,
 the router advertisement fix is skipped with a documented note, never guessed from

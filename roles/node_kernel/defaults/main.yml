@@ -33,3 +33,15 @@ node_kernel_sysctls:
 # (/etc/systemd/network/<file>.network.d/) when systemd-networkd manages the
 # uplink. See README.md, "IPv6 router advertisements on the uplink".
 node_kernel_accept_ra_dropin: 60-cs-node-accept-ra.conf
+
+# Set false to leave router advertisement handling on the uplink entirely to
+# the host's own network config (e.g. a static IPv6 uplink with netplan
+# `accept-ra: false`): the role then writes neither the drop-in nor the
+# sysctl, and removes either if it wrote it before.
+node_kernel_uplink_accept_ra: true
+
+# Run `networkctl reload` when the drop-in changes. The reload reconfigures
+# the uplink, which can briefly drop and re-learn its RA-derived IPv6
+# addresses and routes. Set false on live nodes to have the drop-in take
+# effect at the next reboot or networkd restart instead.
+node_kernel_uplink_ra_reload: true

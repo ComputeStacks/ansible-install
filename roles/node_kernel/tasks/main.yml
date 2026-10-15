@@ -58,6 +58,9 @@
   register: node_kernel_uplink_networkctl
   changed_when: false
   failed_when: false
+  # Read-only; skipped in --check it would leave nothing to classify and
+  # every networkd host would preview the sysctl branch.
+  check_mode: false
   when:
     - node_kernel_has_global_ipv6
     - uplink_interface is defined
@@ -90,6 +93,7 @@
     - node_kernel_has_global_ipv6
     - uplink_interface is defined
     - node_kernel_uplink_ra.mode == 'networkd'
+    - node_kernel_uplink_accept_ra | bool
 
 - name: Accept IPv6 router advertisements on the networkd-managed uplink
   ansible.builtin.copy:
@@ -107,6 +111,7 @@
     - node_kernel_has_global_ipv6
     - uplink_interface is defined
     - node_kernel_uplink_ra.mode == 'networkd'
+    - node_kernel_uplink_accept_ra | bool
   notify: Reload systemd-networkd
 
 # networkd rewrites accept_ra to 0 when it configures the link, but any later
@@ -140,7 +145,32 @@
     - node_kernel_has_global_ipv6
     - uplink_interface is defined
     - node_kernel_uplink_ra.mode == 'sysctl'
+    - node_kernel_uplink_accept_ra | bool
   notify: Reload sysctl
+
+# node_kernel_uplink_accept_ra: false hands RA on the uplink back to the
+# operator's own network config: drop whatever this role wrote before. A
+# removed sysctl file leaves accept_ra as it is until the next boot.
+- name: Remove this role's networkd RA drop-in when the fix is turned off
+  ansible.builtin.file:
+    path: "/etc/systemd/network/{{ node_kernel_uplink_ra.network_file }}.d/{{ node_kernel_accept_ra_dropin }}"
+    state: absent
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'networkd'
+    - not (node_kernel_uplink_accept_ra | bool)
+  notify: Reload systemd-networkd
+
+- name: Remove this role's accept_ra sysctl when the fix is turned off
+  ansible.builtin.file:
+    path: /etc/sysctl.d/61-cs-node-ipv6.conf
+    state: absent
+  when:
+    - node_kernel_has_global_ipv6
+    - uplink_interface is defined
+    - node_kernel_uplink_ra.mode == 'sysctl'
+    - not (node_kernel_uplink_accept_ra | bool)
 
 - name: Note that the IPv6 router advertisement fix is skipped without uplink_interface
   ansible.builtin.debug:

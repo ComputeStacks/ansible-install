@@ -45,7 +45,13 @@
   removes `/etc/sysctl.d/61-cs-node-ipv6.conf`, and runs `networkctl reload`.
   The operator's netplan YAML is not edited. Uplinks networkd does not manage
   keep the sysctl. An `uplink_interface` the host does not have now fails the
-  node instead of writing a sysctl for it.
+  node instead of writing a sysctl for it. The reload reconfigures the
+  uplink and can briefly drop and re-learn its RA-derived IPv6 addresses
+  and routes; on live nodes set `node_kernel_uplink_ra_reload: false` to
+  have the drop-in take effect at the next reboot or networkd restart
+  instead. The drop-in turns RAs on even where netplan says
+  `accept-ra: false`; `node_kernel_uplink_accept_ra: false` turns the whole
+  fix off for such uplinks.
 * **Tailscale now installs from the `artis3n.tailscale` collection** (1.2.1,
   role `artis3n.tailscale.machine`) instead of the standalone galaxy role,
   whose deprecation task fails outright on ansible-core 2.19 and later. Run
@@ -80,7 +86,8 @@
   `s3_export_access_key` / `s3_export_secret_key` in the vaulted secrets), and
   they can be set per region or per node. Export is still off until
   `cs_agent_s3_export_bucket` is set — but once it is, preflight now fails the
-  run on a missing region or key, a non-https endpoint, a bad number, or a
+  run on a missing region or key, a key left as the `CHANGEME` sample
+  placeholder, a non-https endpoint, a bad number, or a
   `max_ttl_sec` that outlives the agent's 7-day task retention, where a
   missing key used to switch export off silently.
 * **Load balancer records now default to a 4-hour TTL**
