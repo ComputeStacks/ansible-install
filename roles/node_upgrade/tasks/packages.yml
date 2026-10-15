@@ -15,6 +15,21 @@
   vars:
     node_upgrade_hold_check_at: before upgrading packages
 
+# Hold again before the OS upgrade rather than trusting the holds to be in
+# place: a run interrupted between the release and the re-hold below (the
+# control host dying mid-install) leaves docker unheld, and the resumed run's
+# OS upgrade would then move it past its pins.
+- name: Hold the docker packages before the OS upgrade
+  ansible.builtin.dpkg_selections:
+    name: "{{ item | regex_replace('=.*$', '') }}"
+    selection: hold
+  loop: "{{ docker_apt_packages }}"
+  when: (item | regex_replace('=.*$', '')) in node_upgrade_installed
+  register: node_upgrade_prehold
+  until: node_upgrade_prehold is succeeded
+  retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+  delay: 10
+
 - name: Apply the pending OS updates, docker held
   ansible.builtin.apt:
     upgrade: safe

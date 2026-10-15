@@ -22,6 +22,10 @@
 * **`backups_key` may be per node.** The docs no longer say every node must
   share the environment's passphrase; a node's passphrase must never change
   once it has backups.
+* **Fix:** an upgrade-docker (or maintain-nodes) run interrupted between
+  releasing docker's apt holds and re-holding them no longer lets the resumed
+  run's OS upgrade move docker past its pins; the holds are re-applied before
+  every OS upgrade.
 * upgrade-docker's state file records which playbook owns it; upgrade-docker
   and maintain-nodes refuse to resume each other's run.
 ## October 14, 2026
