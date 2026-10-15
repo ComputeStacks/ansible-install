@@ -10,7 +10,8 @@ config at startup and then fails every export job, which nobody sees until a
 customer asks for a download:
 
 * the feature is inert until `bucket` is set, and nothing is checked then;
-* the agent signs with static credentials, so both keys are required;
+* the agent signs with static credentials, so both keys are required, and
+  neither may be the sample secrets file's CHANGEME placeholder;
 * an endpoint, when set, must be https (empty means real AWS);
 * part_size_mb >= 5 (the S3 multipart minimum);
 * default_ttl_sec <= max_ttl_sec;
@@ -21,8 +22,9 @@ Stricter than the agent where the agent's permissive value is a footgun: a
 zero worker count, timeout, concurrency or TTL is refused rather than taken
 to mean "none" or "no cap".
 
-The dict carries `access_key_set` / `secret_key_set` booleans, never the
-keys, so no message can echo a credential.
+The dict carries `access_key_set` / `secret_key_set` and
+`access_key_placeholder` / `secret_key_placeholder` booleans, never the keys,
+so no message can echo a credential.
 """
 
 import re
@@ -78,10 +80,14 @@ def cs_agent_export_problems(cfg, tasks_retention_sec):
 
     if not _text(cfg.get("region")):
         problems.append("cs_agent_s3_export_region is empty.")
-    if not _truthy(cfg.get("access_key_set")):
-        problems.append("s3_export_access_key is not set (vaulted secrets).")
-    if not _truthy(cfg.get("secret_key_set")):
-        problems.append("s3_export_secret_key is not set (vaulted secrets).")
+    for key in ("access_key", "secret_key"):
+        if not _truthy(cfg.get(key + "_set")):
+            problems.append(
+                "s3_export_%s is not set (vaulted secrets)." % key)
+        elif _truthy(cfg.get(key + "_placeholder")):
+            problems.append(
+                "s3_export_%s is still the CHANGEME sample placeholder "
+                "(vaulted secrets)." % key)
 
     endpoint = _text(cfg.get("endpoint"))
     if endpoint and not endpoint.startswith("https://"):

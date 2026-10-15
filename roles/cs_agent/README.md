@@ -139,7 +139,9 @@ vaulted per-region group_vars file when regions use different accounts.
 **Checks** (`tasks/export_check.yml`, filter `cs_agent_export_problems` in
 `filter_plugins/cs_agent_export.py`). Pure; `preflight` includes it on every
 new node before anything changes, and this role runs it again as a backstop.
-With a bucket set it requires a region and both keys, an `https://` endpoint
+With a bucket set it requires a region and both keys (neither left as the
+sample's `CHANGEME`, compared trimmed and case-insensitively; the keys are
+never printed), an `https://` endpoint
 if one is set, whole numbers ≥ 1 for workers, timeout, concurrency and both
 TTLs, `part_size_mb` ≥ 5, an `sse` of `AES256`, `aws:kms`, `aws:kms:dsse` or
 `""`, and `default_ttl_sec` ≤ `max_ttl_sec`. cs-agent itself only *logs* a

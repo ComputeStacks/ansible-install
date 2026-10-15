@@ -207,6 +207,43 @@
             fail_msg: "{{ cs_agent_export_problems }}"
             quiet: true
 
+    - name: "Case: CHANGEME placeholder keys, recorded rather than failed"  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+      vars:
+        cs_agent_s3_export_bucket: exports-example
+        cs_agent_export_check_fail: false
+        s3_export_access_key: "CHANGEME"
+        s3_export_secret_key: " changeme\n"
+
+    - name: "Assert: both placeholders reported, neither value echoed"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_export_problems | length == 2
+          - cs_agent_export_problems | select('search', 's3_export_access_key is still the CHANGEME') | list | length == 1
+          - cs_agent_export_problems | select('search', 's3_export_secret_key is still the CHANGEME') | list | length == 1
+          - cs_agent_export_problems | select('search', 'changeme') | list | length == 0
+        fail_msg: "{{ cs_agent_export_problems }}"
+        quiet: true
+
+    - name: "Case: a key merely containing CHANGEME is accepted"  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: export_check
+      vars:
+        cs_agent_s3_export_bucket: exports-example
+        cs_agent_export_check_fail: false
+        s3_export_access_key: "EXAMPLECHANGEMEKEY"
+        s3_export_secret_key: EXAMPLESECRET
+
+    - name: "Assert: no placeholder problem for a real-looking key"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_export_problems == []
+        fail_msg: "{{ cs_agent_export_problems }}"
+        quiet: true
+
     # ======================================================================
     # The filter alone, one rule per case
     # ======================================================================
@@ -242,6 +279,8 @@
         - {patch: {region: ''}, match: 'region is empty'}
         - {patch: {access_key_set: false}, match: 's3_export_access_key'}
         - {patch: {secret_key_set: 'False'}, match: 's3_export_secret_key'}
+        - {patch: {access_key_placeholder: true}, match: 's3_export_access_key is still the CHANGEME'}
+        - {patch: {secret_key_placeholder: 'True'}, match: 's3_export_secret_key is still the CHANGEME'}
         - {patch: {endpoint: 'http://s3.example.com'}, match: 'https://'}
         - {patch: {endpoint: 's3.example.com'}, match: 'https://'}
         - {patch: {sse: 'aes256'}, match: 'cs_agent_s3_export_sse'}

@@ -12,7 +12,8 @@
 #                                       empty when valid or when no bucket is
 #                                       set (export off)
 #
-# The credentials never enter the dict: only whether each is set, so neither
+# The credentials never enter the dict: only whether each is set and whether
+# it is the CHANGEME sample placeholder, so neither
 # the fact nor a failure message can carry one.
 
 - name: Check the backup export settings
@@ -27,6 +28,8 @@
       prefix: "{{ cs_agent_s3_export_prefix }}"
       access_key_set: "{{ (s3_export_access_key | default('') | string | length) > 0 }}"
       secret_key_set: "{{ (s3_export_secret_key | default('') | string | length) > 0 }}"
+      access_key_placeholder: "{{ (s3_export_access_key | default('') | string | trim | upper) == 'CHANGEME' }}"
+      secret_key_placeholder: "{{ (s3_export_secret_key | default('') | string | trim | upper) == 'CHANGEME' }}"
       force_path_style: "{{ cs_agent_s3_export_force_path_style }}"
       part_size_mb: "{{ cs_agent_s3_export_part_size_mb }}"
       concurrency: "{{ cs_agent_s3_export_concurrency }}"
