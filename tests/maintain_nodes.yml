@@ -26,7 +26,10 @@
 #     stops dockerd without the docker_tls_restart_deferred gate; the serial
 #     play sets that var; the cycle flushes the handlers after the converge,
 #     before the agent wait and the decision, and again before the release;
-#     and no node_upgrade task notifies a handler at all;
+#     and no node_upgrade task notifies a handler except the resumed
+#     converge's re-apply task;
+#   * a resumed converge notifies every handler of the converged roles
+#     except docker_tls', by `role : name`, and none that restarts dockerd;
 #   * the converge includes exactly the intended roles -- never node_storage,
 #     geerlingguy.docker, ssh_trust or the controller-side roles -- with
 #     common's reboot off and cs-agent downgrades off;
@@ -280,6 +283,7 @@
         mn_serial: "{{ mn_playbook | selectattr('name', 'equalto', 'Maintain the nodes, one at a time') | first }}"
         mn_ungated: "{{ mn_handlers | maintain_ungated_docker_restarts }}"
         mn_notifying: "{{ mn_nu_tasks | maintain_tasks_with_notify }}"
+        mn_reapply_task: "maintain_converge_phase.yml: Re-apply what an interrupted converge may have left pending"
       ansible.builtin.assert:
         that:
           # the guard has something to guard: docker_tls is converged and
@@ -290,8 +294,9 @@
           # the play var the handlers read
           - mn_serial.vars.docker_tls_restart_deferred is true
           - mn_serial.serial == 1
-          # nothing in the maintenance cycle queues a handler
-          - mn_notifying == []
+          # nothing in the maintenance cycle queues a handler, except the
+          # resumed converge's re-apply (checked in the next assert)
+          - mn_notifying == [mn_reapply_task]
         fail_msg: >-
           Ungated dockerd restarts: {{ mn_ungated }}. node_upgrade tasks with notify:
           {{ mn_notifying }}. Serial play vars: {{ mn_serial.vars | default({}) }}.
@@ -324,6 +329,43 @@
           - (mn_cycle[0].block | selectattr('name', 'equalto', 'Converge inside the hold')
              | first)['ansible.builtin.include_tasks'] == 'maintain_converge_phase.yml'
         fail_msg: "{{ mn_steps }} / {{ mn_phase_steps }}"
+        quiet: true
+
+    # A run that died mid-converge lost the handlers its roles had queued;
+    # the resumed converge notifies them all again. Kept equal to the
+    # converged roles' handlers, so a handler added to one of them is
+    # re-applied too; docker_tls' are left out (its restart must never run
+    # here; maintain_decide.yml's file check covers a lost one).
+    - name: "Assert: a resumed converge re-applies every converged role's handler but docker_tls'"
+      vars:
+        mn_reapply_name: Re-apply what an interrupted converge may have left pending
+        mn_reapply: "{{ (mn_nu_tasks | maintain_task_notifies)['maintain_converge_phase.yml: ' ~ mn_reapply_name] | default([]) }}"
+        mn_expected: "{{ mn_handlers | maintain_handler_refs(['docker_tls']) }}"
+        mn_docker_restarters: "{{ mn_handlers | maintain_docker_restarts }}"
+        mn_phase_steps: "{{ mn_phase | maintain_flattened_task_names }}"
+        mn_task: "{{ mn_phase | selectattr('name', 'equalto', mn_reapply_name) | first }}"
+      ansible.builtin.assert:
+        that:
+          - mn_reapply | length > 0
+          - mn_reapply | sort == mn_expected | sort
+          - mn_reapply | select('search', '^docker_tls ') | list == []
+          # none of the re-applied handlers can restart dockerd, gated or
+          # not (and the detector does see docker_tls' restart)
+          - "'docker_tls : Restart docker' in mn_docker_restarters"
+          - mn_reapply | intersect(mn_docker_restarters) == []
+          # docker_config's handler stays a SIGHUP reload
+          - (mn_handlers.docker_config | selectattr('name', 'equalto', 'Reload docker')
+             | first)['ansible.builtin.systemd_service'].state == 'reloaded'
+          # only on a resumed converge, read before converge_started is set
+          - mn_task.when == 'node_upgrade_maintain_converge_resumed | bool'
+          - mn_task.changed_when is true
+          - mn_phase_steps | maintain_in_order(['Note whether this converge resumes an interrupted one',
+                                                 'Note that the converge has started',
+                                                 'Converge the node-side roles, containers running',
+                                                 mn_reapply_name,
+                                                 'Run the converge handlers inside the hold',
+                                                 'Wait for cs-agent'])
+        fail_msg: "re-applied {{ mn_reapply }}; expected {{ mn_expected }}; dockerd restarters {{ mn_docker_restarters }}"
         quiet: true
 
     - name: "Assert: the converge includes exactly the node-side roles, safely"

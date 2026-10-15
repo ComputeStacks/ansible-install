@@ -52,6 +52,17 @@ def ungated_docker_restarts(handler_files):
     return out
 
 
+def docker_restarts(handler_files):
+    """{role: [handlers]} -> ["role : handler name"] for every handler that
+    restarts or stops dockerd, gated or not."""
+    out = []
+    for role, handlers in sorted((handler_files or {}).items()):
+        for h in handlers or []:
+            if isinstance(h, dict) and _restarts_docker(h):
+                out.append("%s : %s" % (role, h.get("name", "<unnamed>")))
+    return out
+
+
 def included_roles(tasks):
     """A task list -> [{name, vars, when}] for every include_role/import_role."""
     out = []
@@ -88,6 +99,40 @@ def tasks_with_notify(task_files):
     return out
 
 
+def task_notifies(task_files):
+    """{file: tasks} -> {"file: task name": [notified handlers]} for every
+    task carrying `notify` (a single string becomes a one-item list)."""
+    out = {}
+
+    def walk(fname, tasks):
+        for t in tasks or []:
+            if not isinstance(t, dict):
+                continue
+            if "notify" in t:
+                n = t["notify"]
+                out["%s: %s" % (fname, t.get("name", "<unnamed>"))] = \
+                    [n] if isinstance(n, str) else list(n or [])
+            for nested in ("block", "rescue", "always"):
+                walk(fname, t.get(nested))
+
+    for fname, tasks in sorted((task_files or {}).items()):
+        walk(fname, tasks)
+    return out
+
+
+def handler_refs(handler_files, exclude=()):
+    """{role: [handlers]} -> ["role : handler name"] for every named handler
+    of every role not in `exclude`, in file order."""
+    out = []
+    for role, handlers in sorted((handler_files or {}).items()):
+        if role in (exclude or ()):
+            continue
+        for h in handlers or []:
+            if isinstance(h, dict) and h.get("name"):
+                out.append("%s : %s" % (role, h["name"]))
+    return out
+
+
 def flattened_task_names(tasks):
     """Task names, depth first through blocks (a nameless meta task as
     `meta:<action>`)."""
@@ -117,8 +162,11 @@ class FilterModule(object):
     def filters(self):
         return {
             "maintain_ungated_docker_restarts": ungated_docker_restarts,
+            "maintain_docker_restarts": docker_restarts,
             "maintain_included_roles": included_roles,
             "maintain_tasks_with_notify": tasks_with_notify,
+            "maintain_task_notifies": task_notifies,
+            "maintain_handler_refs": handler_refs,
             "maintain_flattened_task_names": flattened_task_names,
             "maintain_in_order": in_order,
         }
