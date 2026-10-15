@@ -1,0 +1,272 @@
+---
+# The two-step attach: is the DRY_RUN preview's fingerprint stable where the
+# preview is run-specific and sensitive everywhere else, and does
+# add-region.yml end every play after the seed when phase 1 stops?
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/controller_seed_preview.yml
+#
+# PURE: tasks/preview_fingerprint.yml is a set_fact over a registered
+# `controller_seed_dry_run`, fed canned previews here; the structural checks
+# read playbooks/add-region.yml and the role's tasks as YAML. Nothing runs on
+# a controller and no host is contacted. Every name and address is a
+# placeholder (example.com, RFC 1918).
+#
+# THE PREVIEWS are Bootstrap::Recorder's own format (controller repo,
+# app/services/bootstrap/recorder.rb): two spaces and a bracketed action per
+# row, thirteen spaces per attribute, `→` between before and after. `apr_run1`
+# and `apr_run2` are the same full-manifest attach previewed twice against the
+# same database: a metric client and a DNS driver are created by the
+# rolled-back apply, so every id pointing at them comes from a sequence the
+# rollback did not rewind and differs between the two. Every other difference
+# is a real change and must change the fingerprint.
+#
+# The one `fatal: ... the DRY_RUN preview is empty` in the output is
+# expected: it is the refusal path, caught by `rescue:`.
+
+- name: DRY_RUN preview fingerprint
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Real control characters: a backslash escape inside a Jinja literal is
+    # not one.
+    apr_nl: "\n"
+    apr_cr: "\r"
+    apr_run1: &apr_run1
+      - "ComputeStacks bootstrap apply — /tmp/manifest.yml"
+      - "DRY RUN — nothing will be written."
+      - ""
+      - "== settings =="
+      - "  [skip  ] Setting company_name (configured on this controller)"
+      - "== clients =="
+      - "  [create] MetricClient https://metrics2.example.com:9443"
+      - "             endpoint: nil → \"https://metrics2.example.com:9443\""
+      - "             username: nil → \"prometheus\""
+      - "             password: nil → «redacted»"
+      - "  [skip  ] LogClient https://metrics.example.com:3443 (exists, skipped)"
+      - "== dns =="
+      - "  [create] ProvisionDriver powerdns"
+      - "             module_name: nil → \"Pdns\""
+      - "             api_key: nil → «redacted»"
+      - "  [update] ProductModule dns"
+      - "             primary_id: 3 → 41"
+      - "  [link  ] ProductModule dns → ProvisionDriver #41"
+      - "  [skip  ] Dns::Zone apps.example.com (exists, skipped)"
+      - "  [warn  ] Dns::Zone apps.example.com — manifest differs from database, database wins — update your inventory or change it in the UI"
+      - "             provision_driver_id: database 3, manifest 41"
+      - "== locations =="
+      - "  [create] Location exm"
+      - "  [create] Region exm-006"
+      - "             p_net_size: nil → 27"
+      - "             metric_client_id: nil → 17"
+      - "             log_client_id: nil → 2"
+      - "  [create] Node node-006.example.com"
+      - "             primary_ip: nil → \"10.0.6.10\""
+      - "  [skip  ] LoadBalancer exm-005 (exists, skipped)"
+      - "  [warn  ] LoadBalancer exm-005 — manifest differs from database, database wins — update your inventory or change it in the UI"
+      - "             domain: database \"a.example.com\", manifest \"a.example.com.\""
+      - "== user_group =="
+      - "  [link  ] UserGroup default → Region exm-006"
+      - "== billing prices =="
+      - "  [link  ] BillingResourcePrice #12 (Small, max_qty=nil) → exm-006"
+      - ""
+      - "5 created, 1 seeded, 0 rotated, 3 linked would be applied; 0 already current, 3 skipped."
+      - "2 row(s) were left alone — see the warnings above."
+      - "DRY RUN — nothing was written."
+    # The same preview one run later: only the sequence-allocated ids moved.
+    apr_run2: >-
+      {{ apr_run1
+         | map('regex_replace', '→ 41$', '→ 42')
+         | map('regex_replace', '#41$', '#42')
+         | map('regex_replace', 'manifest 41$', 'manifest 42')
+         | map('regex_replace', 'metric_client_id: nil → 17$', 'metric_client_id: nil → 18')
+         | list }}
+    # Real changes, each of which must move the fingerprint.
+    apr_changed:
+      # an existing price's id is a database value, not a sequence draw
+      price_id: "{{ apr_run1 | map('regex_replace', '#12 ', '#13 ') | list }}"
+      # the database side of a drift line is the database's value
+      drift_database_side: "{{ apr_run1 | map('regex_replace', 'database 3,', 'database 4,') | list }}"
+      # the before side of a diff line is the database's value
+      diff_before_side: "{{ apr_run1 | map('regex_replace', 'primary_id: 3 →', 'primary_id: 5 →') | list }}"
+      # a plain integer attribute that is not an id
+      not_an_id: "{{ apr_run1 | map('regex_replace', 'p_net_size: nil → 27', 'p_net_size: nil → 28') | list }}"
+      domain_drift: "{{ apr_run1 | map('regex_replace', 'manifest \"a.example.com.\"', 'manifest \"b.example.com\"') | list }}"
+      extra_row: "{{ apr_run1[:28] + ['  [create] Node node-007.example.com'] + apr_run1[28:] }}"
+      summary: "{{ apr_run1 | map('regex_replace', '^5 created', '6 created') | list }}"
+      update_addresses: "{{ apr_run1[:2] + ['UPDATE_ADDRESSES — infrastructure addresses will be updated on rows that already exist.'] + apr_run1[2:] }}"
+  tasks:
+    - name: "Case: the first preview"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: preview_fingerprint
+      vars:
+        controller_seed_dry_run:
+          stdout_lines: *apr_run1
+
+    - name: Keep the first fingerprint
+      ansible.builtin.set_fact:
+        apr_sha1: "{{ controller_seed_preview_sha256 }}"
+
+    - name: "Case: the same preview, next run"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: preview_fingerprint
+      vars:
+        controller_seed_dry_run:
+          stdout_lines: "{{ apr_run2 }}"
+
+    - name: "Assert: the fingerprint is 64 lowercase hex and ignores the sequence-allocated ids"
+      ansible.builtin.assert:
+        that:
+          - apr_sha1 is match('^[0-9a-f]{64}$')
+          - controller_seed_preview_sha256 == apr_sha1
+          # the case is not vacuous: the two inputs really differ
+          - apr_run2 != apr_run1
+        fail_msg: "{{ apr_sha1 }} / {{ controller_seed_preview_sha256 }}"
+        quiet: true
+
+    - name: "Assert: exactly the run-specific ids are normalized, and nothing else"
+      vars:
+        apr_norm: "{{ apr_run1 | controller_seed_preview_normalize }}"
+      ansible.builtin.assert:
+        that:
+          - apr_norm | length == apr_run1 | length
+          - "'             primary_id: 3 → <id>' in apr_norm"
+          - "'  [link  ] ProductModule dns → ProvisionDriver #<id>' in apr_norm"
+          - "'             provision_driver_id: database 3, manifest <id>' in apr_norm"
+          - "'             metric_client_id: nil → <id>' in apr_norm"
+          - "'             log_client_id: nil → <id>' in apr_norm"
+          - "'             p_net_size: nil → 27' in apr_norm"
+          - "'  [link  ] BillingResourcePrice #12 (Small, max_qty=nil) → exm-006' in apr_norm"
+          # five lines carry an id; every other line is passed through as is
+          - (apr_norm | select('search', '<id>') | list | length) == 5
+          - (apr_norm | reject('search', '<id>') | list) == (apr_run1 | reject('search', '(→ |manifest |#)(41|17|2)$') | list)
+        fail_msg: "{{ apr_norm | to_json }}"
+        quiet: true
+
+    - name: "Assert: the fingerprint is sha256 of the normalized lines, one LF each"
+      ansible.builtin.assert:
+        that:
+          - >-
+            apr_sha1 ==
+            ((apr_run1 | controller_seed_preview_normalize | join(apr_nl)) ~ apr_nl) | hash('sha256')
+        quiet: true
+
+    - name: "Assert: the stdout string, CRLF line ends and the stdout_lines list fingerprint alike"
+      ansible.builtin.assert:
+        that:
+          - (apr_run1 | join(apr_nl)) | controller_seed_preview_sha256 == apr_sha1
+          - (apr_run1 | map('regex_replace', '$', apr_cr) | list) | controller_seed_preview_sha256 == apr_sha1
+          # the case is not vacuous: the CRLF input really carries CRs
+          - (apr_run1 | map('regex_replace', '$', apr_cr) | list) != apr_run1
+        quiet: true
+
+    - name: "Assert: every real change moves the fingerprint"
+      ansible.builtin.assert:
+        that:
+          - (item.value | controller_seed_preview_sha256) != apr_sha1
+          - item.value != apr_run1
+        fail_msg: "{{ item.key }} did not change the fingerprint"
+        quiet: true
+      loop: "{{ apr_changed | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: "Case: an empty preview is refused, not fingerprinted"
+      block:
+        - name: Fingerprint a preview that printed nothing
+          ansible.builtin.include_role:
+            name: controller_seed
+            tasks_from: preview_fingerprint
+          vars:
+            controller_seed_dry_run:
+              stdout_lines: ["", "  "]
+
+        - name: Reaching this task means an empty preview was fingerprinted
+          ansible.builtin.fail:
+            msg: preview_fingerprint.yml fingerprinted an empty preview
+      rescue:
+        - name: "Assert: the refusal names the empty preview"
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Fingerprint the DRY_RUN preview'
+              - "'the DRY_RUN preview is empty' in (ansible_failed_result | to_json)"
+            fail_msg: "{{ ansible_failed_result | default({}) | to_json }}"
+            quiet: true
+
+- name: Phase 1 ends every play after the seed
+  hosts: localhost
+  gather_facts: false
+  vars:
+    apr_plays: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../playbooks/add-region.yml') | from_yaml }}"
+    apr_seed_index: "{{ (apr_plays | map(attribute='name') | list).index('Seed the new region') }}"
+    apr_seed_play: "{{ apr_plays[apr_seed_index | int] }}"
+    # Every play after the seed but the summary, which only prints.
+    apr_guarded: "{{ apr_plays[(apr_seed_index | int) + 1:-1] }}"
+    apr_summary: "{{ apr_plays | last }}"
+    apr_role_tasks: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../roles/controller_seed/tasks/main.yml') | from_yaml }}"
+    apr_seed_block: "{{ (apr_role_tasks | selectattr('name', 'equalto', 'Seed the controller') | first).block }}"
+    apr_seed_names: "{{ apr_seed_block | map(attribute='name') | list }}"
+    apr_stop_block: "{{ (apr_seed_block | selectattr('name', 'equalto', 'Stop after the preview (two-step attach, phase 1)') | first) }}"
+    # Module keys are FQCNs, which `attribute=` would read as a dotted path.
+    apr_stop_file_states: >-
+      {%- set out = [] -%}
+      {%- for t in apr_stop_block.block if 'ansible.builtin.file' in t -%}
+      {%- set _ = out.append(t['ansible.builtin.file'].state) -%}
+      {%- endfor -%}
+      {{- out -}}
+    apr_stop_debug_msgs: >-
+      {%- set out = [] -%}
+      {%- for t in apr_stop_block.block if 'ansible.builtin.debug' in t -%}
+      {%- set _ = out.append(t['ansible.builtin.debug'].msg) -%}
+      {%- endfor -%}
+      {{- out -}}
+  tasks:
+    - name: "Assert: the seed play declares the stop supported, and plays follow it"
+      ansible.builtin.assert:
+        that:
+          - (apr_seed_index | int) >= 0  # .index() fails the task outright when the play is missing
+          - apr_seed_play.vars.controller_seed_stop_after_preview_supported | bool
+          - apr_seed_play.roles == ['controller_seed']
+          # agent, post-enrollment, validate: the plays that must not run
+          - apr_guarded | length >= 3
+          - apr_summary.name == 'Two-step attach summary'
+          - apr_summary.tasks | length == 1
+          - "'ansible.builtin.debug' in apr_summary.tasks[0]"
+        fail_msg: "{{ apr_plays | map(attribute='name') | list }}"
+        quiet: true
+
+    - name: "Assert: every play after the seed STARTS with the preview-stop guard"
+      ansible.builtin.assert:
+        that:
+          - (item.pre_tasks | default([])) | length > 0
+          - item.pre_tasks[0]['ansible.builtin.meta'] | default('') == 'end_play'
+          - "'always' in (item.pre_tasks[0].tags | default([]))"
+          - "'controller_seed_stop_after_preview' in item.pre_tasks[0].when"
+          - "'controller_seed_preview_stopped' in item.pre_tasks[0].when"
+          - item.pre_tasks[0] == apr_guarded[0].pre_tasks[0]
+        fail_msg: "Play '{{ item.name }}' runs after the seed without the preview-stop guard as its first task."
+        quiet: true
+      loop: "{{ apr_guarded }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "Assert: the role stops after the gates and before the confirmation and the apply"
+      vars:
+        apr_stop_i: "{{ apr_seed_names.index('Stop after the preview (two-step attach, phase 1)') }}"
+        apr_expect_i: "{{ apr_seed_names.index('Refuse to apply anything but the preview that was reviewed') }}"
+      ansible.builtin.assert:
+        that:
+          - apr_seed_names.index('Preview the apply against the existing controller (DRY_RUN)') < (apr_stop_i | int)
+          - apr_seed_names.index('Refuse to seed a load balancer whose domain the apply cannot change') < (apr_stop_i | int)
+          - apr_seed_names.index('Plan the load balancer public IPv6 addresses') < (apr_stop_i | int)
+          - apr_seed_names.index('Fingerprint the DRY_RUN preview') < (apr_stop_i | int)
+          - (apr_stop_i | int) < (apr_expect_i | int)
+          - (apr_expect_i | int) < apr_seed_names.index('Confirm the apply against the existing controller')
+          - (apr_expect_i | int) < apr_seed_names.index('Apply the manifest')
+          # the manifest goes before the play ends, and the play does end
+          - apr_stop_file_states == ['absent']
+          - (apr_stop_block.block | last)['ansible.builtin.meta'] | default('') == 'end_play'
+          - apr_stop_debug_msgs | select('match', '^controller_seed_preview_sha256=') | list | length == 1
+        fail_msg: "{{ apr_seed_names }}"
+        quiet: true

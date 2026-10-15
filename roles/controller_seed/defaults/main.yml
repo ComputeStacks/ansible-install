@@ -51,6 +51,18 @@ controller_seed_update_addresses: false
 controller_seed_dry_run_first: true
 controller_seed_confirm: true
 
+# Two-step attach (README.md, "Two-step attach"). Pass both as extra vars.
+#
+# Phase 1: run through the DRY_RUN preview and its read-only gates, print the
+# preview and `controller_seed_preview_sha256=<64 hex>`, remove the manifest,
+# and end the run green without applying anything. add-region.yml only: the
+# role refuses it in a playbook that does not set
+# `controller_seed_stop_after_preview_supported` on the seed play.
+controller_seed_stop_after_preview: false
+# Phase 2: apply only when this run's preview has this fingerprint; fail
+# before the apply, printing both, when it does not. Empty: no check.
+controller_seed_expect_preview_sha256: ""
+
 # --- settings -------------------------------------------------------------
 controller_seed_registry_hosts: "{{ groups['registry'] | default([]) }}"
 # Setting.registry_node: the registry server's IP, which the controller SSHes

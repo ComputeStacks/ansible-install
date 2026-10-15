@@ -1,0 +1,11 @@
+---
+# The DRY_RUN preview's fingerprint: sha256 of the preview with its one
+# run-specific value (ids of rows the rolled-back preview created) normalized
+# (filter_plugins/controller_seed_preview.py says what varies and why). Pure:
+# reads the registered `controller_seed_dry_run` and runs nothing, so
+# tests/controller_seed_preview.yml includes it with canned previews.
+
+- name: Fingerprint the DRY_RUN preview
+  ansible.builtin.set_fact:
+    controller_seed_preview_sha256: >-
+      {{ (controller_seed_dry_run.stdout_lines | default([])) | controller_seed_preview_sha256 }}

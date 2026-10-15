@@ -316,13 +316,41 @@
 # The attach manifest carries topology only — locations/regions/nodes/
 # networks/load balancers plus the user-group region link. No settings, no
 # DNS driver, no products. DRY_RUN=1 runs first and pauses for the operator.
+#
+# TWO-STEP ATTACH (docs/attach-mode.md). With
+# `-e controller_seed_stop_after_preview=true` the seed prints the DRY_RUN
+# preview and its fingerprint, removes the manifest and ends this play
+# without applying anything; every play below then ends at its first task
+# (the guard), and the run finishes green. The second run passes
+# `-e controller_seed_expect_preview_sha256=<fingerprint>` and applies only
+# that preview. `controller_seed_stop_after_preview_supported` is how the role
+# knows it is running in a playbook that guards its later plays — site.yml
+# does not, and the role refuses the stop there.
 - name: Seed the new region
   hosts: controller
+  vars:
+    controller_seed_stop_after_preview_supported: true
   roles:
     - controller_seed
 
+# Every play from here on starts with this guard, and tests/
+# controller_seed_preview.yml fails if one does not: a play that ran after a
+# preview stop would enroll an agent against a Node row that was never
+# created. It ends the play when the stop was requested (the variable, as an
+# extra var) or happened (the fact the seed sets on the controller), whichever
+# this host can see. Tagged `always` so a `--tags` run cannot skip it.
 - name: New node agent (requires the seeded Node row)
   hosts: nodes
+  pre_tasks:
+    - &preview_stop_guard
+      name: End this play if the seed stopped after its preview
+      ansible.builtin.meta: end_play
+      when: >-
+        (controller_seed_stop_after_preview | default(false) | bool)
+        or ((groups['controller'] | default([]))
+            | map('extract', hostvars, 'controller_seed_preview_stopped')
+            | select('defined') | select | list | length > 0)
+      tags: [always]
   roles:
     - cs_agent
 
@@ -331,6 +359,8 @@
 # failure would mask the result for the node being attached.
 - name: Post-enrollment controller tasks
   hosts: controller
+  pre_tasks:
+    - *preview_stop_guard
   roles:
     - controller_post_enroll
 
@@ -340,5 +370,25 @@
 - name: Validate the new region
   hosts: controller:nodes
   any_errors_fatal: false
+  pre_tasks:
+    - *preview_stop_guard
   roles:
     - validate
+
+# Last, so it is the last thing a two-step attach's phase 1 prints. Skipped
+# on every other run.
+- name: Two-step attach summary
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Say that the run stopped after the preview
+      ansible.builtin.debug:
+        msg: >-
+          STOPPED AFTER THE DRY_RUN PREVIEW. Nothing was applied to the
+          controller database: no `cstacks seed` apply, no agent enrollment,
+          no post-enrollment tasks, no validation. The new node is built and
+          the additive writes on the shared hosts are in place. Review the
+          preview above; to apply exactly it, run this playbook again with
+          -e controller_seed_expect_preview_sha256={{ controller_seed_preview_sha256 | default('<fingerprint>') }}
+      when: controller_seed_preview_stopped | default(false) | bool
+      tags: [always]

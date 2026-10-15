@@ -224,6 +224,51 @@ The two opt-outs govern only the human-facing half:
 needs a tty), and `controller_seed_dry_run_first: false` stops the preview
 being PRINTED. Neither disables the gate.
 
+### Two-step attach
+
+For a run with no terminal to pause on (CI), the confirmation splits into two
+runs of the same playbook, with a human reading the preview in between:
+
+```bash
+# Phase 1: build, preview, stop. Nothing is applied to the controller database.
+ansible-playbook -i inventories/prod playbooks/add-region.yml \
+  -e controller_seed_stop_after_preview=true -e controller_seed_confirm=false
+
+# Phase 2: the full run again, applying only the preview that was reviewed.
+ansible-playbook -i inventories/prod playbooks/add-region.yml \
+  -e controller_seed_expect_preview_sha256=<fingerprint> -e controller_seed_confirm=false
+```
+
+**Phase 1** runs every play up to and including the seed's `DRY_RUN` preview
+and its read-only gates (load balancer domain drift, the `public_ipv6` plan),
+prints the preview and a line `controller_seed_preview_sha256=<64 hex>`,
+deletes the manifest from the controller, and ends green: no `cstacks seed`
+apply, no agent enrollment, no post-enrollment tasks, no validation. Every
+play after the seed starts with a guard that ends it, and the run's last
+message says it stopped. A wrapper reads the fingerprint with
+`grep -oE 'controller_seed_preview_sha256=[0-9a-f]{64}'`.
+
+What phase 1 leaves in place is everything before the seed: the new node
+built, the portal recreated (if the environment file or `cstacks` changed), a
+fresh `pg_dump`, and the additive writes on the shared hosts in the table
+above — the nameserver's load balancer records, the firewall appends, the
+prometheus fragments and the controller's ssh trust for the node. None of them
+is an apply, and every one of them is a no-op when run again.
+
+**A rejected preview** is fixed in the inventory (or, for drift, in the admin
+UI) and phase 1 is run again; it prints a new preview and a new fingerprint.
+
+**Phase 2** is a full re-run. Everything before the seed converges to what
+phase 1 left (the portal is recreated only by a handler, which fires only
+when the environment append or the `cstacks` install changes something; a
+second `pg_dump` is taken). The seed previews again, and applies only when
+that preview's fingerprint equals `controller_seed_expect_preview_sha256`;
+otherwise it fails before the apply, printing both, with nothing applied —
+the database or the inventory changed since the review, so phase 1 has to be
+run and read again. The fingerprint is a sha256 of the preview with only the
+ids of rows the rolled-back preview creates normalized
+(`roles/controller_seed/README.md`, "Two-step attach").
+
 Each new az also needs its own `app_domain` and its own pair of public DNS
 records — `<app_domain>` A to that node's public IP and `*.<app_domain>`
 **CNAME** to `<app_domain>` (docs/install.md §3). If the new az answers on

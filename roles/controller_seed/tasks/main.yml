@@ -4,6 +4,43 @@
 # host is built and BEFORE the nodes enroll -- the apply is what creates the
 # Node rows whose agent tokens cs_agent reads back. See README.md.
 
+# The two-step attach (README.md, "Two-step attach"). Checked first, before
+# anything is rendered or written.
+#
+# Stopping after the preview is only safe in a playbook whose later plays end
+# when it happens: add-region.yml sets
+# `controller_seed_stop_after_preview_supported` on its seed play and guards
+# every play after it. site.yml does neither, so there a stop would end this
+# play and then enroll agents against Node rows that were never created.
+# Check mode runs no `cstacks seed` at all, so there is no preview to stop
+# after or to compare.
+- name: Assert the two-step attach variables are usable in this run
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (controller_seed_stop_after_preview | bool)
+        or (controller_seed_stop_after_preview_supported | default(false) | bool)
+      - >-
+        not (controller_seed_stop_after_preview | bool)
+        or (controller_seed_expect_preview_sha256 | length == 0)
+      - >-
+        (controller_seed_expect_preview_sha256 | length == 0)
+        or (controller_seed_expect_preview_sha256 is match('^[0-9a-f]{64}$'))
+      - >-
+        not ((controller_seed_stop_after_preview | bool)
+             or (controller_seed_expect_preview_sha256 | length > 0))
+        or not ansible_check_mode
+    fail_msg: >-
+      controller_seed_stop_after_preview is honored only by
+      playbooks/add-region.yml (the playbook whose later plays end when the
+      seed stops), and not together with controller_seed_expect_preview_sha256
+      -- phase 1 prints a fingerprint, phase 2 applies against one.
+      controller_seed_expect_preview_sha256 must be the 64 lowercase hex
+      characters phase 1 printed after `controller_seed_preview_sha256=`.
+      Neither works in check mode, which runs no preview. Nothing has been
+      written.
+    quiet: true
+
 - name: Assert the environment inputs the manifest needs are present
   ansible.builtin.assert:
     that:
@@ -405,16 +442,22 @@
         UPDATE_ADDRESSES: "{{ '1' if controller_seed_update_addresses | bool else '0' }}"
       register: controller_seed_dry_run
       changed_when: false
-      when: (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
+      # The two-step attach variables force it: both read its output.
+      when: >-
+        (existing_env | default(false) | bool)
+        or (controller_seed_update_addresses | bool)
+        or (controller_seed_stop_after_preview | bool)
+        or (controller_seed_expect_preview_sha256 | length > 0)
 
     # `controller_seed_dry_run_first: false` keeps the diff out of a CI log
     # without disarming gate G above. When the preview was skipped entirely
-    # there is no `stdout_lines` and the length test skips this too.
+    # there is no `stdout_lines` and the length test skips this too. A stop
+    # after the preview always prints it: showing it is the point of the stop.
     - name: Show what the apply would change
       ansible.builtin.debug:
         var: controller_seed_dry_run.stdout_lines
       when:
-        - controller_seed_dry_run_first | bool
+        - (controller_seed_dry_run_first | bool) or (controller_seed_stop_after_preview | bool)
         - (controller_seed_dry_run.stdout_lines | default([])) | length > 0
 
     # GATE G -- refuse to rotate a certificate onto a load balancer whose
@@ -519,6 +562,62 @@
         - controller_seed_lb_ipv6_wanted | length > 0
         - not ansible_check_mode
 
+    # TWO-STEP ATTACH (README.md, "Two-step attach"). Everything above is
+    # read-only on the controller database: the preview, gate G and the IPv6
+    # plan. Phase 1 (`controller_seed_stop_after_preview`) ends here; phase 2
+    # (`controller_seed_expect_preview_sha256`) applies only the preview phase
+    # 1 printed. The fingerprint is of the preview with its run-specific ids
+    # normalized (filter_plugins/controller_seed_preview.py).
+    - name: Fingerprint the DRY_RUN preview
+      ansible.builtin.include_tasks: preview_fingerprint.yml
+      when: >-
+        (controller_seed_stop_after_preview | bool)
+        or (controller_seed_expect_preview_sha256 | length > 0)
+
+    - name: Stop after the preview (two-step attach, phase 1)
+      when: controller_seed_stop_after_preview | bool
+      block:
+        # The value alone after `=`, so a wrapper reads it with
+        #   grep -oE 'controller_seed_preview_sha256=[0-9a-f]{64}'
+        # whichever result format the callback uses. Printed once per
+        # controller; no other line of the run carries that prefix.
+        - name: Print the preview fingerprint
+          ansible.builtin.debug:
+            msg: "controller_seed_preview_sha256={{ controller_seed_preview_sha256 }}"
+
+        # Unconditionally, unlike after an apply: the file carries secrets and
+        # phase 2 renders it again.
+        - name: Remove the manifest (nothing is applied in this run)
+          ansible.builtin.file:
+            path: "{{ controller_seed_manifest_path }}"
+            state: absent
+
+        # Read by the guard at the top of every later play in add-region.yml,
+        # which ends that play.
+        - name: Record that this run stopped after the preview
+          ansible.builtin.set_fact:
+            controller_seed_preview_stopped: true
+
+        - name: End the seed play here; nothing is applied
+          ansible.builtin.meta: end_play
+
+    # Before the pause, so nobody is asked to confirm an apply this refuses.
+    - name: Refuse to apply anything but the preview that was reviewed
+      ansible.builtin.assert:
+        that:
+          - controller_seed_preview_sha256 == controller_seed_expect_preview_sha256
+        fail_msg: >-
+          This run's DRY_RUN preview has fingerprint
+          {{ controller_seed_preview_sha256 }}, but
+          controller_seed_expect_preview_sha256 is
+          {{ controller_seed_expect_preview_sha256 }}. The controller database
+          or the inventory changed since the preview was reviewed, so what
+          would be applied is not what was approved. Nothing was applied. Run
+          phase 1 again (controller_seed_stop_after_preview=true), review the
+          new preview, and pass its fingerprint.
+        quiet: true
+      when: controller_seed_expect_preview_sha256 | length > 0
+
     - name: Confirm the apply against the existing controller
       ansible.builtin.pause:
         prompt: >-
@@ -568,7 +667,8 @@
           The seed step failed on {{ inventory_hostname }} -- see the error
           above. From `cstacks seed` it names the manifest section and key
           path; from the load balancer domain gate it names the load balancer
-          and the two domains, and nothing was applied.
+          and the two domains; from the preview fingerprint check it names
+          both fingerprints. In the last two cases nothing was applied.
 
 # After the block, not in it: the manifest apply has committed by now, so the
 # rescue's "nothing was written" would be untrue for a failure here. A re-run
