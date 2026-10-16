@@ -22,8 +22,32 @@
   failed.
 * **`site.yml` and `add-region.yml` end with a "lock down ssh" TODO** naming
   every host whose firewall still accepts ssh from anywhere
-  (`firewall_allow_ssh_from` unset). Narrow it and run `make firewall`; see
+  (`firewall_allow_ssh_from` unset). Narrow it and run `make lock-ssh`; see
   the README's "Restricting ssh".
+* **`make lock-ssh ENV=<env>` locks ssh down as its own step.** It runs
+  `playbooks/firewall.yml` and refuses any host whose
+  `firewall_allow_ssh_from` is empty, then checks the controller's root ssh
+  to the nodes and the registry and the nodes' borg ssh to the backup
+  server. Preview it with `ARGS='--check --diff'`.
+* **With `firewall_allow_ssh_from` set, nodes and the registry accept ssh
+  from the controller** without its being listed, as a backup server
+  already accepts its nodes. The list now only needs the machines you run
+  ansible from.
+* **A run is refused, before anything changes, if a host's narrowed ssh
+  list does not cover the address the run reaches it from** (read on the
+  host, so NAT and bastions count). Every playbook checks it, including
+  `upgrade-docker.yml`. For one deliberate run from an uncovered address,
+  `make lock-ssh ARGS='-e firewall_ssh_allow_this_run=true'` allows it for
+  `firewall_ssh_run_allow_timeout` (1h) instead; only `firewall.yml` honors
+  that.
+* **Every firewall apply rolls itself back unless ansible can reconnect.**
+  The new table is applied with a restore scheduled
+  `firewall_rollback_seconds` (180) out, cancelled only once a fresh ssh
+  connection has come back through it; a host that does not come back
+  restores its previous table by itself and the run fails naming it. A table
+  is now applied when it differs from the last one applied and verified
+  (`/var/lib/cs-firewall/applied.sha256`), so the first run after this
+  change re-applies every host's table once, through the same check.
 
 ## October 14, 2026
 

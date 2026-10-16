@@ -273,21 +273,64 @@ alone. A firewall this repository did not render is never rewritten from here.
 hosts whose own table changes. A node's changed address is accepted by the
 controller and the metrics host as well, so include them.
 
-**Restricting ssh.** `firewall_allow_ssh_from` (empty means anywhere) is a list
-of addresses or CIDRs, set in `group_vars` or per host. The table is applied
-by restarting `cs-firewall.service`; the connection ansible is using survives
-that, the next one does not. Before narrowing it, make sure the list still
-covers:
+Every table is applied with an automatic rollback: the role schedules a
+restore of the last verified table, applies the new one, opens a **fresh** ssh
+connection through it, and only then cancels the restore. A host the run
+cannot reach again restores its previous firewall by itself within
+`firewall_rollback_seconds` (180), and the run fails naming it
+([`roles/firewall/README.md`](roles/firewall/README.md), "Applying the table
+safely").
 
-* the machine you run ansible from;
-* on the nodes and the registry, the controller (volumes, haproxy
-  certificate deploys, load balancer reloads, `DockerSSH`);
-* nothing extra for the backup server: every node is always accepted there
-  (borg runs over ssh).
+### Restricting ssh
 
-Anything you lock out has to be recovered from the host's console.
+Every host accepts ssh from anywhere until you narrow it, and a fresh install
+ends by naming the hosts still open. Narrowing it is a deliberate last step,
+its own run:
 
-**Moving sshd to another port.** `ssh_port` tells the firewall (and the rest
+1. Set `firewall_allow_ssh_from`, in `group_vars` or per host, to the
+   addresses or networks of the machines you run ansible from — a bastion, a
+   CI runner. Nothing else: on the nodes and the registry the controller is
+   accepted without being listed (volumes, haproxy certificate deploys, load
+   balancer reloads, `DockerSSH`), and on a backup server every node is (borg).
+2. Preview it: `make lock-ssh ENV=prod ARGS='--check --diff'`.
+3. Apply it: `make lock-ssh ENV=prod`.
+
+`make lock-ssh` is `make firewall` with every targeted host required to set
+the list, so no host is left open by mistake. Three things stand between the
+list and a lockout:
+
+* **Refusal.** Before anything changes, preflight reads on each host the
+  address this run reaches it from (`SSH_CONNECTION`, so after any NAT, jump
+  host or bastion) and stops the run if that host's list — with the
+  controller, the nodes and `firewall_extra_allowed_ipv4` / `_ipv6` as above —
+  does not cover it, naming the host, the address and the fix. Every entry
+  point checks this, `site.yml`, `add-region.yml` and `upgrade-docker.yml`
+  included. A run over the tailnet needs its tailnet address, or
+  `100.64.0.0/10`, in the list.
+* **Rollback.** As above. A run that lost a host says so, and the host is
+  back on its previous table within three minutes; fix the list and run
+  again once it is.
+* **Opt-in, for one deliberate run from an address the list does not
+  cover:** `make lock-ssh ENV=prod ARGS='-e firewall_ssh_allow_this_run=true'`
+  skips the refusal and allows this run's source for
+  `firewall_ssh_run_allow_timeout` (1h) instead, through a set in the table
+  that is never written to disk. The run prints when it expires. After that,
+  or after a reboot or the next apply, that address is locked out, and the
+  rollback only proved the table loads, not that the list lets anyone in.
+  Only `firewall.yml` honors it; every other playbook refuses it.
+
+`make lock-ssh` ends with the `ssh` and `borg` checks from
+[`roles/validate`](roles/validate/README.md): the controller's root ssh to
+each narrowed node and the registry, and each node's borg ssh to a narrowed
+backup server.
+
+Anything locked out despite all this has to be recovered from the host's
+console, or over ssh from the controller (nodes, registry) or a node (backup),
+which are still accepted.
+
+### Moving sshd to another port
+
+`ssh_port` tells the firewall (and the rest
 of the repository) which port sshd listens on; it does not move sshd, and
 preflight requires `ansible_port` to match it. Opening the new port before
 anything dials it takes two runs:

@@ -307,7 +307,13 @@ node reports capacity.
 
 Finally, **lock down ssh** on the new node if the inventory does not already
 set `firewall_allow_ssh_from`: its firewall accepts ssh from anywhere until
-then, and the run ends by naming it. See the README's "Restricting ssh".
+then, and the run ends by naming it. Set the list to the machines you run
+ansible from (the controller is accepted on the node without being listed),
+then `make lock-ssh ENV=<name> ARGS='--check --diff'` and
+`make lock-ssh ENV=<name>`. On an attach inventory it re-renders the new
+node's table only; the existing hosts get the same node-address appends as
+this run, and their own ssh rules are not touched. See the README's
+"Restricting ssh".
 
 ## What attach mode is not
 

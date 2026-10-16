@@ -372,9 +372,13 @@ checkpoints:
   off-host. Tenant volumes go to the borg server; the controller's own
   database does not.
 * **Lock down ssh.** Every host's firewall accepts ssh from anywhere until
-  you set `firewall_allow_ssh_from` and run `make firewall`; the run ends by
-  naming the hosts still open. See the README's "Restricting ssh" for what
-  the list must cover.
+  you narrow it; the run ends by naming the hosts still open. Set
+  `firewall_allow_ssh_from` to the machines you run ansible from (the
+  controller and the nodes are accepted where they need to be without being
+  listed), preview with `make lock-ssh ENV=<name> ARGS='--check --diff'`,
+  then run `make lock-ssh ENV=<name>`. It refuses a list that would lock this
+  run out, rolls back any host it cannot reach again, and ends by checking
+  the controller's and the nodes' ssh. See the README's "Restricting ssh".
 
 ## Known rough edges on Ubuntu 26.04
 

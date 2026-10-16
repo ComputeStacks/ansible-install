@@ -80,6 +80,10 @@ hosts and backup hosts; unset everywhere means the single site called
    NEVER `flush ruleset` (it destroys docker's and the agent's `cs_agent`
    tables; docker does not recover until dockerd restarts). No forward-hook
    drop chain. Do not create v1's `expose-ports`/`container-inbound` chains.
+   A rendered table is applied only through `roles/firewall`'s safe apply
+   (`tasks/apply.yml`: a scheduled rollback, cancelled only once a fresh ssh
+   connection has come back through the new table), never a bare restart;
+   the attach-mode appends, which only add accepts, are the one exception.
 8. **SECRET_KEY_BASE / USER_AUTH_SECRET are immutable inputs.** Never
    generated, never re-rendered on existing controllers. Preflight fails on a
    blank or short one.
@@ -141,7 +145,8 @@ could plausibly write have exactly one owner:
 
 * the `ops` docker network → `metrics`;
 * `/etc/update-motd.d/50-computestacks` → `common`;
-* `/etc/modules-load.d/cs-firewall.conf` → `firewall`;
+* `/etc/modules-load.d/cs-firewall.conf` and `/var/lib/cs-firewall/` →
+  `firewall`;
   `/etc/modules-load.d/cs-node.conf` → `node_kernel` (separate files, no
   sharing);
 * on nodes, the `docker_data_device` filesystem, its fstab entries (the data
