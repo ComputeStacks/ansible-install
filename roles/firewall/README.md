@@ -46,7 +46,7 @@ applied by a role-owned oneshot unit. Also owns
 | `/etc/nftables.d/cs-peers.nft` | Attach mode on a v2-built host only: additive peer rules, loaded by the same unit after the table (a missing file is a no-op). |
 | `/var/lib/cs-firewall/rollback.sh` | The restore the safe apply schedules. |
 | `/var/lib/cs-firewall/applied.nft`, `applied.sha256` | A copy and the sha256 of the last table that was applied **and verified**. A table on disk with a different sha256 is applied on the next run. |
-| `/var/lib/cs-firewall/adopted.nft` | Only on a host converged before the safe apply existed, until its first verified apply: the table it was running, kept as the rollback target. |
+| `/var/lib/cs-firewall/adopted.nft` | Only on a host converged before the safe apply existed, until its first verified apply: a snapshot of the table it is running (`nft list table`), kept as the rollback target. |
 | `cs-firewall-rollback-<time>-<n>.timer` / `.service` | Transient (`systemd-run`), one per apply; cancelled once the apply is verified. A `<unit>.fired` marker beside the state files means one ran. |
 
 The distro `nftables.service` is **stopped and disabled** (see below).
@@ -207,7 +207,9 @@ next connection, and `tasks/apply.yml` applies every table like this:
 2. **Rollback.** A transient `systemd-run` timer, `firewall_rollback_seconds`
    (180) out, runs `rollback.sh`: copy `applied.nft` back and restart
    `cs-firewall`. On a host converged before this existed it restores
-   `adopted.nft`, the table it ran before. On a host that had no table of
+   `adopted.nft`, a snapshot of the table it was running, taken from the
+   kernel on each run until the first verified apply (never the file on
+   disk, which an interrupted run may have rewritten without applying). On a host that had no table of
    ours at all, it deletes the new table, moves `cs-static.nft` aside to
    `cs-static.nft.failed` and disables the unit: the host then has **no**
    firewall, as before the run. The timer outlives any ssh connection. A

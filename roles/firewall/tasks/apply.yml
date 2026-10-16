@@ -27,11 +27,11 @@
     firewall_apply_rolled_back: false
     firewall_rollback_unit: "cs-firewall-rollback-{{ now(utc=true, fmt='%Y%m%dT%H%M%S') }}-{{ 99999 | random }}"
     # The table a rollback puts back: the last verified apply's copy, else
-    # the pre-existing table adopted in tasks/nftables.yml, else none -- the
-    # host had no table of ours, and a rollback removes the new one.
+    # the snapshot of the running table taken in tasks/nftables.yml, else
+    # none -- no table of ours was running, and a rollback removes the new one.
     firewall_rollback_source: >-
       {{ (firewall_state_dir ~ '/applied.nft') if firewall_previous.results[0].stat.exists
-         else ((firewall_state_dir ~ '/adopted.nft') if firewall_previous.results[1].stat.exists else '') }}
+         else ((firewall_state_dir ~ '/adopted.nft') if firewall_adopted.stat.exists | default(false) else '') }}
 
 # Over the connection the run already has, which the old table let in. Step 4
 # requires a different client port, which proves its connection is a new one.
@@ -52,7 +52,9 @@
       units=$(systemctl list-units --all --plain --no-legend --type=timer,service \
                 'cs-firewall-rollback-*' | awk '{print $1}')
       for unit in $units; do
-        systemctl stop "$unit"
+        # Stopping one half of a transient timer/service pair can unload the
+        # other, so a unit listed above may be gone by its turn.
+        systemctl stop "$unit" 2>/dev/null || true
         systemctl reset-failed "$unit" 2>/dev/null || true
         echo "$unit"
       done
