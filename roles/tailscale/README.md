@@ -34,9 +34,11 @@ it; its first join takes a short-lived `tailscale_authkey` for that run
 2. Starts an installed `tailscaled`, then reads the login state
    (`tasks/status.yml`, read-only): `tailscale status --json`'s
    `BackendState`, or `NotInstalled` when there is no `tailscale` binary.
-   `Running` is **logged in**; `NeedsLogin`, `NoState` and `NotInstalled`
-   are **not logged in**; anything else (`Stopped`, `NeedsMachineAuth`, an
-   unreadable status) fails with a message naming the state.
+   `Running` is **logged in**; `NeedsLogin` and `NotInstalled` are **not
+   logged in**; `Starting` and `NoState`, which a just-started daemon reports
+   whether or not it is logged in, are waited out (up to a minute); anything
+   else (`Stopped`, `NeedsMachineAuth`, an unreadable status) fails with a
+   message naming the state.
 3. **Logged in:** reads `tailscale debug prefs` (never logged) and compares
    it with the flags below; any difference fails the run before anything
    changes, naming each setting and the `tailscale set …` that makes the

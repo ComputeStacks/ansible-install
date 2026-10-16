@@ -23,12 +23,14 @@ import shlex
 # BackendState values (ipn.State) this role knows how to act on.
 #   Running        logged in and up: never joined again.
 #   NeedsLogin     installed, not logged in: the first join.
-#   NoState        tailscaled has no state yet: the first join.
 #   NotInstalled   (ours) no tailscale binary: install, then the first join.
 # Anything else -- Stopped (logged in, `tailscale down`), NeedsMachineAuth
-# (waiting for approval), Starting, InUseOtherUser, or an unreadable status --
-# is refused by tasks/status.yml with a message naming the state.
-JOIN_STATES = ("NeedsLogin", "NoState", "NotInstalled")
+# (waiting for approval), Starting, NoState, InUseOtherUser, or an
+# unreadable status -- is refused by tasks/status.yml with a message naming
+# the state. NoState is what a just-started tailscaled reports before it has
+# loaded its state -- a logged-in node included -- so it is waited out like
+# Starting, and never read as "not logged in".
+JOIN_STATES = ("NeedsLogin", "NotInstalled")
 LOGGED_IN_STATE = "Running"
 
 
