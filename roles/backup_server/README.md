@@ -46,8 +46,10 @@ single-site inventory sets `site` nowhere, every host lands in the site called
 4. **sshd sized for the backup sweep**, in the drop-in
    `/etc/ssh/sshd_config.d/40-computestacks-backup.conf` (checked with
    `sshd -t` before it is installed, then sshd reloaded; open sessions are
-   kept). Every node fires its due backups on the same schedule (the
-   controller's default is `@hourly`; cs-agent checks every 20 s), each with
+   kept). Every node fires its due backups on the same schedules (the
+   controller's default is `@hourly`; cs-agent 3.5.0 and later start each
+   project's backups at a fixed offset of up to 2 hours after the cron
+   time, which spreads the sweep but does not remove it), each with
    `queue.numworkers` + 1 backups at once (4 by default), and every borg
    invocation is a new connection. Stock `MaxStartups 10:30:100` starts
    dropping new connections at 10 unauthenticated handshakes, sooner when

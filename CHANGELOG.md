@@ -2,6 +2,13 @@
 
 ## October 15, 2026
 
+* **cs-agent 3.5.0** (was 3.4.0): scheduled backups start at a per-project
+  offset (up to 2 hours) instead of all at once, backups missed during
+  maintenance mode are caught up, and backup/restore tasks on one volume no
+  longer overlap (see the cs-agent CHANGELOG). New nodes install it, and
+  `make maintain-nodes` upgrades live nodes to it inside the hold. The
+  package is published after the release is built; until then
+  `make check-pins` fails on it and nothing can install it.
 * **Breaking: tailnet membership is `tailscale_enabled` alone, default
   false.** A host is on the tailnet only when `tailscale_enabled` is true for
   it; `tailscale_authkey` no longer turns tailscale on, and `site.yml`'s old

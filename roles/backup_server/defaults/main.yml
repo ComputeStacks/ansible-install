@@ -53,8 +53,9 @@ backup_server_borg_keyservers:
 backup_server_install_borg: false
 
 # --- sshd ------------------------------------------------------------------
-# Every node fires its due backups on the same schedule (the controller's
-# default is @hourly; cs-agent checks every 20 s), each node running
+# Every node fires its due backups on the same schedules (the controller's
+# default is @hourly; cs-agent 3.5.0+ offsets each project by up to 2 h,
+# which spreads the sweep but does not remove it), each node running
 # cs-agent's queue.numworkers + 1 backups at once, and every borg invocation
 # is a new SSH connection. Stock sshd starts randomly dropping new
 # connections at 10 unauthenticated handshakes (MaxStartups 10:30:100) --

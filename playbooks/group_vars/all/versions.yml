@@ -35,12 +35,15 @@ controller_image_allow_floating_tag: false
 # cs-agent — apt PACKAGE version. Historically this was NOT the agent's
 # self-reported version (package 1.5.0 shipped backup-agent 2.0.0), but since
 # the node-agent rename the deb is cut straight from the git tag, so package
-# == agent version. Verified 2026-10-09 against
+# == agent version. Set 2026-10-15 to agent v3.5.0 from its CHANGELOG (no
+# migrations, no API changes; four new agent.yml keys, all with defaults,
+# none rendered here). The package is built from the tag and published to
 # https://repo.computestacks.com/public/dists/stable/main/binary-amd64/Packages
-# — newest listed package is 3.4.0, which is agent v3.4.0 (the pool is
-# append-only, so every older version stays installable for a rollback).
+# after the release -- until it is listed there, `make check-pins` fails on
+# this pin and nothing can install it. The pool is append-only, so every
+# older version stays installable for a rollback.
 # 3.4.0 is the minimum for `make upgrade-docker` (`cs-agent maintenance`).
-cs_agent_apt_version: "3.4.0"
+cs_agent_apt_version: "3.5.0"
 cs_agent_apt_repo: "https://repo.computestacks.com/public"
 cs_agent_apt_key_url: "https://repo.computestacks.com/public/computestacks.gpg.asc"
 

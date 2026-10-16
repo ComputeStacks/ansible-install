@@ -71,8 +71,8 @@ environment can carry a permanent exclusion in its inventory.
 
 ## Why these checks are shaped the way they are
 
-**The agent probe expects HTTP 401.** cs-agent 3.4.0 (the pinned
-`cs_agent_apt_version`) has no unauthenticated route: every handler is wrapped
+**The agent probe expects HTTP 401.** cs-agent (3.4.0 and later, which
+covers the pinned `cs_agent_apt_version`) has no unauthenticated route: every handler is wrapped
 in `requireCustomer`/`requireAdmin`, and a request without an `Authorization`
 header is answered 401 by `authenticate` (`httpapi/httpapi.go` in
 ComputeStacks/node-agent). A 401 is therefore the strongest signal available —
