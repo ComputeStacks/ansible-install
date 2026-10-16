@@ -16,8 +16,9 @@
     msg: >-
       TODO (by hand): lock down ssh. sshd on {{ firewall_ssh_open_hosts | join(', ') }}
       accepts connections from anywhere. Set firewall_allow_ssh_from to the
-      machines you run ansible from, plus the controller on nodes and the
-      registry (a backup server accepts the nodes for you), then run
-      `make firewall`. See README "Restricting ssh".
+      machines you run ansible from (the controller and, on a backup server,
+      the nodes are accepted without being listed), preview with
+      `make lock-ssh ENV=<env> ARGS='--check --diff'`, then run
+      `make lock-ssh ENV=<env>`. See README "Restricting ssh".
   when: firewall_ssh_open_hosts | length > 0
   run_once: true

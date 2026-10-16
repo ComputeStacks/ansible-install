@@ -9,6 +9,7 @@
 #   make add-region ENV=prod
 #   make upgrade-docker ENV=prod
 #   make firewall ENV=prod
+#   make lock-ssh ENV=prod
 #   make validate ENV=prod
 #   make lint check
 #
@@ -65,7 +66,7 @@ define require_env
 	  exit 1; }
 endef
 
-.PHONY: help deps site add-region upgrade-docker firewall validate add-region-validate lint check check-pins
+.PHONY: help deps site add-region upgrade-docker firewall lock-ssh validate add-region-validate lint check check-pins
 
 help:
 	@echo "deps                              install the pinned galaxy roles and collections"
@@ -75,6 +76,9 @@ help:
 	@echo "                                  time, in a maintenance window (LIMIT=<node> resumes one)"
 	@echo "firewall ENV=<name>               re-render and apply the host firewalls only"
 	@echo "                                  (ARGS='--check --diff' shows the change first)"
+	@echo "lock-ssh ENV=<name>               the same, refusing any host whose"
+	@echo "                                  firewall_allow_ssh_from is empty; then checks"
+	@echo "                                  the controller and backup ssh paths"
 	@echo "validate ENV=<name>               re-run the post-install checks only"
 	@echo "add-region-validate ENV=<name>    the same, for an attached region (add-region.yml)"
 	@echo "lint                              ansible-lint, production profile"
@@ -85,8 +89,9 @@ help:
 	@echo "                                  public_ipv6 check and load balancer address seed, the"
 	@echo "                                  node upgrade selection rules, the node data"
 	@echo "                                  disk classification, the reachability verdict,"
-	@echo "                                  the tailnet routing of every pairwise consumer"
-	@echo "                                  and the cs-agent backup export settings"
+	@echo "                                  the tailnet routing of every pairwise consumer,"
+	@echo "                                  the cs-agent backup export settings and"
+	@echo "                                  the ssh-source check against the firewall"
 	@echo "check-pins                        confirm every pin in versions.yml and requirements.yml"
 	@echo "                                  exists upstream (network; not part of check)"
 	@echo ""
@@ -131,6 +136,16 @@ upgrade-docker:
 firewall:
 	$(require_env)
 	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) playbooks/firewall.yml
+
+# The deliberate last step of an install: firewall.yml with every targeted
+# host required to set firewall_allow_ssh_from, so none is left accepting ssh
+# from anywhere. Preflight refuses a list that does not cover this run's own
+# source, each table is applied with an automatic rollback, and the run ends
+# by checking the controller's and the nodes' ssh paths (README.md,
+# "Restricting ssh"). Preview it with ARGS='--check --diff'.
+lock-ssh:
+	$(require_env)
+	$(ANSIBLE_PLAYBOOK) $(PLAY_ARGS) -e firewall_require_ssh_allowlist=true playbooks/firewall.yml
 
 # Every check in roles/validate carries the `validate` tag (plus its own
 # name), so this runs the assertions without re-running the converge.
@@ -193,6 +208,8 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/backup_server_sshd.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/backup_server_sshd.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/firewall_ssh_source.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/firewall_ssh_source.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"
@@ -203,7 +220,8 @@ check:
 	@echo "       every ssh port consumer reads the listening host's own ssh_port,"
 	@echo "       the uplink's IPv6 RA fix matches who manages the link,"
 	@echo "       every tailnet consumer agrees on which legs ride the tailnet,"
-	@echo "       cs-agent's backup export block renders only with a bucket and is checked"
+	@echo "       cs-agent's backup export block renders only with a bucket and is checked,"
+	@echo "       the ssh-source check covers exactly what each host's firewall accepts"
 
 # Online, read-only: every pin in playbooks/group_vars/all/versions.yml (and
 # requirements.yml) is looked up at its source -- apt indexes, registries,
