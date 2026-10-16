@@ -7,15 +7,17 @@
   containers for another reason, so on a node that needed no stop they were
   never applied. Now every node gets them after the converge and the agent
   wait, with its containers running and docker's packages held; needrestart
-  is told not to restart services during that upgrade. OS updates still never
+  is told not to restart services for that upgrade. OS updates still never
   stop containers on their own, but the stop decision is now taken after
   them: an update that asks for a reboot (typically a kernel) stops the
   containers and reboots the node in the same run. `--check` flags the
-  kernel and libc updates that usually do. A run interrupted during the
+  updates that usually do (kernel, firmware, microcode, libc, dbus, PAM,
+  systemd), but the run decides from `/var/run/reboot-required`. A run interrupted during the
   upgrade re-runs it on resume; if dpkg was left half-way, the run stops with
   the node held and says to run `dpkg --configure -a`. `upgrade-docker`
-  is unchanged; its OS upgrade now runs async, so a dropped connection no
-  longer kills dpkg part-way.
+  stops as before; its OS upgrade now also runs async, so a dropped
+  connection no longer kills dpkg part-way (the async ceiling is the lock
+  wait plus 6 hours).
 
 ## October 15, 2026
 

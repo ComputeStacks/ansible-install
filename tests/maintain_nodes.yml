@@ -395,7 +395,8 @@
           # the list is recorded with the decision, for a resumed run's report
           - "'os_live' in mn_record.vars.node_upgrade_state_update"
           # docker re-held BEFORE apt, apt gated and non-interactive
-          - mn_os_steps == ['Hold the docker packages before the OS upgrade', 'Apply the pending OS updates, docker held']
+          - mn_os_steps == ['Hold the docker packages before the OS upgrade', 'Apply the pending OS updates, docker held',
+                            "Forget needrestart's pending run from the live upgrade"]
           - mn_prehold['ansible.builtin.dpkg_selections'].selection == 'hold'
           - mn_prehold.loop is defined
           - mn_apt['ansible.builtin.apt'].upgrade == 'safe'
@@ -460,14 +461,15 @@
             mn_check_plain is search('would stop containers: no')
           - mn_check_plain is search('would be applied live inside the hold, with the containers running, without a stop\\.')
           - mn_check_plain is not search('reboot the node')
-          # a listed kernel/libc update is flagged: the run would then stop and reboot
+          # a listed reboot-prone update is flagged: the run would then stop and reboot
           - >-
-            mn_check_kernel is search('kernel/libc: libc6, linux-image-6.20.0-11-generic')
+            mn_check_kernel is search('may ask for a reboot: libc6, linux-image-6.20.0-11-generic')
           - mn_check_kernel is search('would then STOP the containers and reboot the node')
           - >-
             mn_real_kernel is search('stop containers: YES because a reboot is pending')
           - >-
-            mn_real_kernel is search('OS updates: 3 \\(kernel/libc: [^)]*\\) applied live inside the hold, containers running -- the node asked for a reboot')
+            mn_real_kernel is search('OS updates: 3 \\(may ask for a reboot: [^)]*\\) applied live inside the hold, '
+                                     ~ 'containers running -- the node asked for a reboot')
           - mn_real_kernel is not search('Still pending')
           - >-
             mn_real_plain is search('stop containers: no')

@@ -40,7 +40,8 @@ itself, inside the hold.
 **Pending OS updates are applied live, inside the hold, with the containers
 running** — after the converge and the agent, before the run decides whether
 to stop. docker's packages are held for it (so are cs-agent, node_exporter
-and haproxy), and needrestart is told not to restart services, but a
+and haproxy), and needrestart is told not to restart services (now or at
+the next apt run), but a
 package's own upgrade can still restart its service (sshd, for one, which
 keeps open sessions). OS updates never stop containers on their own; when
 one of them asks for a reboot (a kernel, often libc), the reboot does — in
@@ -63,14 +64,16 @@ Preview first. `--check --diff` takes no hold and changes nothing: it runs
 every preflight, shows the converge's diffs, and prints per node
 
     <node>: would stop containers: no -- docker matches its pins, ... .
-    Tenant containers running now: 412. Pending OS updates: 23 (kernel/libc:
+    Tenant containers running now: 412. Pending OS updates: 23 (may ask for a reboot:
     libc6, linux-image-...) -- would be applied live inside the hold, with
-    the containers running, without a stop. BUT the kernel/libc updates
+    the containers running, without a stop. BUT some of these updates
     usually ask for a reboot: the run would then STOP the containers and
     reboot the node.
 
 The preview cannot know for certain whether the updates will ask for a
-reboot; it flags the kernel and libc packages that usually do. A real run
+reboot; it flags the packages that usually do (kernel, firmware,
+microcode, libc, dbus, PAM, systemd), and the run itself decides from
+`/var/run/reboot-required`. A real run
 reports the updates it applied live and, after them, its decision.
 
 ```sh

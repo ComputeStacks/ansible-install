@@ -200,7 +200,7 @@ view.
 | agent | `agent_wait.yml` | — | Poll `maintenance status --json` until `agent_active` and a local hold (`node_upgrade_agent_wait`, 300s). Exit 3 and no output are retried; no hold, or another error document, fails at once. `controller_acked` is not read. |
 | OS updates, live | `maintain_os_updates.yml`, `os_upgrade.yml` | — | Containers RUNNING (R3). List the pending OS updates (kept for the report and state.json), re-hold the docker packages, `apt-get upgrade --with-new-pkgs` (`node_upgrade_apply_os_updates`; async, needrestart suspended). Then the agent wait again (one poll when nothing restarted it), which also confirms the hold. |
 | decide | `maintain_decide.yml` | `converged` | Stop iff docker drifts, dockerd must restart (docker_tls' deferred reason, or a docker_tls file newer than the running dockerd), `/var/run/reboot-required` exists (the live OS updates may just have written it), or `maintain_force_restart`. The decision, its inputs and the OS updates applied live (`os_live`) are written with the phase (R2). |
-| report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the OS updates applied live and any still pending (kernel/libc named). |
+| report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the OS updates applied live and any still pending (those that usually ask for a reboot named). |
 | record, stop, packages | as upgrade-docker | `recorded`, `stopped`, `packages` | Only when the decision says stop. packages' OS upgrade is normally a no-op now; it catches anything new and keeps a resumed run correct. |
 | docker restart | `docker_restart.yml` | `docker_restarted` | When the decision requires it and no reboot follows. |
 | reboot, services, start | as upgrade-docker | `rebooted`, `started` | |
@@ -244,12 +244,15 @@ decision.
   decision (`tasks/os_upgrade.yml`, the same file the stopped window's
   `packages.yml` runs): docker's packages re-held first (cs-agent,
   node_exporter and haproxy are held by their roles), needrestart's apt hook
-  suspended, async so a dropped connection does not kill dpkg. Because the
+  suspended and its pending run cleared (so a later apt run does not restart
+  those services with tenants up), async so a dropped connection does not kill dpkg. Because the
   decision reads `/var/run/reboot-required` afterwards, an update that asks
   for a reboot stops the containers and reboots in the same run. No role in
   the converge runs `apt upgrade`; they install at `present`, the agent and
-  node_exporter at their pins. A resumed converge applies them again (apt
-  waits for the dpkg lock of an orphaned job); a dpkg left half-way is not
+  node_exporter at their pins. A resumed converge applies them again (an
+  orphaned apt job may still hold the dpkg lock, and the roles' installs
+  wait for it only briefly: a run re-started at once can fail on it, held;
+  re-run when the job is done); a dpkg left half-way is not
   repaired automatically -- the failure message says to run
   `dpkg --configure -a` (a half-configured docker package would restart
   dockerd), with the node still held.

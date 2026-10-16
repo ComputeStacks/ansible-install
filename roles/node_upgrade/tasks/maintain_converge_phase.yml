@@ -12,8 +12,10 @@
 # needs no stop.
 #
 # A run interrupted during the live OS upgrade re-runs this whole phase: the
-# docker packages are re-held and apt runs again (apt waits for the dpkg
-# lock an orphaned job still holds). If dpkg itself was left half-way, apt
+# docker packages are re-held and apt runs again. An orphaned apt job from
+# the dropped run may still hold the dpkg lock; the converge's own role
+# installs wait for it only briefly, so a run re-started at once can fail on
+# that lock (held, containers running) -- re-run it once the job is done. If dpkg itself was left half-way, apt
 # refuses and the failure (templates/maintain_failed.j2) says to run
 # `dpkg --configure -a`; the node stays held, its containers running.
 #

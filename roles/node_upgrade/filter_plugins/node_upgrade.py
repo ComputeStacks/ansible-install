@@ -490,10 +490,19 @@ def maintain_decide(inputs):
 
 # Packages whose upgrade makes Ubuntu ask for a reboot: the kernel (a new
 # linux-image / linux-modules) and the C library every running process maps.
+# Packages whose Ubuntu maintainer scripts usually ask for a reboot
+# (/var/run/reboot-required). A hint for the preview only -- the run itself
+# decides from the file -- so it errs toward naming too many.
 REBOOT_PACKAGE_PATTERNS = (
-    re.compile(r"^linux-(image|modules|modules-extra|generic|virtual|kvm|headers)(-|$)"),
+    re.compile(r"^linux-(image|modules|modules-extra|generic|virtual|kvm|headers|firmware)(-|$)"),
     re.compile(r"^libc6(:|$)"),
     re.compile(r"^libc-bin(:|$)"),
+    re.compile(r"^dbus(-|:|$)"),
+    re.compile(r"^libdbus-1-3(:|$)"),
+    re.compile(r"^(intel|amd64)-microcode(:|$)"),
+    re.compile(r"^libpam0g(:|$)"),
+    re.compile(r"^libpam-(modules|modules-bin|runtime)(:|$)"),
+    re.compile(r"^systemd(-sysv)?(:|$)"),
 )
 
 

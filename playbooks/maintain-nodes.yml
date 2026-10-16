@@ -9,11 +9,14 @@
 #   * docker drifts from its pins in versions.yml;
 #   * the converge changed what dockerd only reads at start (docker_tls'
 #     certificate or ExecStart drop-in);
-#   * /var/run/reboot-required already exists;
+#   * /var/run/reboot-required exists -- including when this run's own OS
+#     updates asked for it;
 #   * -e maintain_force_restart=true.
 #
-# Pending OS updates are never a reason on their own; they are applied only
-# inside a stopped window that happens anyway. Run it in a scheduled window.
+# Pending OS updates are applied live, inside the hold, with the containers
+# running, before that decision; they are never a reason to stop on their
+# own, only through the reboot one of them may ask for. Run it in a
+# scheduled window.
 #
 #   make maintain-nodes ENV=<env>                            (every node)
 #   make maintain-nodes ENV=<env> ARGS='--check --diff'      (preview, no hold)
@@ -25,7 +28,8 @@
 # containers RUNNING (common, node_exporter, tailscale, ubuntu_pro,
 # docker_config, docker_tls, node_kernel, haproxy, node_observability,
 # firewall, cs_agent -- cs-agent is upgraded inside the hold); run every
-# handler inside the hold; wait for the agent; decide; only if needed record
+# handler inside the hold; wait for the agent; apply the pending OS updates
+# live (docker held); decide; only if needed record
 # / stop / packages / docker restart / reboot / start; release; validate the
 # node; settle 60s; next node.
 #

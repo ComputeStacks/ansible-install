@@ -12,7 +12,7 @@
 {%- set would = ansible_check_mode -%}
 {%- set apply = node_upgrade_apply_os_updates | bool -%}
 {%- set from_state = node_upgrade_maintain_from_state | default(false) -%}
-{%- macro kernel(u) -%}{{ (' (kernel/libc: ' ~ (u.reboot_packages | join(', ')) ~ ')') if u.reboot_hint | default(false) else '' }}{%- endmacro -%}
+{%- macro kernel(u) -%}{{ (' (may ask for a reboot: ' ~ (u.reboot_packages | join(', ')) ~ ')') if u.reboot_hint | default(false) else '' }}{%- endmacro -%}
 {{ inventory_hostname }}: {{ 'would stop' if would else 'stop' }} containers: {{ 'YES' if d.stop else 'no' }}
 {%- if d.stop %} because {{ d.reasons | join('; ') }}.
 {%- else %} -- docker matches its pins, no docker restart is required, no reboot is pending, and the run is not forced.
@@ -43,7 +43,7 @@
 {%- elif not apply %} Pending OS updates: {{ os.count }}{{ kernel(os) }} -- NOT applied (node_upgrade_apply_os_updates is false).
 {%- else %} Pending OS updates: {{ os.count }}{{ kernel(os) }} -- would be applied live inside the hold, with the containers running, without a stop
 {%- if os.reboot_hint and d.stop %}; the node would then reboot in the stopped window, if they ask for it.
-{%- elif os.reboot_hint %}. BUT the kernel/libc updates usually ask for a reboot: the run would then STOP the containers and reboot the node.
+{%- elif os.reboot_hint %}. BUT some of these updates usually ask for a reboot: the run would then STOP the containers and reboot the node.
 {%- else %}.
 {%- endif %}
 {%- endif %}

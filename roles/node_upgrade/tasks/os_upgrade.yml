@@ -18,8 +18,9 @@
 #
 # Sets: node_upgrade_os_upgrade (the apt result)
 #
-# Everything was downloaded before the hold (tasks/download.yml), so this
-# does not depend on the mirror being reachable. It runs under async + poll,
+# tasks/download.yml downloaded the pending updates before the hold, so this
+# normally needs nothing from the mirror; a converge role that refreshes
+# apt's lists inside the hold (haproxy's) can add an update downloaded here. It runs under async + poll,
 # so a dropped connection does not kill apt half-way through dpkg; the job
 # finishes on the node, and a re-run waits for its dpkg lock.
 
@@ -55,6 +56,23 @@
     DEBIAN_FRONTEND: noninteractive
     NEEDRESTART_SUSPEND: "{{ '1' if (node_upgrade_os_upgrade_live | default(false) | bool) else '' }}"
   register: node_upgrade_os_upgrade
-  async: "{{ (node_upgrade_apt_lock_timeout | int) + 3600 }}"
+  # A ceiling, not an expected duration: at the ceiling ansible SIGKILLs the
+  # job, dpkg included, so it is set far beyond any real upgrade (a node
+  # months behind, a kernel with DKMS rebuilds on slow disk).
+  async: "{{ (node_upgrade_apt_lock_timeout | int) + 21600 }}"
   poll: 15
   when: node_upgrade_apply_os_updates | bool
+
+# NEEDRESTART_SUSPEND makes needrestart's apt hook exit early, but it leaves
+# its marker (/run/needrestart/unpacked), so the NEXT apt run without the
+# suspension -- unattended-upgrades, a role's install in the next converge --
+# would restart every service the libraries updated here, tenants running.
+# Clear it: the services pick the new libraries up at their own next restart
+# or at the next reboot.
+- name: Forget needrestart's pending run from the live upgrade
+  ansible.builtin.file:
+    path: /run/needrestart/unpacked
+    state: absent
+  when:
+    - node_upgrade_apply_os_updates | bool
+    - node_upgrade_os_upgrade_live | default(false) | bool
