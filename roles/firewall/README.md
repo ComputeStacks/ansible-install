@@ -199,11 +199,13 @@ next connection, and `tasks/apply.yml` applies every table like this:
 1. **When.** The table on disk is applied when its sha256 differs from
    `/var/lib/cs-firewall/applied.sha256` (the last table applied *and
    verified*), when there is no record yet — once, on a host converged before
-   this existed — or when the unit changed. Not on the template's `changed`:
-   a run that stopped between rendering and applying would otherwise leave
-   an unapplied table on disk that the next run sees as unchanged and the
-   next reboot loads unverified. Check mode applies nothing and schedules
-   nothing; it says which hosts would be applied.
+   this existed — when the unit changed, or when the firewall is not
+   running: `cs-firewall` not active, or `inet cs_static` not in the kernel.
+   Not on the template's `changed`: a run that stopped between rendering and
+   applying would otherwise leave an unapplied table on disk that the next
+   run sees as unchanged and the next reboot loads unverified. Check mode
+   applies nothing and schedules nothing; it says which hosts would be
+   applied, and why.
 2. **Rollback.** A transient `systemd-run` timer, `firewall_rollback_seconds`
    (180) out, runs `rollback.sh`: copy `applied.nft` back and restart
    `cs-firewall`. On a host converged before this existed it restores
@@ -213,8 +215,12 @@ next connection, and `tasks/apply.yml` applies every table like this:
    ours at all, it deletes the new table, moves `cs-static.nft` aside to
    `cs-static.nft.failed` and disables the unit: the host then has **no**
    firewall, as before the run. The timer outlives any ssh connection. A
-   rollback timer left pending by an earlier run is cancelled first; this
-   run's connection got in, so what is running can be reached.
+   rollback timer an earlier run left pending is never cancelled: that run
+   did not verify its table, and the timer replaces it whatever this run
+   does. roles/preflight refuses the run while one is pending, and this step
+   refuses it again, naming the unit and when it fires; `adopted.nft` is not
+   rewritten while one is. What fired or cancelled rollbacks left behind is
+   cleaned up.
 3. **Apply**, then with the opt-in add this run's source to `ssh_run4/6`.
 4. **Verify.** `meta: reset_connection`, then `wait_for_connection`
    (`firewall_verify_timeout`, 60 s): a new ssh connection from the control
@@ -227,8 +233,11 @@ next connection, and `tasks/apply.yml` applies every table like this:
    timer is no longer active. Then it records `applied.nft` and
    `applied.sha256`.
 6. **Fail** the hosts that did not come back, each with its reason and the
-   list of every such host: each restores its previous firewall by itself
-   within `firewall_rollback_seconds` of its apply.
+   list of every such host: within `firewall_rollback_seconds` of its apply
+   each restores its previous firewall by itself, or, on a host that had no
+   table of ours before, deletes the new one, moves the file to
+   `cs-static.nft.failed` and disables the unit, leaving it with **no**
+   firewall from this role.
 
 From step 3 to step 6 no task fails a host on its own. `ansible.cfg` makes
 every play `any_errors_fatal`, so one host failing early would stop the run
@@ -240,7 +249,8 @@ verify. A host whose ssh is blocked takes about 50 s per attempt
 (`ConnectionAttempts=5`), so allow `firewall_rollback_seconds` well past
 twice `firewall_verify_timeout`; with more hosts than `forks` (20) blocked at
 once, raise it further. A rollback that fires before its cancel is reported
-as a failure of its own: the host then runs its previous table.
+as a failure of its own: the host then runs its previous table, or no table
+of ours if it had none before.
 
 `tasks/v2_append.yml` (attach mode) keeps the plain "Apply the ComputeStacks
 firewall" handler: it only ever adds accepts to a running table, which cannot

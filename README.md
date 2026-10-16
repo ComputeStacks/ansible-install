@@ -277,7 +277,11 @@ Every table is applied with an automatic rollback: the role schedules a
 restore of the last verified table, applies the new one, opens a **fresh** ssh
 connection through it, and only then cancels the restore. A host the run
 cannot reach again restores its previous firewall by itself within
-`firewall_rollback_seconds` (180), and the run fails naming it
+`firewall_rollback_seconds` (180) — or, if it had no firewall from this
+repository before, deletes the new table and is left with none — and the
+run fails naming it. A run is refused while a rollback an earlier run left
+is still pending, and a host whose firewall is not running has its table
+applied again
 ([`roles/firewall/README.md`](roles/firewall/README.md), "Applying the table
 safely").
 
@@ -307,9 +311,12 @@ list and a lockout:
   point checks this, `site.yml`, `add-region.yml` and `upgrade-docker.yml`
   included. A run over the tailnet needs its tailnet address, or
   `100.64.0.0/10`, in the list.
-* **Rollback.** As above. A run that lost a host says so, and the host is
-  back on its previous table within three minutes; fix the list and run
-  again once it is.
+* **Rollback.** As above. A run that lost a host says so, and within three
+  minutes the host is back on its previous table, or, if it had none from
+  this repository, has no firewall from it at all (the table deleted,
+  `cs-static.nft` moved to `cs-static.nft.failed`, the unit disabled). Fix
+  the list and run again once the rollback has fired; until then every run
+  is refused.
 * **Opt-in, for one deliberate run from an address the list does not
   cover:** `make lock-ssh ENV=prod ARGS='-e firewall_ssh_allow_this_run=true'`
   skips the refusal and allows this run's source for

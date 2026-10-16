@@ -164,8 +164,9 @@ change nothing.
   is a single lowercase word — letters, digits, hyphens only, no dots, no
   uppercase (not an FQDN).
 - **This run's ssh source** is covered by each narrowed host's ssh accept
-  set, the ssh opt-in is used only where it is honored, and `make lock-ssh`
-  leaves no host open to anywhere — see
+  set, the ssh opt-in is used only where it is honored, `make lock-ssh`
+  leaves no host open to anywhere, and no firewall rollback from an earlier
+  run is pending — see
   [below](#this-runs-ssh-source-tasksssh_sourceyml).
 - `secret_key_base` and `user_auth_secret` are defined, at least 128
   characters, and not the `CHANGEME` sample placeholders. **This role never
@@ -230,11 +231,17 @@ through the persistent table, it checks:
   check can only refuse a run the table would let in, never the reverse. A
   list entry that is not an address or a network is named in the message and
   counts for nothing.
+- **A pending firewall rollback.** On every v2 host, list or no list, the run
+  reads `systemctl list-timers --all 'cs-firewall-rollback-*'` and stops if
+  a rollback roles/firewall scheduled in an earlier run is still waiting to
+  fire: that run never verified its table, and the timer replaces it
+  whatever this run does. The message names the unit, when it fires, and
+  how to cancel it once you have confirmed the running table lets you in.
 
 Every message names the host, the source and the fix, and ends "Nothing was
 changed." The decisions are `filter_plugins/preflight_ssh.py`
 (`preflight_ssh_connection`, `preflight_ssh_covered`,
-`preflight_ssh_unparsed`, python `ipaddress`); `tests/firewall_ssh_source.yml`
+`preflight_ssh_unparsed`, python `ipaddress`; `preflight_rollback_pending`); `tests/firewall_ssh_source.yml`
 proves them, and renders every host's real table to prove that the filter and
 the template agree on which sources are accepted.
 
@@ -367,9 +374,11 @@ not earn.
 | `preflight_ssh_peer_hosts` / `preflight_ssh_also` | derived | The peers roles/firewall accepts ssh from on this host, and every address besides the list the check counts. Read only on the executing host. |
 | `preflight_ssh_unparsed` | derived | List entries that are not an address or a network. |
 
-Every derived variable above references `hostvars`, so every assertion that
-reads one is `run_once` and evaluates in the executing host's own context —
-the only place such a variable is valid (docs/contracts.md §Variable scope).
+Every derived variable above references `hostvars`, so each is read only in
+the executing host's own context — the only place such a variable is valid
+(docs/contracts.md rule 10, §Variable scope): most in `run_once` assertions,
+and `preflight_ssh_peer_hosts` / `preflight_ssh_also` in the per-host ssh
+source check, for the host it runs on.
 The single exception is `hostvars[h].cs_app_domain`, which is safe to read
 cross-host by construction and is why that name exists (§Variable scope
 again); this role still only reads it `run_once`.

@@ -18,9 +18,13 @@ that the filter and the template agree.
 
 Python's `ipaddress` rather than ansible.utils' `ipaddr`: that collection is
 not a dependency of this repository.
+
+`preflight_rollback_pending` reads the firewall rollback timers an earlier
+run left on a host: a run never acts while one is still waiting to fire.
 """
 
 import ipaddress
+import json
 
 # Always accepted by the table (`iifname "lo" accept`). Only a run through a
 # tunnel that ends on the host itself ever comes from here.
@@ -102,10 +106,44 @@ def preflight_ssh_covered(source, allow_from, also=()):
     return False
 
 
+def preflight_rollback_pending(listing):
+    """The firewall rollbacks an earlier run left pending on a host.
+
+    `listing` is {"now": <the host's clock, usec>, "timers": <`systemctl
+    list-timers --all --output=json 'cs-firewall-rollback-*'`>}, as JSON text
+    or already parsed. A timer with a next elapse is still waiting to fire;
+    one without (null or 0) has fired or was cancelled. Returns a list of
+    {unit, seconds}: the unit name without `.timer`, and the seconds until it
+    fires, rounded up and never negative. Unparseable input is no timers.
+    """
+    if isinstance(listing, str):
+        try:
+            listing = json.loads(listing or "{}")
+        except ValueError:
+            return []
+    if not isinstance(listing, dict):
+        return []
+    try:
+        now = int(listing.get("now") or 0)
+    except (TypeError, ValueError):
+        now = 0
+    pending = []
+    for timer in listing.get("timers") or []:
+        if not isinstance(timer, dict) or not timer.get("next"):
+            continue
+        unit = str(timer.get("unit") or "")
+        if unit.endswith(".timer"):
+            unit = unit[: -len(".timer")]
+        left = int(timer["next"]) - now
+        pending.append({"unit": unit, "seconds": max(0, -(-left // 1000000))})
+    return pending
+
+
 class FilterModule:
     def filters(self):
         return {
             "preflight_ssh_connection": preflight_ssh_connection,
             "preflight_ssh_covered": preflight_ssh_covered,
             "preflight_ssh_unparsed": preflight_ssh_unparsed,
+            "preflight_rollback_pending": preflight_rollback_pending,
         }

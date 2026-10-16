@@ -47,7 +47,11 @@
   restores its previous table by itself and the run fails naming it. A table
   is now applied when it differs from the last one applied and verified
   (`/var/lib/cs-firewall/applied.sha256`), so the first run after this
-  change re-applies every host's table once, through the same check.
+  change re-applies every host's table once, through the same check. A host
+  whose firewall is not running (`cs-firewall` stopped, or its table gone
+  from the kernel) has it applied again. A run is refused, before anything
+  changes, while a rollback an earlier run scheduled is still pending on a
+  host.
 
 ## October 14, 2026
 

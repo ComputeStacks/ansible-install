@@ -11,9 +11,9 @@
 # the two refusals that need no host; the second renders every host's real
 # table with the list set and with it empty, and asserts the controller's ssh
 # accept, the ssh_run sets, and that the filter and the template agree.
-# PURE: tasks/ssh_source.yml's command is never reached (existing_env, or an
-# empty list), and nothing is written. The two `fatal:` lines in the output
-# are expected: they are the refusals, caught by `rescue:`.
+# PURE: tasks/ssh_source.yml's commands are never reached (existing_env, or
+# an earlier refusal), and nothing is written. The two `fatal:` lines in the
+# output are expected: they are the refusals, caught by `rescue:`.
 
 - name: The ssh-source filters and refusals
   hosts: localhost
@@ -72,6 +72,30 @@
           - not ('192.0.2.200' | preflight_ssh_covered(['bastion.example.com']))
           - (['bastion.example.com', '192.0.2.1'] | preflight_ssh_unparsed) == ['bastion.example.com']
         quiet: true
+
+    # As the host prints it: `systemctl list-timers --output=json` with its
+    # clock. A pending timer has a next elapse; a fired or cancelled one none.
+    - name: Assert which firewall rollbacks are pending
+      ansible.builtin.assert:
+        that:
+          - >-
+            (fss_timers | to_json | preflight_rollback_pending)
+            == [{'unit': 'cs-firewall-rollback-a', 'seconds': 121},
+                {'unit': 'cs-firewall-rollback-c', 'seconds': 0}]
+          - (fss_timers | preflight_rollback_pending | length) == 2
+          - (fss_no_timers | to_json | preflight_rollback_pending) == []
+          - ('' | preflight_rollback_pending) == []
+          - ('not json' | preflight_rollback_pending) == []
+        quiet: true
+      vars:
+        fss_no_timers: {now: 1, timers: []}
+        fss_timers:
+          now: 1000000000000000
+          timers:
+            - {next: 1000000120000001, unit: cs-firewall-rollback-a.timer}
+            - {next: null, unit: cs-firewall-rollback-b.timer}
+            - {next: 999999990000000, unit: cs-firewall-rollback-c.timer}
+            - {next: 0, unit: cs-firewall-rollback-d.timer}
 
     - name: "Case: the temporary allowance outside playbooks/firewall.yml"
       block:

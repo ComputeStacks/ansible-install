@@ -17,8 +17,9 @@
 # Also here, because they are the same family and must stop the run just as
 # early: the opt-in that allows this run's source temporarily
 # (`firewall_ssh_allow_this_run`) is refused outside playbooks/firewall.yml,
-# and `make lock-ssh` (`firewall_require_ssh_allowlist`) refuses a host whose
-# list is empty.
+# `make lock-ssh` (`firewall_require_ssh_allowlist`) refuses a host whose
+# list is empty, and every v2 host is refused while a firewall rollback an
+# earlier run scheduled is still waiting to fire.
 #
 # Included from tasks/main.yml (site.yml, add-region.yml, firewall.yml) and
 # from upgrade-docker.yml's preflight play, whose node reboots open new
@@ -68,6 +69,42 @@
   when:
     - firewall_require_ssh_allowlist | default(false) | bool
     - not (existing_env | default(false) | bool)
+
+# A rollback timer roles/firewall scheduled in an earlier run and that is
+# still waiting means that run never verified the table it applied. Nothing
+# can tell from here whether the running table lets anyone in, and the timer
+# will replace it within minutes whatever this run does, so the run waits for
+# it: never cancelled, never raced. Read-only, so check mode reads it too.
+- name: Refuse while an earlier run's firewall rollback is pending
+  when: not (existing_env | default(false) | bool)
+  block:
+    - name: Read the firewall rollback timers on the host
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -euo pipefail
+          timers=$(systemctl list-timers --all --no-legend --output=json 'cs-firewall-rollback-*')
+          printf '{"now": %s, "timers": %s}\n' "$(date +%s%6N)" "${timers:-[]}"
+      register: preflight_rollback_timers
+      changed_when: false
+      check_mode: false
+
+    - name: Assert no firewall rollback from an earlier run is pending
+      ansible.builtin.assert:
+        that:
+          - preflight_rollback_pending_now | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} has a firewall rollback from an earlier run
+          pending ({% for t in preflight_rollback_pending_now %}{{ t.unit }},
+          fires within {{ t.seconds }} s{{ '' if loop.last else '; ' }}{% endfor %}): that run did
+          not verify its table. Wait for it to fire (or cancel it on the host
+          with systemctl stop {{ preflight_rollback_pending_now
+          | map(attribute='unit') | map('regex_replace', '$', '.timer') | join(' ') }}
+          once you have confirmed the running table lets you in), then re-run.
+          Nothing was changed.
+        quiet: true
+      vars:
+        preflight_rollback_pending_now: "{{ preflight_rollback_timers.stdout | preflight_rollback_pending }}"
 
 - name: Check this run's ssh source against the allowlist
   when:
