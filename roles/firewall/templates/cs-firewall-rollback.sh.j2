@@ -1,0 +1,32 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# The automatic firewall rollback. roles/firewall (tasks/apply.yml) runs this
+# from a transient systemd timer it schedules before each apply of
+# {{ firewall_config_file }}, and cancels the timer once a FRESH ssh
+# connection has come back through the new table. If this runs at all, that
+# apply was not verified in time, so the last table that was is put back.
+#
+#   $1  marker file, created first: the run checks for it to learn that the
+#       rollback fired
+#   $2  the table to restore -- the last verified apply's copy -- or empty
+#       when this host had no table of ours before the apply
+set -u
+marker="$1"
+restore="${2:-}"
+
+: > "$marker"
+
+if [ -n "$restore" ] && [ -s "$restore" ]; then
+    echo "restoring $restore over {{ firewall_config_file }}"
+    cp "$restore" "{{ firewall_config_file }}"
+    systemctl restart {{ firewall_service }}
+else
+    # No previous table: the host had no firewall from this role before the
+    # apply, so it goes back to having none -- the table deleted, the file
+    # moved aside so a reboot does not load it again, the unit disabled.
+    echo "no previous table; deleting inet {{ firewall_table }} and moving {{ firewall_config_file }} aside"
+    {{ firewall_nft_bin }} delete table inet {{ firewall_table }} || true
+    mv -f "{{ firewall_config_file }}" "{{ firewall_config_file }}.failed"
+    systemctl disable {{ firewall_service }} || true
+fi

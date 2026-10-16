@@ -55,6 +55,55 @@
     group: root
     mode: "0755"
 
+# --- safe apply (tasks/apply.yml) -------------------------------------------
+# The table is applied when what is on disk differs from what was last applied
+# AND verified -- recorded in `firewall_state_dir` -- or the unit changed. Not
+# on `changed`: a run that stopped between rendering the file and applying it
+# would leave a new file on disk that the next run sees as unchanged, and the
+# host would load it unverified at its next reboot.
+
+- name: Ensure the firewall state directory exists
+  ansible.builtin.file:
+    path: "{{ firewall_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the firewall rollback script
+  ansible.builtin.template:
+    src: cs-firewall-rollback.sh.j2
+    dest: "{{ firewall_state_dir }}/rollback.sh"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Look for the last verified table and the table on disk
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop:
+    - "{{ firewall_state_dir }}/applied.nft"
+    - "{{ firewall_config_file }}"
+  register: firewall_previous
+
+# A host converged before the safe apply existed runs a table with no record
+# of it. Its table file is what it boots with and what that converge applied,
+# so it is kept -- once, never overwritten -- as the table a rollback restores
+# until the first verified apply records one.
+- name: Keep the pre-existing table to roll back to
+  ansible.builtin.copy:
+    src: "{{ firewall_config_file }}"
+    dest: "{{ firewall_state_dir }}/adopted.nft"
+    remote_src: true
+    force: false
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - not firewall_previous.results[0].stat.exists
+    - firewall_previous.results[1].stat.exists
+
 - name: Render the ComputeStacks nftables table
   ansible.builtin.template:
     src: cs-static.nft.j2
@@ -63,7 +112,7 @@
     group: root
     mode: "0644"
     validate: "{{ (firewall_nft_bin ~ ' --check --file %s') if (firewall_validate_config | bool) else omit }}"
-  notify: Apply the ComputeStacks firewall
+  register: firewall_table_render
 
 - name: Install the ComputeStacks firewall unit
   ansible.builtin.template:
@@ -72,13 +121,49 @@
     owner: root
     group: root
     mode: "0644"
-  notify:
-    - Reload systemd for the ComputeStacks firewall
-    - Apply the ComputeStacks firewall
+  register: firewall_unit_render
 
-- name: Enable and start the ComputeStacks firewall
+# Enable only: the first start, like every later restart, is an apply, and
+# goes through tasks/apply.yml.
+- name: Enable the ComputeStacks firewall
   ansible.builtin.systemd_service:
     name: "{{ firewall_service }}"
     enabled: true
-    state: started
     daemon_reload: true
+
+- name: Read the record of the last verified apply
+  ansible.builtin.slurp:
+    src: "{{ firewall_state_dir }}/applied.sha256"
+  register: firewall_applied_record
+  failed_when: false
+
+- name: Checksum the table on disk
+  ansible.builtin.stat:
+    path: "{{ firewall_config_file }}"
+    checksum_algorithm: sha256
+  register: firewall_table_now
+
+- name: Decide whether the table needs applying
+  ansible.builtin.set_fact:
+    firewall_apply_needed: >-
+      {{ (firewall_unit_render is changed)
+         or (ansible_check_mode and firewall_table_render is changed)
+         or not (firewall_table_now.stat.exists | default(false))
+         or ((firewall_applied_record.content | default('') | b64decode | trim)
+             != (firewall_table_now.stat.checksum | default(''))) }}
+
+- name: Report the apply check mode would make
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} would apply {{ firewall_config_file }}, with an
+      automatic rollback after {{ firewall_rollback_seconds }} s unless a fresh
+      ssh connection comes back through it.
+  when:
+    - ansible_check_mode
+    - firewall_apply_needed | bool
+
+- name: Apply the table, verify it and keep it or roll it back
+  ansible.builtin.include_tasks: apply.yml
+  when:
+    - not ansible_check_mode
+    - firewall_apply_needed | bool
