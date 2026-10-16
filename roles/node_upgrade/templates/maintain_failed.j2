@@ -15,6 +15,12 @@
 {%- set rerun = 'make maintain-nodes ENV=<env> LIMIT=' ~ inventory_hostname ~ ':' ~ (groups['controller'] | first)
                 ~ ((':' ~ backup) if backup else '') -%}
 {%- set phases = node_upgrade_phases_done | default([]) -%}
+{#- apt refuses every install while an earlier apt/dpkg run is left half-way;
+    not repaired automatically (tasks/os_upgrade.yml says why). -#}
+{%- set dpkg_broken = (why is search('dpkg --configure -a')) or (why is search('dpkg was interrupted')) -%}
+{%- set dpkg_hint = (' DPKG WAS INTERRUPTED (an earlier apt or dpkg run died part-way), so apt refuses every install until it is repaired. On the node, `dpkg --audit` lists the half-configured packages; '
+    ~ ('configuring a docker package (' ~ (docker_apt_packages | map('regex_replace', '=.*$', '') | join(', ')) ~ ') restarts dockerd, so if one is listed do it only with the tenant containers stopped; otherwise ' if ('stopped' not in phases or 'started' in phases) else '')
+    ~ 'run `dpkg --configure -a`, then re-run.') if dpkg_broken else '' -%}
 {%- if node_upgrade_rescue_released | default(false) | bool -%}
 "{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
 The maintenance hold this run placed has been RELEASED automatically: it failed before the
@@ -46,8 +52,8 @@ it resumes at the release confirmation, archives {{ node_upgrade_state_file }} a
 NODE STATE: {{ inventory_hostname }} IS HELD in maintenance and its tenant containers are
 RUNNING -- nothing was stopped. {% if 'converged' in phases %}The converge finished (decision:
 {{ 'stop' if (node_upgrade_state.decision.stop | default(false)) else 'no stop' }}).{% else %}The
-converge started and may have changed the node's configuration part-way; a dockerd restart it
-needs, if any, has not happened yet.{% endif %}
+converge started and may have changed the node's configuration, and applied some of its OS
+updates, part-way; a dockerd restart or reboot it needs, if any, has not happened yet.{% endif %}{{ dpkg_hint }}
 Fix the cause, then re-run `{{ rerun }}`: it resumes inside the same hold
 ({{ 'and converges again' if 'converged' not in phases else 'from the recorded decision' }}).
 To abandon instead: `cs-agent maintenance off` on the node is safe for the tenants (nothing was
@@ -56,7 +62,7 @@ again by the next run (a docker_tls file newer than the running dockerd).
 {%- else -%}
 "{{ task }}" failed on {{ inventory_hostname }}: {{ why }}
 NODE STATE: {{ inventory_hostname }} IS HELD in maintenance, part-way through its stopped
-window (phases done: {{ phases | join(', ') }}; state {{ node_upgrade_state_file }}).
+window (phases done: {{ phases | join(', ') }}; state {{ node_upgrade_state_file }}).{{ dpkg_hint }}
 {% if 'started' in phases %}The containers recorded there have been started again.
 {% elif 'stopped' in phases %}The containers recorded there ARE STOPPED, and nothing
 will start them until this playbook does.

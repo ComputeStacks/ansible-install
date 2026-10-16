@@ -10,11 +10,15 @@
 #   2. the handlers, flushed: in check mode none acts, and docker_tls' deferred
 #      restart only records its reason;
 #   3. the decision, from the same inputs a real run reads after its converge;
-#   4. the pending OS updates;
+#   4. the pending OS updates, which a real run applies live inside the hold,
+#      without a stop, BEFORE it decides -- so one that asks for a reboot (a
+#      kernel, libc: reboot_hint) turns a "no" here into a stop and a reboot,
+#      and the report says so;
 #   5. "would stop containers: yes/no because ...".
 #
 # An unfinished run (state.json) is previewed from its record: once its
-# converge is done, the decision it wrote is the one a resumed run acts on.
+# converge is done, the decision it wrote is the one a resumed run acts on,
+# and its OS updates were already applied.
 
 - name: Preview the converge
   ansible.builtin.include_tasks: maintain_converge.yml
@@ -30,6 +34,7 @@
 - name: Use the decision the unfinished run recorded
   ansible.builtin.set_fact:
     node_upgrade_maintain_decision: "{{ node_upgrade_state.decision }}"
+    node_upgrade_maintain_os_live: "{{ node_upgrade_state.os_live | default(none) }}"
     node_upgrade_maintain_from_state: true
   when: "'converged' in node_upgrade_phases_done"
 

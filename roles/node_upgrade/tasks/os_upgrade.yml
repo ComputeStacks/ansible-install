@@ -1,0 +1,60 @@
+---
+# The OS upgrade (`apt-get upgrade --with-new-pkgs`), with docker's packages
+# HELD so it can never move them. One spelling for both places it runs:
+#
+#   tasks/packages.yml                 the stopped window: upgrade-docker, and
+#                                      maintain-nodes when its decision stops
+#   tasks/maintain_converge_phase.yml  maintain-nodes, LIVE: inside the hold,
+#                                      tenant containers running, before the
+#                                      stop decision (R3)
+#
+# Input: node_upgrade_os_upgrade_live (default false). Live, needrestart's
+# apt hook is suspended (NEEDRESTART_SUSPEND), so a library update does not
+# restart host services under the running tenants; the services pick the new
+# library up at their next restart or the next reboot. A package's own
+# maintainer script still restarts its service (sshd, for one); docker,
+# containerd, cs-agent, node_exporter and haproxy are held, so none of them
+# moves.
+#
+# Sets: node_upgrade_os_upgrade (the apt result)
+#
+# Everything was downloaded before the hold (tasks/download.yml), so this
+# does not depend on the mirror being reachable. It runs under async + poll,
+# so a dropped connection does not kill apt half-way through dpkg; the job
+# finishes on the node, and a re-run waits for its dpkg lock.
+
+# Hold again before the OS upgrade rather than trusting the holds to be in
+# place: a run interrupted between releasing them and re-holding them
+# (tasks/packages.yml, the control host dying mid-install) leaves docker
+# unheld, and the resumed run's OS upgrade would then move it past its pins.
+- name: Hold the docker packages before the OS upgrade
+  ansible.builtin.dpkg_selections:
+    name: "{{ item | regex_replace('=.*$', '') }}"
+    selection: hold
+  loop: "{{ docker_apt_packages }}"
+  when: (item | regex_replace('=.*$', '')) in node_upgrade_installed
+  # dpkg --set-selections takes the dpkg lock without waiting, and
+  # unattended-upgrades may hold it; retry rather than fail.
+  register: node_upgrade_prehold
+  until: node_upgrade_prehold is succeeded
+  retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
+  delay: 10
+
+# An earlier apt or dpkg run that died part-way makes apt refuse with
+# "dpkg was interrupted, you must manually run 'dpkg --configure -a'". That
+# is not repaired here: the half-configured package could be anything,
+# docker's included, and configuring docker restarts dockerd. The failure
+# leaves it to the operator: maintain_failed.j2 says what to run, and
+# upgrade-docker's cycle_failed.j2 prints apt's message, which names it.
+- name: Apply the pending OS updates, docker held
+  ansible.builtin.apt:
+    upgrade: safe
+    force_apt_get: true
+    lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_SUSPEND: "{{ '1' if (node_upgrade_os_upgrade_live | default(false) | bool) else '' }}"
+  register: node_upgrade_os_upgrade
+  async: "{{ (node_upgrade_apt_lock_timeout | int) + 3600 }}"
+  poll: 15
+  when: node_upgrade_apply_os_updates | bool

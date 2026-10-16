@@ -1,8 +1,9 @@
 ---
-# Fetch every package the package phase will install while the containers are
-# still RUNNING (R1): a mirror outage, a proxy problem or a full disk then
-# fails the run before anything is held or stopped, instead of in the middle
-# of the window with every tenant down. apt's cache dedupes, so a resumed run
+# Fetch every package the OS upgrade and the package phase will install
+# (maintain-nodes applies the OS updates live inside the hold), before the
+# hold (R1): a mirror outage, a proxy problem or a full disk then fails the
+# run before anything is held or stopped, instead of in the middle of the
+# window. apt's cache dedupes, so a resumed run
 # pays only for what changed on the mirror since.
 #
 # apt-get takes the dpkg lock for the downloads too; the apt module's

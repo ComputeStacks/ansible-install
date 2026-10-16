@@ -1,9 +1,21 @@
 ---
 # The `converged` phase of tasks/maintain_cycle.yml, inside the hold: the
 # converge with the tenant containers running, every handler it notified,
-# the wait for cs-agent, and the decision -- written into state.json with the
-# phase (R2), so a resumed run acts on this record and never re-decides from
-# what a later converge reports as changed.
+# the wait for cs-agent, the pending OS updates applied LIVE (R3), and the
+# decision -- written into state.json with the phase (R2), so a resumed run
+# acts on this record and never re-decides from what a later converge
+# reports as changed.
+#
+# The decision is read AFTER the OS updates on purpose: an update that asks
+# for a reboot (a kernel, libc) leaves /var/run/reboot-required, and the
+# same run then stops the containers and reboots. Anything else they change
+# needs no stop.
+#
+# A run interrupted during the live OS upgrade re-runs this whole phase: the
+# docker packages are re-held and apt runs again (apt waits for the dpkg
+# lock an orphaned job still holds). If dpkg itself was left half-way, apt
+# refuses and the failure (templates/maintain_failed.j2) says to run
+# `dpkg --configure -a`; the node stays held, its containers running.
 #
 # A RESUMED converge (state.json has `converge_started` but not `converged`:
 # the previous run died part-way through it) re-applies every handler effect
@@ -76,6 +88,29 @@
 - name: Wait for cs-agent
   ansible.builtin.include_tasks: agent_wait.yml
 
+# Listed BEFORE they are applied, for the report: once applied they no
+# longer show as pending. Written into state.json with the phase.
+- name: List the pending OS updates, before applying them live
+  ansible.builtin.include_tasks: maintain_os_updates.yml
+
+- name: Note the OS updates this run applies live
+  ansible.builtin.set_fact:
+    node_upgrade_maintain_os_live: >-
+      {{ node_upgrade_os_updates | combine({'applied': node_upgrade_apply_os_updates | bool}) }}
+
+# R3: OS updates are never a reason to stop, so they are applied here, with
+# the tenant containers running and docker's packages held -- in the same
+# file as the stopped window's OS upgrade (tasks/packages.yml).
+- name: Apply the pending OS updates live, inside the hold
+  ansible.builtin.include_tasks: os_upgrade.yml
+  vars:
+    node_upgrade_os_upgrade_live: true
+
+# One poll when nothing restarted the agent; it also confirms the hold is
+# still in place after the upgrade, before anything is decided.
+- name: Wait for cs-agent after the OS updates
+  ansible.builtin.include_tasks: agent_wait.yml
+
 - name: Gather the decision's inputs
   ansible.builtin.include_tasks: maintain_decide.yml
 
@@ -85,3 +120,4 @@
     node_upgrade_phase: converged
     node_upgrade_state_update:
       decision: "{{ node_upgrade_maintain_decision }}"
+      os_live: "{{ node_upgrade_maintain_os_live }}"

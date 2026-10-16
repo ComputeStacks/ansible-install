@@ -29,6 +29,10 @@
 #     converge's re-apply task;
 #   * a resumed converge notifies every handler of the converged roles
 #     except docker_tls', by `role : name`, and none that restarts dockerd;
+#   * R3: the OS updates are listed, then applied live inside the hold --
+#     docker's packages re-held first -- after the agent wait and before the
+#     decision, through the same task file as the stopped window's; and the
+#     report says what was (or would be) applied live;
 #   * the converge includes exactly the intended roles -- never node_storage,
 #     geerlingguy.docker, ssh_trust or the controller-side roles -- with
 #     common's reboot off and cs-agent downgrades off.
@@ -93,7 +97,7 @@
           - mn_restart.stop and mn_restart.docker_restart_required
           - mn_restart.docker_restart_reasons == ['docker_tls changed']
           - "mn_restart.reasons == ['docker must restart: docker_tls changed']"
-          - mn_reboot.stop and mn_reboot.reasons[0] is search('reboot is already pending')
+          - mn_reboot.stop and mn_reboot.reasons[0] is search('reboot is pending')
           - mn_forced.stop and mn_forced.reasons == ['forced (maintain_force_restart)']
         fail_msg: "{{ [mn_drifted, mn_restart, mn_reboot, mn_forced] | to_json }}"
         quiet: true
@@ -356,4 +360,122 @@
           - mn_names | intersect(['node_storage', 'geerlingguy.docker', 'ssh_trust', 'controller', 'controller_seed',
                                   'controller_post_enroll', 'metrics', 'backup_server', 'powerdns', 'vault']) == []
         fail_msg: "{{ mn_included | to_json }}"
+        quiet: true
+
+    # R3: OS updates never stop containers, so the converge phase applies
+    # them live, inside the hold. They must come after the agent is back (a
+    # held node, a working agent) and before the decision (so a reboot they
+    # ask for is decided on in the same run), with docker re-held first.
+    - name: "Assert: R3 -- the OS updates are applied live, docker held, between the agent wait and the decision"
+      vars:
+        mn_phase_steps: "{{ mn_phase | maintain_flattened_task_names }}"
+        mn_live: "{{ mn_phase | selectattr('name', 'equalto', 'Apply the pending OS updates live, inside the hold') | first }}"
+        mn_record: "{{ mn_phase | selectattr('name', 'equalto', 'Record the converge and the decision') | first }}"
+        mn_os: "{{ mn_nu_tasks['os_upgrade.yml'] }}"
+        mn_os_steps: "{{ mn_os | maintain_flattened_task_names }}"
+        mn_prehold: "{{ mn_os | selectattr('name', 'equalto', 'Hold the docker packages before the OS upgrade') | first }}"
+        mn_apt: "{{ mn_os | selectattr('name', 'equalto', 'Apply the pending OS updates, docker held') | first }}"
+        mn_pkg: "{{ mn_nu_tasks['packages.yml'] }}"
+        mn_pkg_steps: "{{ mn_pkg | maintain_flattened_task_names }}"
+        mn_pkg_os: "{{ mn_pkg | selectattr('name', 'equalto', 'Apply the pending OS updates, docker held') | first }}"
+      ansible.builtin.assert:
+        that:
+          - mn_phase_steps | maintain_in_order(['Run the converge handlers inside the hold',
+                                                 'Wait for cs-agent',
+                                                 'List the pending OS updates, before applying them live',
+                                                 'Note the OS updates this run applies live',
+                                                 'Apply the pending OS updates live, inside the hold',
+                                                 'Wait for cs-agent after the OS updates',
+                                                 'Gather the decision\'s inputs',
+                                                 'Record the converge and the decision'])
+          # exactly once, and not after the decision
+          - mn_phase_steps | select('equalto', 'Apply the pending OS updates live, inside the hold') | list | length == 1
+          - mn_live['ansible.builtin.include_tasks'] == 'os_upgrade.yml'
+          - mn_live.vars.node_upgrade_os_upgrade_live is true
+          # the list is recorded with the decision, for a resumed run's report
+          - "'os_live' in mn_record.vars.node_upgrade_state_update"
+          # docker re-held BEFORE apt, apt gated and non-interactive
+          - mn_os_steps == ['Hold the docker packages before the OS upgrade', 'Apply the pending OS updates, docker held']
+          - mn_prehold['ansible.builtin.dpkg_selections'].selection == 'hold'
+          - mn_prehold.loop is defined
+          - mn_apt['ansible.builtin.apt'].upgrade == 'safe'
+          - mn_apt['ansible.builtin.apt'].force_apt_get is true
+          - mn_apt['ansible.builtin.apt'].lock_timeout is defined
+          - mn_apt.environment.DEBIAN_FRONTEND == 'noninteractive'
+          - mn_apt.when == 'node_upgrade_apply_os_updates | bool'
+          # async: a dropped connection must not kill dpkg half-way
+          - mn_apt.async is defined and mn_apt.poll | int > 0
+          # the stopped window uses the same file, before the docker pins
+          - mn_pkg_os['ansible.builtin.include_tasks'] == 'os_upgrade.yml'
+          - mn_pkg_steps | maintain_in_order(['Check the node is still held',
+                                               'Apply the pending OS updates, docker held',
+                                               'Install the pinned docker packages'])
+          # one spelling: no other node_upgrade file runs an apt upgrade
+          - mn_nu_tasks | dict2items | rejectattr('key', 'equalto', 'os_upgrade.yml') | map(attribute='value')
+            | map('to_json') | select('search', '"upgrade":\\s*"safe"') | list == []
+          - mn_os | to_json is search('"upgrade":\\s*"safe"')
+        fail_msg: "{{ mn_phase_steps }} / {{ mn_os_steps }} / {{ mn_pkg_steps }}"
+        quiet: true
+
+    # ======================================================================
+    # The report's OS update lines (templates/maintain_report.j2)
+    # ======================================================================
+    - name: "Assert: the report says what is, or would be, applied live"
+      vars:
+        mn_tpl: "{{ mn_roles ~ '/node_upgrade/templates/maintain_report.j2' }}"
+        mn_no: {stop: false, reasons: [], reboot_pending: false}
+        mn_reboot: {stop: true, reasons: ['a reboot is pending (/var/run/reboot-required)'], reboot_pending: true}
+        mn_kernel:
+          count: 3
+          packages: [openssl, libc6, linux-image-6.20.0-11-generic]
+          reboot_packages: [libc6, linux-image-6.20.0-11-generic]
+          reboot_hint: true
+        mn_plain: {count: 2, packages: [openssl, curl], reboot_packages: [], reboot_hint: false}
+        mn_none: {count: 0, packages: [], reboot_packages: [], reboot_hint: false}
+        mn_base: {inventory_hostname: node1, node_upgrade_state_file: /x/state.json, node_upgrade_apply_os_updates: true}
+        # --check: nothing applied yet
+        mn_check_plain: >-
+          {{ lookup('ansible.builtin.template', mn_tpl, template_vars=mn_base | combine({'ansible_check_mode': true,
+             'node_upgrade_maintain_decision': mn_no, 'node_upgrade_os_updates': mn_plain})) }}
+        mn_check_kernel: >-
+          {{ lookup('ansible.builtin.template', mn_tpl, template_vars=mn_base | combine({'ansible_check_mode': true,
+             'node_upgrade_maintain_decision': mn_no, 'node_upgrade_os_updates': mn_kernel})) }}
+        # a real run: applied live, then the decision read the reboot
+        mn_real_kernel: >-
+          {{ lookup('ansible.builtin.template', mn_tpl, template_vars=mn_base | combine({'ansible_check_mode': false,
+             'node_upgrade_maintain_decision': mn_reboot, 'node_upgrade_os_updates': mn_none,
+             'node_upgrade_maintain_os_live': mn_kernel | combine({'applied': true})})) }}
+        mn_real_plain: >-
+          {{ lookup('ansible.builtin.template', mn_tpl, template_vars=mn_base | combine({'ansible_check_mode': false,
+             'node_upgrade_maintain_decision': mn_no, 'node_upgrade_os_updates': mn_none,
+             'node_upgrade_maintain_os_live': mn_plain | combine({'applied': true})})) }}
+        mn_real_off: >-
+          {{ lookup('ansible.builtin.template', mn_tpl, template_vars=mn_base | combine({'ansible_check_mode': false,
+             'node_upgrade_apply_os_updates': false,
+             'node_upgrade_maintain_decision': mn_no, 'node_upgrade_os_updates': mn_plain,
+             'node_upgrade_maintain_os_live': mn_plain | combine({'applied': false})})) }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            mn_check_plain is search('would stop containers: no')
+          - mn_check_plain is search('would be applied live inside the hold, with the containers running, without a stop\\.')
+          - mn_check_plain is not search('reboot the node')
+          # a listed kernel/libc update is flagged: the run would then stop and reboot
+          - >-
+            mn_check_kernel is search('kernel/libc: libc6, linux-image-6.20.0-11-generic')
+          - mn_check_kernel is search('would then STOP the containers and reboot the node')
+          - >-
+            mn_real_kernel is search('stop containers: YES because a reboot is pending')
+          - >-
+            mn_real_kernel is search('OS updates: 3 \\(kernel/libc: [^)]*\\) applied live inside the hold, containers running -- the node asked for a reboot')
+          - mn_real_kernel is not search('Still pending')
+          - >-
+            mn_real_plain is search('stop containers: no')
+          - >-
+            mn_real_plain is search('OS updates: 2 applied live inside the hold, containers running\\.')
+          - >-
+            mn_real_off is search('OS updates: NOT applied \\(node_upgrade_apply_os_updates is false\\)')
+          - >-
+            mn_real_off is search('Still pending: 2 -- not applied\\.')
+        fail_msg: "{{ [mn_check_plain, mn_check_kernel, mn_real_kernel, mn_real_plain, mn_real_off] | to_json }}"
         quiet: true

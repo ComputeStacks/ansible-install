@@ -1,20 +1,51 @@
 {#- The per-node decision report of maintain-nodes (tasks/maintain_report.yml),
     in --check ("would") and in a real run alike. One line per fact; the
-    regex_replace in the caller folds it into one message. -#}
+    regex_replace in the caller folds it into one message.
+
+    OS updates (R3): a real run lists them (node_upgrade_maintain_os_live) and
+    applies them LIVE inside the hold, before the decision; `os` is then what
+    is still pending. In --check nothing was applied, and `os` is what the live
+    apply would install. -#}
 {%- set d = node_upgrade_maintain_decision -%}
 {%- set os = node_upgrade_os_updates | default({'count': -1}) -%}
+{%- set live = node_upgrade_maintain_os_live | default(none) -%}
 {%- set would = ansible_check_mode -%}
+{%- set apply = node_upgrade_apply_os_updates | bool -%}
+{%- set from_state = node_upgrade_maintain_from_state | default(false) -%}
+{%- macro kernel(u) -%}{{ (' (kernel/libc: ' ~ (u.reboot_packages | join(', ')) ~ ')') if u.reboot_hint | default(false) else '' }}{%- endmacro -%}
 {{ inventory_hostname }}: {{ 'would stop' if would else 'stop' }} containers: {{ 'YES' if d.stop else 'no' }}
 {%- if d.stop %} because {{ d.reasons | join('; ') }}.
 {%- else %} -- docker matches its pins, no docker restart is required, no reboot is pending, and the run is not forced.
 {%- endif %}
-{%- if node_upgrade_maintain_from_state | default(false) %} (decided by the interrupted run and read back from {{ node_upgrade_state_file }}){% endif %}
+{%- if from_state %} (decided by the interrupted run and read back from {{ node_upgrade_state_file }}){% endif %}
 {%- if node_upgrade_maintain_running is defined %} Tenant containers running now: {{ node_upgrade_maintain_running }}.{% endif %}
+{%- if live is not none or from_state %}
+{#- the live apply happened: this run's, or the interrupted run's (none
+    recorded: a state.json written before the live apply existed) -#}
+{%- if live is none %}
+{%- elif not live.applied | default(true) %} OS updates: NOT applied (node_upgrade_apply_os_updates is false).
+{%- elif live.count | int < 0 %} OS updates: applied live inside the hold, containers running (the pending list could not be read first).
+{%- elif live.count | int == 0 %} OS updates: none were pending.
+{%- else %} OS updates: {{ live.count }}{{ kernel(live) }} applied live inside the hold, containers running{{ ' (by the interrupted run)' if from_state else '' }}
+{%- if live.reboot_hint | default(false) %}{{ ' -- the node asked for a reboot, so it reboots in this run' if d.reboot_pending | default(false) else ' -- no reboot was asked for' }}{% endif %}.
+{%- endif %}
+{%- if os.count | int < 0 %} Still pending: could not be listed.
+{%- elif os.count | int > 0 %} Still pending: {{ os.count }}{{ kernel(os) }} --
+{%- if not apply %} not applied.
+{%- elif d.stop %} {{ 'would be' if would else 'are' }} applied while the containers are stopped.
+{%- else %} left for the next run (OS updates never stop containers on their own).
+{%- endif %}
+{%- endif %}
+{%- else %}
+{#- --check, before any converge: what the live apply would install -#}
 {%- if os.count | int < 0 %} Pending OS updates: could not be listed.
 {%- elif os.count | int == 0 %} Pending OS updates: none.
-{%- else %} Pending OS updates: {{ os.count }}{{ (' (kernel/libc: ' ~ (os.reboot_packages | join(', ')) ~ ')') if os.reboot_hint else '' }} --
-{%- if d.stop %} {{ 'would be' if would else 'are' }} applied while the containers are stopped{{ ', and the node would then reboot' if os.reboot_hint and would else '' }}.
-{%- else %} NOT applied: OS updates never stop containers on their own{{ '; a forced run (-e maintain_force_restart=true) would apply them and reboot' if os.reboot_hint else '; a forced run (-e maintain_force_restart=true) would apply them' }}.
+{%- elif not apply %} Pending OS updates: {{ os.count }}{{ kernel(os) }} -- NOT applied (node_upgrade_apply_os_updates is false).
+{%- else %} Pending OS updates: {{ os.count }}{{ kernel(os) }} -- would be applied live inside the hold, with the containers running, without a stop
+{%- if os.reboot_hint and d.stop %}; the node would then reboot in the stopped window, if they ask for it.
+{%- elif os.reboot_hint %}. BUT the kernel/libc updates usually ask for a reboot: the run would then STOP the containers and reboot the node.
+{%- else %}.
+{%- endif %}
 {%- endif %}
 {%- endif %}
 {%- if would %} CHECK MODE: no hold was taken and nothing was changed; the diffs above are what the converge would change.{% endif %}

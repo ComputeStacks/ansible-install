@@ -5,7 +5,7 @@ to date with the inventory and `versions.yml`: the node-side roles of a node
 build (base system, node_exporter, tailscale, Ubuntu Pro, docker's daemon
 configuration and TLS listener, kernel settings, haproxy's host preparation,
 cadvisor and fluentd, the firewall, and cs-agent — upgraded to its pin), the
-docker packages, the pending OS updates and a pending reboot. One node at a
+pending OS updates, the docker packages and a pending reboot. One node at a
 time, each inside a cs-agent maintenance hold that the run places and
 releases itself.
 
@@ -30,17 +30,23 @@ hold is released — only when one of these is true for the node:
 | --- | --- |
 | docker drifts from its pins in `versions.yml` | the package install restarts dockerd |
 | the converge changed what dockerd reads only at start: its TLS certificate (renewed within 30 days of expiry, or new SANs) or its ExecStart drop-in | dockerd must restart to load it |
-| `/var/run/reboot-required` exists (often: unattended-upgrades installed a kernel) | the node reboots |
+| `/var/run/reboot-required` exists (often: a kernel, installed by unattended-upgrades or by this run's OS updates) | the node reboots |
 | `-e maintain_force_restart=true` | asked for |
 
 Tenant containers have no docker restart policy, so a dockerd restart or a
 reboot would leave them down; that is why the run stops and starts them
 itself, inside the hold.
 
-**Pending OS updates never stop containers on their own.** When the run stops
-them anyway, it applies the OS updates in that window (docker's packages held)
-and reboots if they ask for it. Otherwise they wait for unattended-upgrades or
-for the next window that stops.
+**Pending OS updates are applied live, inside the hold, with the containers
+running** — after the converge and the agent, before the run decides whether
+to stop. docker's packages are held for it (so are cs-agent, node_exporter
+and haproxy), and needrestart is told not to restart services, but a
+package's own upgrade can still restart its service (sshd, for one, which
+keeps open sessions). OS updates never stop containers on their own; when
+one of them asks for a reboot (a kernel, often libc), the reboot does — in
+the same run. A run interrupted part-way through them re-holds docker and
+runs apt again; if dpkg itself was left half-way, the run stops with the node
+held and says to run `dpkg --configure -a` first.
 
 The cs-agent upgrade happens inside the hold with the containers running: the
 agent restarts, keeps its hold, and the run waits until it is back.
@@ -56,10 +62,16 @@ node is released.
 Preview first. `--check --diff` takes no hold and changes nothing: it runs
 every preflight, shows the converge's diffs, and prints per node
 
-    <node>: would stop containers: YES because docker must restart: ... .
+    <node>: would stop containers: no -- docker matches its pins, ... .
     Tenant containers running now: 412. Pending OS updates: 23 (kernel/libc:
-    libc6, linux-image-...) -- would be applied while the containers are
-    stopped, and the node would then reboot.
+    libc6, linux-image-...) -- would be applied live inside the hold, with
+    the containers running, without a stop. BUT the kernel/libc updates
+    usually ask for a reboot: the run would then STOP the containers and
+    reboot the node.
+
+The preview cannot know for certain whether the updates will ask for a
+reboot; it flags the kernel and libc packages that usually do. A real run
+reports the updates it applied live and, after them, its decision.
 
 ```sh
 make maintain-nodes ENV=prod ARGS='--check --diff'
@@ -159,6 +171,7 @@ the node.
 ## maintain-nodes and upgrade-docker
 
 `upgrade-docker.yml` still exists and still only moves docker (and the OS
-updates and reboot riding with it). `maintain-nodes.yml` does that too when
-docker drifts, plus the converge. They share the state file and refuse to
+updates and reboot riding with it), always with the containers stopped.
+`maintain-nodes.yml` does that too when docker drifts, plus the converge and
+the live OS updates. They share the state file and refuse to
 resume each other's unfinished run.

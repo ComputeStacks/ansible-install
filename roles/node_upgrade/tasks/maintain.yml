@@ -8,8 +8,9 @@
 #   --check     tasks/maintain_preview.yml: no hold, a check-mode converge with
 #               diffs, and "would stop containers: yes/no because ..."
 #   otherwise   tasks/maintain_cycle.yml: hold -> converge -> handlers ->
-#               agent back -> decide -> [record/stop/packages/docker
-#               restart/reboot/services/start] -> release
+#               agent back -> OS updates applied live -> decide ->
+#               [record/stop/packages/docker restart/reboot/services/start]
+#               -> release
 #
 # The play MUST set docker_tls_restart_deferred: true (a play var, so the
 # role's handlers see it too): the converge runs with tenants up, and a

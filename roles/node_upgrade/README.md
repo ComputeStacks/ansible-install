@@ -64,7 +64,7 @@ metrics and registry docker hosts are not covered.
 | hold | `hold.yml` | `held` | Fresh run only: `cs-agent maintenance on --reason docker-upgrade --wait --timeout 7200s --settle 30s --json` under `async`/`poll`; repeated only while it places no hold (`not_placed`, up to 3 more times, 30s apart). Resume: requires the existing hold, never calls `on`. |
 | record | `record.yml` | `recorded` | `docker container inspect` of every container; the running non-system ones go into `state.json` **before** anything stops. |
 | stop | `stop.yml` | `stopped` | Hold re-check; `docker stop -t 30` the recorded ones still running, 8 at a time; assert none is running. |
-| packages | `packages.yml` | `packages` | Hold re-check; `apt-get upgrade --with-new-pkgs` with the docker packages **held**; then release the holds → install the pins exactly → re-hold (in `always:`); assert no drift remains. |
+| packages | `packages.yml` | `packages` | Hold re-check; `os_upgrade.yml`: re-hold the docker packages, then `apt-get upgrade --with-new-pkgs` with them **held** (async, so a dropped connection does not kill dpkg); then release the holds → install the pins exactly → re-hold (in `always:`); assert no drift remains. |
 | reboot | `reboot.yml` | `rebooted` | Reboot if `/var/run/reboot-required` exists now. |
 | services | `services.yml` | — | docker started; docker, cs-agent, cs-firewall active; `docker info` answers; hold re-check. |
 | start | `start.yml` | `started` | Start the recorded set, 8 at a time, re-starting what is down every 15s for up to 600s, at most 5 attempts each; fail on what is still down, minus `node_upgrade_accept_down`. |
@@ -198,9 +198,10 @@ view.
 | converge | `maintain_converge_phase.yml` → `maintain_converge.yml` | — | `converge_started` saved first. Then, containers RUNNING: common (its reboot off), node_exporter, tailscale (members), ubuntu_pro (token), docker_config, docker_tls (restart deferred), node_kernel, haproxy, node_observability, firewall, cs_agent (pin installed, never downgraded). |
 | handlers | `maintain_converge_phase.yml` | — | On a resumed converge, every lost handler is notified again first (see "Resumed converge" below). Then `meta: flush_handlers` inside the hold (R1). |
 | agent | `agent_wait.yml` | — | Poll `maintenance status --json` until `agent_active` and a local hold (`node_upgrade_agent_wait`, 300s). Exit 3 and no output are retried; no hold, or another error document, fails at once. `controller_acked` is not read. |
-| decide | `maintain_decide.yml` | `converged` | Stop iff docker drifts, dockerd must restart (docker_tls' deferred reason, or a docker_tls file newer than the running dockerd), `/var/run/reboot-required` exists, or `maintain_force_restart`. The decision and its inputs are written with the phase (R2). |
-| report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the pending OS updates (kernel/libc named). |
-| record, stop, packages | as upgrade-docker | `recorded`, `stopped`, `packages` | Only when the decision says stop. The OS updates are applied here and only here (R3). |
+| OS updates, live | `maintain_os_updates.yml`, `os_upgrade.yml` | — | Containers RUNNING (R3). List the pending OS updates (kept for the report and state.json), re-hold the docker packages, `apt-get upgrade --with-new-pkgs` (`node_upgrade_apply_os_updates`; async, needrestart suspended). Then the agent wait again (one poll when nothing restarted it), which also confirms the hold. |
+| decide | `maintain_decide.yml` | `converged` | Stop iff docker drifts, dockerd must restart (docker_tls' deferred reason, or a docker_tls file newer than the running dockerd), `/var/run/reboot-required` exists (the live OS updates may just have written it), or `maintain_force_restart`. The decision, its inputs and the OS updates applied live (`os_live`) are written with the phase (R2). |
+| report | `maintain_report.yml` | — | "stop containers: yes/no because ...", the tenant count, the OS updates applied live and any still pending (kernel/libc named). |
+| record, stop, packages | as upgrade-docker | `recorded`, `stopped`, `packages` | Only when the decision says stop. packages' OS upgrade is normally a no-op now; it catches anything new and keeps a resumed run correct. |
 | docker restart | `docker_restart.yml` | `docker_restarted` | When the decision requires it and no reboot follows. |
 | reboot, services, start | as upgrade-docker | `rebooted`, `started` | |
 | release | `release.yml` | `released` | `meta: flush_handlers` first (a no-op: nothing notifies after the converge), then `off` and the controller confirmation. |
@@ -210,8 +211,11 @@ view.
 
 `tasks/maintain_preview.yml`: both preflights, then the converge in check mode
 with its diffs (agent.yml stays `no_log`), the handlers (none acts; docker_tls
-records its reason), the decision, the pending OS updates, and per node
-"would stop containers: yes/no because ...". NO hold. A docker certificate due
+records its reason), the decision, the pending OS updates (which a real run
+would apply live, without a stop), and per node "would stop containers:
+yes/no because ...". The decision there is taken before any OS update, so
+when a listed update usually asks for a reboot (kernel, libc: `reboot_hint`)
+the report says the run would then stop the containers and reboot. NO hold. A docker certificate due
 for renewal is reported, not issued, and counts as "docker restart required".
 The tailscale role is not previewed (the collection's own status read cannot
 run in check mode); preflight already proved the node logged in with the
@@ -235,10 +239,20 @@ decision.
 * **R2 -- decide once, from state.** The decision and its inputs are written
   with `converged`; a resumed run reads them and never re-decides. The
   docker_tls file check also re-detects a restart a dead run did not record.
-* **R3 -- OS updates.** Not a reason to stop; applied only in a stopped window
-  that happens for another reason; never with tenants running (no role in the
-  converge runs `apt upgrade`; they install at `present`, the agent and
-  node_exporter at their pins).
+* **R3 -- OS updates.** Never a reason to stop on their own. They are
+  applied LIVE, inside the hold, after the agent wait and before the
+  decision (`tasks/os_upgrade.yml`, the same file the stopped window's
+  `packages.yml` runs): docker's packages re-held first (cs-agent,
+  node_exporter and haproxy are held by their roles), needrestart's apt hook
+  suspended, async so a dropped connection does not kill dpkg. Because the
+  decision reads `/var/run/reboot-required` afterwards, an update that asks
+  for a reboot stops the containers and reboots in the same run. No role in
+  the converge runs `apt upgrade`; they install at `present`, the agent and
+  node_exporter at their pins. A resumed converge applies them again (apt
+  waits for the dpkg lock of an orphaned job); a dpkg left half-way is not
+  repaired automatically -- the failure message says to run
+  `dpkg --configure -a` (a half-configured docker package would restart
+  dockerd), with the node still held.
 * **R5 -- releasing after a failure.** If the run fails after its own hold
   was RECORDED and before the converge's first task (state.json with only
   `held`, no `converge_started`), nothing has changed and the hold is
@@ -317,14 +331,14 @@ drift, reboot_pending, force}`; `docker_restarted` with that phase.
 | `node_upgrade_parallel` | 8 | concurrent stops/starts |
 | `node_upgrade_start_wait` / `_interval` / `_retries` | 600 / 15 / 5 | the tolerant start |
 | `node_upgrade_accept_down` | `[]` | names or ids (12+ chars) allowed to stay down |
-| `node_upgrade_apply_os_updates` | true | OS updates ride along; never a trigger on their own |
+| `node_upgrade_apply_os_updates` | true | apply the pending OS updates: upgrade-docker in its stopped window, maintain-nodes live inside the hold; never a trigger on their own |
 | `node_upgrade_apt_lock_timeout` | 900 (s) | dpkg lock wait |
 | `node_upgrade_reboot_timeout` | 900 (s) | |
 | `node_upgrade_services_timeout` | 300 (s) | docker/cs-agent/cs-firewall after packages/reboot |
 | `node_upgrade_force` | false | run the cycle even with nothing to do |
 | `node_upgrade_node_settle` | 60 (s) | pause before the next node |
 | `node_upgrade_playbook` | `upgrade-docker` | recorded in state.json (R7); `maintain-nodes.yml` sets `maintain-nodes` |
-| `node_upgrade_maintain_force_restart` | `maintain_force_restart`, else false | maintain-nodes: stop (and so apply OS updates, reboot if they ask) even with no other reason |
+| `node_upgrade_maintain_force_restart` | `maintain_force_restart`, else false | maintain-nodes: stop (and reboot if one is pending) even with no other reason |
 | `node_upgrade_agent_wait` / `_interval` | 300 / 5 (s) | maintain-nodes: wait for cs-agent after the converge |
 
 ## `tasks_from: detect_live`

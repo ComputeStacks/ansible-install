@@ -1,5 +1,22 @@
 # Changelog
 
+## October 16, 2026
+
+* **maintain-nodes applies the pending OS updates live, inside the hold.**
+  They used to be applied only when the run stopped a node's tenant
+  containers for another reason, so on a node that needed no stop they were
+  never applied. Now every node gets them after the converge and the agent
+  wait, with its containers running and docker's packages held; needrestart
+  is told not to restart services during that upgrade. OS updates still never
+  stop containers on their own, but the stop decision is now taken after
+  them: an update that asks for a reboot (typically a kernel) stops the
+  containers and reboots the node in the same run. `--check` flags the
+  kernel and libc updates that usually do. A run interrupted during the
+  upgrade re-runs it on resume; if dpkg was left half-way, the run stops with
+  the node held and says to run `dpkg --configure -a`. `upgrade-docker`
+  is unchanged; its OS upgrade now runs async, so a dropped connection no
+  longer kills dpkg part-way.
+
 ## October 15, 2026
 
 * **cs-agent 3.5.0** (was 3.4.0): scheduled backups start at a per-project

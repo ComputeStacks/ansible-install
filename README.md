@@ -413,8 +413,10 @@ It needs cs-agent >= 3.4.0 on every node and controller >= 9.8.0.
 **Bringing live nodes up to date** — a changed pin or setting in a node-side
 role, a cs-agent upgrade, the docker pins — is `make maintain-nodes`. It
 runs the same hold and release per node, converges the node's roles with
-containers running, and stops and restarts tenant containers only when
-docker drifts from its pins, docker must restart, or a reboot is pending.
+containers running, applies the pending OS updates live inside the hold,
+and stops and restarts tenant containers only when docker drifts from its
+pins, docker must restart, or a reboot is pending (a kernel among the OS
+updates asks for one).
 It is customer-impacting; run it in a maintenance window, and preview it
 first with `ARGS='--check --diff'`. A `LIMIT` must keep the controller and
 the node's backup host in the run. `docs/maintain-nodes.md` has the details.

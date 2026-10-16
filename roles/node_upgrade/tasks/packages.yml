@@ -1,8 +1,8 @@
 ---
 # The package phase, with every recorded container already stopped (R1).
 #
-#   1. the OS upgrade (`apt-get upgrade --with-new-pkgs`) runs with docker's
-#      packages STILL HELD, so it can never move them;
+#   1. the OS upgrade (`apt-get upgrade --with-new-pkgs`, tasks/os_upgrade.yml)
+#      runs with docker's packages re-held first, so it can never move them;
 #   2. then, in one block: release the holds, install docker_apt_packages
 #      exactly as pinned, and re-hold them -- in `always:`, so a failed
 #      install never leaves the engine unheld for the next unattended upgrade.
@@ -15,29 +15,11 @@
   vars:
     node_upgrade_hold_check_at: before upgrading packages
 
-# Hold again before the OS upgrade rather than trusting the holds to be in
-# place: a run interrupted between the release and the re-hold below (the
-# control host dying mid-install) leaves docker unheld, and the resumed run's
-# OS upgrade would then move it past its pins.
-- name: Hold the docker packages before the OS upgrade
-  ansible.builtin.dpkg_selections:
-    name: "{{ item | regex_replace('=.*$', '') }}"
-    selection: hold
-  loop: "{{ docker_apt_packages }}"
-  when: (item | regex_replace('=.*$', '')) in node_upgrade_installed
-  register: node_upgrade_prehold
-  until: node_upgrade_prehold is succeeded
-  retries: "{{ (node_upgrade_apt_lock_timeout | int) // 10 }}"
-  delay: 10
-
+# Normally a no-op under maintain-nodes, whose converge already applied the
+# OS updates live (tasks/os_upgrade.yml); it catches anything that appeared
+# since, and keeps a resumed run correct.
 - name: Apply the pending OS updates, docker held
-  ansible.builtin.apt:
-    upgrade: safe
-    force_apt_get: true
-    lock_timeout: "{{ node_upgrade_apt_lock_timeout }}"
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-  when: node_upgrade_apply_os_updates | bool
+  ansible.builtin.include_tasks: os_upgrade.yml
 
 - name: Install the pinned docker packages
   block:

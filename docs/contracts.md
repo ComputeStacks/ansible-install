@@ -509,8 +509,12 @@ first three statically:
   converge always reaches); the playbook refuses a `--limit` that drops
   either of those two, rather than skipping or failing on them inside the
   hold.
-* **No OS upgrade with tenants running.** Roles install at `present` (or a
-  pin); pending OS updates are applied only in a stopped window.
+* **The OS upgrade belongs to the cycle, never to a role.** Roles install at
+  `present` (or a pin) and never run `apt upgrade`. The cycle applies the
+  pending OS updates inside the hold, with the tenant containers running and
+  docker's packages held (cs-agent, node_exporter and haproxy are held by
+  their roles), before it decides whether to stop; a reboot they ask for is
+  then a reason to stop in the same run.
 
 ### Container network placement
 

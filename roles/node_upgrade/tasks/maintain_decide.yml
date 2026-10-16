@@ -1,5 +1,6 @@
 ---
-# Gather the inputs of the stop decision AFTER the converge and its handlers,
+# Gather the inputs of the stop decision AFTER the converge, its handlers and
+# (in a real run) the live OS updates -- so a reboot they ask for is seen --
 # and apply the rule (filter node_upgrade_maintain_decide). Read-only and
 # check-mode safe. tasks/maintain_cycle.yml writes the result into state.json
 # with the `converged` phase (R2); a resumed run decides from that record and

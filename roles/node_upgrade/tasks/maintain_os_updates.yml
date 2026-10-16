@@ -1,10 +1,12 @@
 ---
 # List the pending OS updates, for the report only: they are never a reason
-# to stop (R3), and they are applied only inside a stopped window
-# (tasks/packages.yml). A simulation (`-s`): it reads apt's lists as they are
-# on the node -- after tasks/download.yml's `apt-get update` in a real run,
-# as last updated by unattended-upgrades in --check -- takes no lock and
-# changes nothing.
+# to stop (R3). A real run lists them twice: in the converge phase, just
+# before applying them live inside the hold (tasks/os_upgrade.yml), and after
+# the decision, for what is still pending. --check lists them once, as what
+# the live apply would install. A simulation (`-s`): it reads apt's lists as
+# they are on the node -- after tasks/download.yml's `apt-get update` in a
+# real run, as last updated by unattended-upgrades in --check -- takes no
+# lock and changes nothing.
 #
 # Sets: node_upgrade_os_updates  {count, packages, reboot_packages, reboot_hint}
 

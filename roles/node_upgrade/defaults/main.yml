@@ -73,10 +73,13 @@ node_upgrade_helper: /usr/local/libexec/computestacks/node-upgrade-containers
 
 # --- packages and reboot ----------------------------------------------------
 # Also apply every other pending OS update (`apt-get upgrade
-# --with-new-pkgs`, what `apt upgrade` does), with docker's packages still
-# held, while the node's containers are down anyway. This is what pulls in a
-# new kernel, and with it the reboot. It never TRIGGERS a cycle on its own:
-# a node with no docker drift and no pending reboot is skipped.
+# --with-new-pkgs`, what `apt upgrade` does), with docker's packages held.
+# upgrade-docker applies them while the node's containers are down anyway;
+# maintain-nodes applies them LIVE, inside the hold with the containers
+# running, before it decides whether to stop. This is what pulls in a new
+# kernel, and with it the reboot. Never a reason on its own: upgrade-docker
+# skips a node with no docker drift and no pending reboot, and maintain-nodes
+# stops containers for these updates only when they ask for a reboot.
 node_upgrade_apply_os_updates: true
 # Seconds to wait for the dpkg/apt lock (unattended-upgrades runs on every
 # node and holds it for minutes at a time).

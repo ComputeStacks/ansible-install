@@ -6,13 +6,17 @@
 #   hold       `cs-agent maintenance on --wait` (fresh run only)      -> held
 #              state.json then records `converge_started`
 #   converge   tasks/maintain_converge.yml, tenants RUNNING; handlers flushed
-#              inside the hold; cs-agent awaited; decision taken     -> converged
-#              (the decision and its inputs are written with the phase: R2)
-#   only when the decision says stop:
-#     record / stop / packages (OS updates + docker pins)          -> recorded,
-#     docker restart (when required) / reboot (when required)         stopped,
-#     services / start -- the upgrade-docker steps, unchanged         packages,
-#                                                                     docker_restarted,
+#              inside the hold; cs-agent awaited; the pending OS updates
+#              listed, then applied LIVE, docker held (R3); decision
+#              taken                                                  -> converged
+#              (the decision, its inputs and the OS updates applied are
+#              written with the phase: R2)
+#   only when the decision says stop (docker drift, a docker restart, a
+#   reboot -- the live OS updates may have asked for it -- or forced):
+#     record / stop / packages (docker pins; the OS upgrade        -> recorded,
+#     again, normally a no-op)                                        stopped,
+#     docker restart (when required) / reboot (when required)         packages,
+#     services / start -- the upgrade-docker steps, unchanged         docker_restarted,
 #                                                                     rebooted, started
 #   release    handlers flushed again (nothing may fire after `off`),
 #              `maintenance off`, controller confirmation             -> released
@@ -42,10 +46,13 @@
     - name: Use the decision the interrupted run recorded
       ansible.builtin.set_fact:
         node_upgrade_maintain_decision: "{{ node_upgrade_state.decision }}"
+        node_upgrade_maintain_os_live: "{{ node_upgrade_state.os_live | default(none) }}"
         node_upgrade_maintain_from_state: true
       when: node_upgrade_maintain_decision is not defined
 
-    - name: List the pending OS updates
+    # After the live apply: what is left, normally nothing. A stopped window
+    # applies it (tasks/packages.yml); otherwise it waits for the next run.
+    - name: List the OS updates still pending
       ansible.builtin.include_tasks: maintain_os_updates.yml
 
     - name: Report the decision
@@ -65,7 +72,7 @@
             - "'packages' not in node_upgrade_phases_done"
             - "'started' not in node_upgrade_phases_done"
 
-        - name: Apply the OS updates and the docker pins
+        - name: Apply the docker pins and any OS update still pending
           ansible.builtin.include_tasks: packages.yml
           when: "'packages' not in node_upgrade_phases_done"
 

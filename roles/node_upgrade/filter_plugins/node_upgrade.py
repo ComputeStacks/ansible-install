@@ -445,12 +445,12 @@ def maintain_decide(inputs):
       * docker drifts from its pins (the package install restarts dockerd);
       * dockerd must restart to load what the converge changed (docker_tls'
         certificate or ExecStart drop-in; the restart was deferred);
-      * /var/run/reboot-required already exists;
+      * /var/run/reboot-required exists;
       * maintain_force_restart.
 
-    Pending OS updates are NOT an input: they are applied only inside a
-    stopped window that happens for one of the reasons above (the same rule
-    as upgrade-docker), and never with tenants running.
+    Pending OS updates are NOT an input (R3): maintain-nodes applies them
+    live, inside the hold, BEFORE gathering these inputs, so one that asks
+    for a reboot shows up here as reboot_pending.
 
     Returns {stop, reasons, docker_restart_required, docker_restart_reasons,
     drift, reboot_pending, force} -- everything the state file records with
@@ -474,7 +474,7 @@ def maintain_decide(inputs):
     for r in restart:
         reasons.append("docker must restart: " + r)
     if reboot:
-        reasons.append("a reboot is already pending (/var/run/reboot-required)")
+        reasons.append("a reboot is pending (/var/run/reboot-required)")
     if force:
         reasons.append("forced (maintain_force_restart)")
     return {
