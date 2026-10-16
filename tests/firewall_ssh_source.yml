@@ -1,0 +1,221 @@
+---
+# Does preflight's ssh-source check accept exactly the sources each host's
+# firewall will accept ssh from once firewall_allow_ssh_from is set? A check
+# that says yes where the table says no locks the run out; one that says no
+# where the table says yes refuses a good run.
+#
+#   ansible-playbook -c local -i inventories/example tests/firewall_ssh_source.yml
+#
+# (run by `make check`, also against tests/fixtures/single-site). The first
+# play proves roles/preflight's filters (filter_plugins/preflight_ssh.py) and
+# the two refusals that need no host; the second renders every host's real
+# table with the list set and with it empty, and asserts the controller's ssh
+# accept, the ssh_run sets, and that the filter and the template agree.
+# PURE: tasks/ssh_source.yml's command is never reached (existing_env, or an
+# empty list), and nothing is written. The two `fatal:` lines in the output
+# are expected: they are the refusals, caught by `rescue:`.
+
+- name: The ssh-source filters and refusals
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    fss_list: [192.0.2.0/24, 198.51.100.7, "2001:db8:1::/48"]
+    # As an existing_env host with no opt-in, nothing in ssh_source.yml runs
+    # but an assert.
+    existing_env: true
+  tasks:
+    # First, so the role -- and with it the filter plugin -- is loaded.
+    - name: Load roles/preflight through its ssh-source entry point
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: ssh_source
+
+    - name: Assert SSH_CONNECTION is parsed and a mapped address unwrapped
+      ansible.builtin.assert:
+        that:
+          - ("192.0.2.9 50022 192.0.2.1 22" | preflight_ssh_connection).address == '192.0.2.9'
+          - ("192.0.2.9 50022 192.0.2.1 22" | preflight_ssh_connection).port == 50022
+          - ("::ffff:192.0.2.9 50022 ::ffff:192.0.2.1 22" | preflight_ssh_connection).address == '192.0.2.9'
+          - ("2001:db8:1::5 40000 2001:db8::1 22" | preflight_ssh_connection).address == '2001:db8:1::5'
+          - ("fe80::5%eth0 40000 fe80::1%eth0 22" | preflight_ssh_connection).address == 'fe80::5'
+          - ("" | preflight_ssh_connection).address == ''
+          - ("" | preflight_ssh_connection).port == 0
+          - ("not-an-address 1 2 3" | preflight_ssh_connection).address == ''
+        quiet: true
+
+    - name: Assert which sources the list covers
+      ansible.builtin.assert:
+        that:
+          # inside a v4 CIDR, a bare address, inside a v6 CIDR
+          - "'192.0.2.200' | preflight_ssh_covered(fss_list)"
+          - "'198.51.100.7' | preflight_ssh_covered(fss_list)"
+          - "'2001:db8:1:ffff::1' | preflight_ssh_covered(fss_list)"
+          # an IPv4-mapped IPv6 source is its IPv4 address
+          - "'::ffff:192.0.2.200' | preflight_ssh_covered(fss_list)"
+          # not covered: next to the bare address, outside both CIDRs
+          - not ('198.51.100.8' | preflight_ssh_covered(fss_list))
+          - not ('203.0.113.1' | preflight_ssh_covered(fss_list))
+          - not ('2001:db8:2::1' | preflight_ssh_covered(fss_list))
+          # an empty list is ssh from anywhere
+          - "'203.0.113.1' | preflight_ssh_covered([])"
+          # the extra addresses: a peer, a blanket operator accept
+          - "'10.0.0.5' | preflight_ssh_covered(fss_list, ['10.0.0.5'])"
+          - "'10.0.5.5' | preflight_ssh_covered(fss_list, ['10.0.0.0/16'])"
+          - not ('10.1.0.5' | preflight_ssh_covered(fss_list, ['10.0.0.0/16']))
+          # loopback always; garbage never
+          - "'127.0.0.1' | preflight_ssh_covered(fss_list)"
+          - "'::1' | preflight_ssh_covered(fss_list)"
+          - not ('' | preflight_ssh_covered(fss_list))
+          - not ('bastion.example.com' | preflight_ssh_covered(fss_list))
+          # an entry that is not an address counts for nothing, and is named
+          - not ('192.0.2.200' | preflight_ssh_covered(['bastion.example.com']))
+          - (['bastion.example.com', '192.0.2.1'] | preflight_ssh_unparsed) == ['bastion.example.com']
+        quiet: true
+
+    - name: "Case: the temporary allowance outside playbooks/firewall.yml"
+      block:
+        - name: Set the opt-in, not permitted
+          ansible.builtin.set_fact:
+            firewall_ssh_allow_this_run: true
+
+        - name: Run the refusal with the opt-in set and not permitted
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: ssh_source
+
+        - name: Fail when the refusal let it through
+          ansible.builtin.fail:
+            msg: firewall_ssh_allow_this_run was accepted outside firewall.yml
+      rescue:
+        - name: Assert it was the opt-in refusal that failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg is search('honored only by\s+playbooks/firewall.yml')
+            quiet: true
+
+    - name: "Case: make lock-ssh on a host with no allowlist"
+      block:
+        # As `make lock-ssh` passes it: a string, from -e.
+        - name: Make it a v2 host under make lock-ssh, with no list
+          ansible.builtin.set_fact:
+            existing_env: false
+            firewall_ssh_allow_this_run: false
+            firewall_allow_ssh_from: []
+            firewall_require_ssh_allowlist: "true"
+
+        - name: Run the lock-ssh requirement with an empty list
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: ssh_source
+
+        - name: Fail when the requirement let it through
+          ansible.builtin.fail:
+            msg: make lock-ssh accepted an empty firewall_allow_ssh_from
+      rescue:
+        - name: Assert it was the lock-ssh requirement that failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg is search('it is empty here')
+            quiet: true
+
+- name: The rendered table agrees with the filter
+  hosts: all
+  gather_facts: false
+  vars:
+    existing_env: true
+    fss_list: [192.0.2.250, "2001:db8:5::/64"]
+    fss_extra4: [198.51.100.0/28]
+    fss_ssh_port: "{{ ssh_port | default(cs_ports.ssh) }}"
+    fss_table: >-
+      {{ lookup('ansible.builtin.template',
+                playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').splitlines() }}
+    # Every source the table accepts ssh from by address: the per-source ssh
+    # accepts (the operator's list and the peers), the blanket operator
+    # accepts, and loopback (`iifname "lo" accept`).
+    fss_rendered_sources: >-
+      {{ fss_table
+         | select('search', '^\s*ip6? saddr [^@\s]+ tcp dport ' ~ fss_ssh_port ~ ' accept')
+         | map('regex_replace', '^\s*ip6? saddr (\S+) .*$', '\1') | list
+         + fss_table | select('match', '^\s*ip6? saddr \S+ accept\s*$')
+           | map('regex_replace', '^\s*ip6? saddr (\S+) accept\s*$', '\1') | list
+         + ['127.0.0.0/8', '::1'] }}
+  tasks:
+    - name: Load roles/preflight (and its filter plugin) as above
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: ssh_source
+
+    - name: Load roles/firewall's and roles/preflight's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/{{ item }}/defaults/main.yml"
+      loop: [firewall, preflight]
+
+    # set_fact, because include_vars outranks task vars.
+    - name: Narrow ssh and add a blanket operator accept
+      ansible.builtin.set_fact:
+        firewall_allow_ssh_from: "{{ fss_list }}"
+        firewall_extra_allowed_ipv4: "{{ fss_extra4 }}"
+
+    - name: Assert the controller is accepted on nodes and the registry, and nowhere else
+      vars:
+        fss_controller_lines: >-
+          {{ fss_table | select('search', 'tcp dport ' ~ fss_ssh_port ~ ' accept')
+             | select('search', 'comment "(' ~ (groups['controller'] | map('regex_escape') | join('|')) ~ ')"')
+             | map('regex_replace', '^\s*ip6? saddr (\S+) .*$', '\1') | list | sort }}
+        fss_controller_want: >-
+          {{ (groups['controller'] | map('extract', hostvars, 'primary_ip') | list
+              + groups['controller'] | map('extract', hostvars, 'public_ip') | list) | unique | sort }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            fss_controller_lines == (fss_controller_want
+            if ('nodes' in group_names or 'registry' in group_names) else [])
+        fail_msg: "{{ inventory_hostname }}: controller ssh accepts {{ fss_controller_lines }}"
+        quiet: true
+
+    - name: Assert the ssh_run sets and their accepts are rendered
+      ansible.builtin.assert:
+        that:
+          - fss_table | select('match', '^\s*set ssh_run4 \{') | list | length == 1
+          - fss_table | select('match', '^\s*set ssh_run6 \{') | list | length == 1
+          - >-
+            fss_table | select('match', '^\s*ip saddr @ssh_run4 tcp dport ' ~ fss_ssh_port ~ ' accept') | list | length == 1
+          - >-
+            fss_table | select('match', '^\s*ip6 saddr @ssh_run6 tcp dport ' ~ fss_ssh_port ~ ' accept') | list | length == 1
+        fail_msg: "{{ inventory_hostname }}: {{ fss_table | select('search', 'ssh_run') | list }}"
+        quiet: true
+
+    - name: Assert the filter covers exactly what the table accepts
+      vars:
+        fss_candidates: >-
+          {{ ['192.0.2.250', '192.0.2.251', '2001:db8:5::9', '2001:db8:6::9',
+              '198.51.100.5', '198.51.100.17', '203.0.113.250', '127.0.0.1', '::1']
+             + groups['all'] | map('extract', hostvars, 'primary_ip') | select('defined') | list
+             + groups['all'] | map('extract', hostvars, 'public_ip') | select('defined') | list }}
+        # Filters are not tests, so `select` cannot call them: a loop.
+        fss_disagree: >-
+          {% for c in fss_candidates | unique %}{% if (c | preflight_ssh_covered(firewall_allow_ssh_from, preflight_ssh_also))
+          != (c | preflight_ssh_covered(fss_rendered_sources)) %}{{ c }} {% endif %}{% endfor %}
+      ansible.builtin.assert:
+        that:
+          - (fss_disagree | default('', true) | trim | length) == 0
+        fail_msg: >-
+          {{ inventory_hostname }}: the filter and the table disagree on
+          {{ fss_disagree }} (table accepts ssh from {{ fss_rendered_sources }})
+        quiet: true
+
+    - name: Open ssh to anywhere again
+      ansible.builtin.set_fact:
+        firewall_allow_ssh_from: []
+
+    - name: Assert an open ssh renders one accept, no sets and no peer ssh accepts
+      ansible.builtin.assert:
+        that:
+          - fss_table | select('search', 'ssh_run') | list | length == 0
+          - >-
+            fss_table | select('search', 'tcp dport ' ~ fss_ssh_port ~ ' accept') | list
+            == ['        tcp dport ' ~ fss_ssh_port ~ ' accept    comment "ssh"']
+          - "'203.0.113.250' | preflight_ssh_covered(firewall_allow_ssh_from, preflight_ssh_also)"
+        fail_msg: "{{ inventory_hostname }}: {{ fss_table | select('search', 'ssh') | list }}"
+        quiet: true
