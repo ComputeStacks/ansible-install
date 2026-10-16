@@ -100,7 +100,9 @@
     owner: root
     group: root
     mode: "0600"
+  # Check mode creates no state directory to copy into.
   when:
+    - not ansible_check_mode
     - not firewall_previous.results[0].stat.exists
     - firewall_previous.results[1].stat.exists
 
