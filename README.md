@@ -282,7 +282,8 @@ covers:
 * the machine you run ansible from;
 * on the nodes and the registry, the controller (volumes, haproxy
   certificate deploys, load balancer reloads, `DockerSSH`);
-* on the backup server, every node (borg runs over ssh).
+* nothing extra for the backup server: every node is always accepted there
+  (borg runs over ssh).
 
 Anything you lock out has to be recovered from the host's console.
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## October 15, 2026
+
+* **Backup servers' sshd is sized for the nodes' backup sweep.** Every
+  node fires its due backups on the same schedule (`@hourly` by default)
+  with 4 borg sessions each, and stock sshd (`MaxStartups 10:30:100`) drops
+  new connections at random past 10 unauthenticated handshakes, failing
+  backups. `backup_server` now writes
+  `/etc/ssh/sshd_config.d/40-computestacks-backup.conf` with `MaxStartups`
+  sized from the nodes in the server's site (never lowered by a run; raise it
+  with `backup_server_sshd_max_startups_min`), `LoginGraceTime 30` and, on
+  OpenSSH 9.8 and later,
+  the nodes' addresses in `PerSourcePenaltyExemptList`, and reloads sshd. An
+  `existing_env` backup server is left alone unless
+  `backup_server_sshd_manage: true`, which then requires a size and
+  `backup_server_sshd_penalty_exempt_extra`; see
+  `roles/backup_server/README.md`.
+* **`firewall_allow_ssh_from` no longer cuts a backup server off from its
+  nodes.** On a backup server it now also accepts ssh from every node.
+  Before, a narrowed list had to name every node by hand, or their backups
+  failed.
+* **`site.yml` and `add-region.yml` end with a "lock down ssh" TODO** naming
+  every host whose firewall still accepts ssh from anywhere
+  (`firewall_allow_ssh_from` unset). Narrow it and run `make firewall`; see
+  the README's "Restricting ssh".
+
 ## October 14, 2026
 
 * **`make deps` reinstalls galaxy roles** (`--force`), so a changed pin

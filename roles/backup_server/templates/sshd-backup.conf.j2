@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+#
+# Sized for {{ backup_server_sshd_sessions }} simultaneous borg sessions (roles/backup_server,
+# "sshd"). Loaded before sshd_config's own settings, so these win.
+MaxStartups {{ backup_server_sshd_max_startups | trim }}
+LoginGraceTime {{ backup_server_sshd_login_grace_time | int }}
+{% if (backup_server_sshd_has_penalties | default(true) | bool) and backup_server_sshd_penalty_exempt | length > 0 %}
+PerSourcePenaltyExemptList {{ backup_server_sshd_penalty_exempt | join(',') }}
+{% endif %}

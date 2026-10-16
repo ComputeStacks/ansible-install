@@ -371,6 +371,10 @@ checkpoints:
 * Schedule `cstacks database-backup` (see the README) and copy its output
   off-host. Tenant volumes go to the borg server; the controller's own
   database does not.
+* **Lock down ssh.** Every host's firewall accepts ssh from anywhere until
+  you set `firewall_allow_ssh_from` and run `make firewall`; the run ends by
+  naming the hosts still open. See the README's "Restricting ssh" for what
+  the list must cover.
 
 ## Known rough edges on Ubuntu 26.04
 

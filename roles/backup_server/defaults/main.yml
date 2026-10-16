@@ -51,3 +51,73 @@ backup_server_borg_keyservers:
 # the server's existing one — and then set backup_borg_remote_path on the
 # nodes to point at it.
 backup_server_install_borg: false
+
+# --- sshd ------------------------------------------------------------------
+# Every node fires its due backups on the same schedule (the controller's
+# default is @hourly; cs-agent checks every 20 s), each node running
+# cs-agent's queue.numworkers + 1 backups at once, and every borg invocation
+# is a new SSH connection. Stock sshd starts randomly dropping new
+# connections at 10 unauthenticated handshakes (MaxStartups 10:30:100) --
+# sooner when scanners hold slots or a busy server slows handshakes --
+# which fails backups at random. tasks/sshd.yml writes a drop-in sized from
+# the nodes this server serves.
+#
+# Written on a v2-built server. Attach mode (existing_env) leaves a live
+# server's sshd alone unless this is set true, and then the inventory lists
+# only the nodes being attached, so backup_server_sshd_penalty_exempt_extra
+# and a size (backup_server_sshd_fleet_node_count or
+# backup_server_sshd_max_startups_min) are required (tasks/sshd.yml).
+backup_server_sshd_manage: "{{ not (existing_env | default(false) | bool) }}"
+backup_server_sshd_dropin: /etc/ssh/sshd_config.d/40-computestacks-backup.conf
+
+# The nodes in this backup server's site, by inventory.
+backup_server_sshd_nodes: >-
+  {{ groups['nodes'] | default([]) | map('extract', hostvars)
+     | selectattr('cs_site', 'equalto', cs_site)
+     | map(attribute='inventory_hostname') | list }}
+# Concurrent backups per node: cs-agent's queue.numworkers + 1. Each node's
+# own cs_agent_queue_numworkers is read (roles/cs_agent's default is 3); this
+# is the per-node figure for backup_server_sshd_fleet_node_count.
+backup_server_sshd_backups_per_node: 4
+# The simultaneous borg sessions the server must accept.
+backup_server_sshd_sessions: >-
+  {{ ((backup_server_sshd_fleet_node_count | default(0) | int) * (backup_server_sshd_backups_per_node | int))
+     if (existing_env | default(false) | bool) else
+     ((backup_server_sshd_nodes | map('extract', hostvars)
+       | map(attribute='cs_agent_queue_numworkers', default=3) | map('int') | sum)
+      + (backup_server_sshd_nodes | length)) }}
+# MaxStartups is ONE limit for the whole server -- concurrent unauthenticated
+# connections from every source together -- so it has to grow with the fleet.
+# start:rate:full. `start` is the largest of: 1.5x the simultaneous sessions,
+# sshd's own 10, backup_server_sshd_max_startups_min, and the start already
+# on the server (tasks/sshd.yml reads it), so a run never lowers it -- not a
+# --limit run, not an attach. `full` is twice the start, never below sshd's
+# own 100. To lower it, edit or delete the drop-in by hand first.
+backup_server_sshd_max_startups_min: 0
+
+# How long an unauthenticated connection may hold one of those slots. Nodes
+# log in by key in well under a second; sshd's default of 120 s mostly lets
+# scanners and password guessers sit on slots.
+backup_server_sshd_login_grace_time: 30
+backup_server_sshd_max_startups_start: >-
+  {{ [10, ((backup_server_sshd_sessions | int) * 3 / 2) | round(0, 'ceil') | int,
+      backup_server_sshd_max_startups_min | int,
+      backup_server_sshd_current_start | default(0) | int] | max }}
+backup_server_sshd_max_startups: >-
+  {{ backup_server_sshd_max_startups_start }}:30:{{ [100, (backup_server_sshd_max_startups_start | int) * 2] | max }}
+
+# OpenSSH >= 9.8 penalizes a source address after a run of failed or aborted
+# connections (PerSourcePenalties) and refuses it for a while -- which fails
+# that node's whole sweep. The nodes are exempt: each node's primary_ip and
+# public_ip (nodes dial this server's primary_ip), plus any extra
+# address/masklen entries -- prefer the node subnets, which stay right as the
+# fleet grows. Left out on an sshd older than 9.8, which has no penalties
+# and rejects the option.
+backup_server_sshd_penalty_exempt_extra: []
+backup_server_sshd_penalty_exempt: >-
+  {{ ((backup_server_sshd_nodes
+       | map('extract', hostvars) | map(attribute='primary_ip', default='') | list
+       + backup_server_sshd_nodes
+       | map('extract', hostvars) | map(attribute='public_ip', default='') | list)
+      | reject('equalto', '') | list + backup_server_sshd_penalty_exempt_extra)
+     | unique | list }}

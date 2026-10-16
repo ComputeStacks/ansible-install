@@ -1,0 +1,23 @@
+---
+# The last task of site.yml and add-region.yml: name every host in the play
+# whose nftables firewall (this role's, so not an existing_env host's) still
+# accepts ssh from anywhere -- firewall_allow_ssh_from empty, the default.
+# Prints only; changes nothing.
+- name: TODO for the operator - lock down ssh
+  vars:
+    firewall_ssh_open_hosts: >-
+      {{ ansible_play_hosts_all
+         | zip(ansible_play_hosts_all | map('extract', hostvars)
+               | map(attribute='firewall_allow_ssh_from', default=[]) | map('length') | list,
+               ansible_play_hosts_all | map('extract', hostvars)
+               | map(attribute='existing_env', default=false) | map('bool') | list)
+         | selectattr('1', 'equalto', 0) | rejectattr('2') | map(attribute='0') | list }}
+  ansible.builtin.debug:
+    msg: >-
+      TODO (by hand): lock down ssh. sshd on {{ firewall_ssh_open_hosts | join(', ') }}
+      accepts connections from anywhere. Set firewall_allow_ssh_from to the
+      machines you run ansible from, plus the controller on nodes and the
+      registry (a backup server accepts the nodes for you), then run
+      `make firewall`. See README "Restricting ssh".
+  when: firewall_ssh_open_hosts | length > 0
+  run_once: true

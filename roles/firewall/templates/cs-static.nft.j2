@@ -177,7 +177,13 @@ table inet {{ firewall_table }} {
 {% if 'backup' in group_names %}
 
         # --- backup ------------------------------------------------------
-        # Nodes reach borg over ssh only, which the global ssh accept covers.
+        # Nodes reach borg over ssh. With ssh open to anywhere the global
+        # accept covers them; with firewall_allow_ssh_from set, every node is
+        # accepted here, so narrowing ssh never stops their backups. Every
+        # node, not this site's: see README "Sites are deliberately ignored".
+{% if firewall_allow_ssh_from | length > 0 %}
+{{ accept_from(groups['nodes'] | default([]), 'tcp dport ' ~ ssh_port_self ~ ' accept') }}
+{% endif %}
 {% endif %}
 {% if firewall_extra_allowed_ipv4 | length > 0 or firewall_extra_allowed_ipv6 | length > 0 or firewall_extra_input_rules | length > 0 %}
 

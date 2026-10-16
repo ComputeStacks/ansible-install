@@ -1,0 +1,127 @@
+---
+# Is a backup server's sshd drop-in sized from the nodes in its own site, and
+# does it exempt exactly those nodes' addresses from PerSourcePenalties?
+#
+#   ansible-playbook -c local -i inventories/example tests/backup_server_sshd.yml
+#
+# (run by `make check`, also against tests/fixtures/single-site). Renders
+# only; nothing is written.
+- name: Render each backup server's sshd drop-in
+  hosts: backup
+  gather_facts: false
+  tasks:
+    - name: Load roles/backup_server's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/backup_server/defaults/main.yml"
+
+    - name: Assert the drop-in matches this site's nodes
+      vars:
+        sshd_test_nodes: >-
+          {{ groups['nodes'] | select('in', groups['nodes'] | map('extract', hostvars)
+               | selectattr('cs_site', 'equalto', cs_site) | map(attribute='inventory_hostname') | list) | list }}
+        sshd_test_start: "{{ [10, (sshd_test_nodes | length) * 6] | max }}"
+        sshd_test_addresses: >-
+          {{ (sshd_test_nodes | map('extract', hostvars, 'primary_ip') | list
+              + sshd_test_nodes | map('extract', hostvars, 'public_ip') | list) | unique | sort }}
+        sshd_test_lines: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/backup_server/templates/sshd-backup.conf.j2').splitlines()
+             | reject('match', '^#') | reject('equalto', '') | list }}
+      ansible.builtin.assert:
+        that:
+          - sshd_test_nodes | length > 0
+          - sshd_test_lines[0] == 'MaxStartups ' ~ sshd_test_start ~ ':30:' ~ ([100, (sshd_test_start | int) * 2] | max)
+          - sshd_test_lines[1] == 'LoginGraceTime 30'
+          - sshd_test_lines[2] == 'PerSourcePenaltyExemptList ' ~ (sshd_test_addresses | join(','))
+          - sshd_test_lines | length == 3
+        fail_msg: >-
+          {{ inventory_hostname }} (site {{ cs_site }}, nodes {{ sshd_test_nodes }})
+          rendered {{ sshd_test_lines }}
+        quiet: true
+
+    # set_fact, because include_vars outranks task vars.
+    - name: Make it an attach-mode server sized from operator fleet values
+      ansible.builtin.set_fact:
+        existing_env: true
+        backup_server_sshd_fleet_node_count: 20
+        backup_server_sshd_penalty_exempt_extra: [198.51.100.0/24]
+
+    - name: Assert MaxStartups follows the fleet count and adds the extra exemptions
+      vars:
+        sshd_test_lines: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/backup_server/templates/sshd-backup.conf.j2').splitlines()
+             | reject('match', '^#') | reject('equalto', '') | list }}
+      ansible.builtin.assert:
+        that:
+          - not (backup_server_sshd_manage | bool)
+          - sshd_test_lines[0] == 'MaxStartups 120:30:240'
+          - sshd_test_lines[2] is search(',198\.51\.100\.0/24$')
+        fail_msg: "{{ sshd_test_lines }}"
+        quiet: true
+
+    - name: Assert an sshd without PerSourcePenalties gets no exemption list
+      vars:
+        backup_server_sshd_has_penalties: false
+        sshd_test_lines: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/backup_server/templates/sshd-backup.conf.j2').splitlines()
+             | reject('match', '^#') | reject('equalto', '') | list }}
+      ansible.builtin.assert:
+        that:
+          - sshd_test_lines == ['MaxStartups 120:30:240', 'LoginGraceTime 30']
+        fail_msg: "{{ sshd_test_lines }}"
+        quiet: true
+
+    - name: Put a larger MaxStartups on the server already
+      ansible.builtin.set_fact:
+        backup_server_sshd_current_start: 200
+
+    - name: Assert a run never lowers what is on the server
+      ansible.builtin.assert:
+        that:
+          - backup_server_sshd_max_startups | trim == '200:30:400'
+        fail_msg: "{{ backup_server_sshd_max_startups }}"
+        quiet: true
+
+    - name: Set an operator floor above both
+      ansible.builtin.set_fact:
+        backup_server_sshd_max_startups_min: 300
+
+    - name: Assert the operator floor wins
+      ansible.builtin.assert:
+        that:
+          - backup_server_sshd_max_startups | trim == '300:30:600'
+        fail_msg: "{{ backup_server_sshd_max_startups }}"
+        quiet: true
+
+- name: Render each backup server's firewall with ssh narrowed
+  hosts: backup
+  gather_facts: false
+  tasks:
+    - name: Load roles/firewall's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/firewall/defaults/main.yml"
+
+    - name: Narrow ssh to one operator address
+      ansible.builtin.set_fact:
+        firewall_allow_ssh_from: [192.0.2.250]
+
+    - name: Assert every node, and only the nodes, still reach ssh
+      vars:
+        sshd_test_port: "{{ ssh_port | default(cs_ports.ssh) }}"
+        sshd_test_nodes: "{{ groups['nodes'] }}"
+        sshd_test_want: >-
+          {{ (sshd_test_nodes | map('extract', hostvars, 'primary_ip') | list
+              + sshd_test_nodes | map('extract', hostvars, 'public_ip') | list) | unique | sort }}
+        sshd_test_got: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').splitlines()
+             | select('search', 'tcp dport ' ~ sshd_test_port ~ ' accept')
+             | reject('search', '192\.0\.2\.250')
+             | map('regex_replace', '^\s*ip6? saddr (\S+) .*$', '\1') | unique | sort }}
+      ansible.builtin.assert:
+        that:
+          - sshd_test_got == sshd_test_want
+        fail_msg: "{{ inventory_hostname }}: want {{ sshd_test_want }}, got {{ sshd_test_got }}"
+        quiet: true

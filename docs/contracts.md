@@ -85,8 +85,10 @@ hosts and backup hosts; unset everywhere means the single site called
    blank or short one.
 9. **Attach mode (`existing_env: true`):** the inventory is a PARTIAL view of
    the fleet — no shared-host file is rendered whole. Additive fragments and
-   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script
-   and NEW per-az `file_sd` fragment files. `/etc/default/computestacks` is
+   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script,
+   NEW per-az `file_sd` fragment files, and — only when the operator sets
+   `backup_server_sshd_manage` — the backup server's sshd drop-in, rendered
+   from operator-supplied fleet values. `/etc/default/computestacks` is
    append-only, always. See §Attach mode.
 10. **A variable defined in `playbooks/group_vars/` that references
     `hostvars` may only be read on the host currently executing.** NEVER

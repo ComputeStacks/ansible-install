@@ -1,7 +1,8 @@
 # backup_server
 
 The borg backup server a node's cs-agent SSHes into: the `cstacks` account,
-the pinned upstream borg release, and the repository path.
+the pinned upstream borg release, the repository path, and sshd sized for the
+nodes' backup sweep.
 
 | Runs in | Play | Hosts |
 | --- | --- | --- |
@@ -10,7 +11,7 @@ the pinned upstream borg release, and the repository path.
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** only `tasks/account.yml` runs, and its one write is
-`~cstacks/.ssh` (see "Attach mode" below). **Requires:** —.
+`~cstacks/.ssh`; sshd is resized only on request (see "Attach mode" below). **Requires:** —.
 
 A fleet may hold several backup servers, one per `site`
 (docs/contracts.md §Site scoping). The role itself is site-agnostic — it runs
@@ -42,6 +43,46 @@ single-site inventory sets `site` nowhere, every host lands in the site called
    `/var/lib/computestacks/backups`), created `cstacks:cstacks` 0770 — on a
    server these playbooks built. On an `existing_env` server it is only
    `stat`ed.
+4. **sshd sized for the backup sweep**, in the drop-in
+   `/etc/ssh/sshd_config.d/40-computestacks-backup.conf` (checked with
+   `sshd -t` before it is installed, then sshd reloaded; open sessions are
+   kept). Every node fires its due backups on the same schedule (the
+   controller's default is `@hourly`; cs-agent checks every 20 s), each with
+   `queue.numworkers` + 1 backups at once (4 by default), and every borg
+   invocation is a new connection. Stock `MaxStartups 10:30:100` starts
+   dropping new connections at 10 unauthenticated handshakes, sooner when
+   internet scanners hold slots or a busy server slows handshakes, failing
+   backups at random. The drop-in sets:
+   * `MaxStartups`. It is one limit for the whole server — concurrent
+     unauthenticated connections from all nodes together — so it grows with
+     the fleet. The start is the largest of: 1.5x the simultaneous sessions
+     of the nodes in this server's site (each node's own
+     `cs_agent_queue_numworkers` + 1; 10 default nodes give 60, 20 give
+     120), sshd's own 10, `backup_server_sshd_max_startups_min`, and the
+     start already on the server. Full is twice the start (never below 100).
+     **A run never lowers it**, so a `--limit` run or an attach cannot shrink
+     what a fuller run or the operator set; set
+     `backup_server_sshd_max_startups_min` to run it above what the
+     inventory implies, and edit or delete the drop-in by hand to lower it.
+   * `LoginGraceTime 30` (sshd's default is 120): every connection that has
+     not logged in yet holds one of the `MaxStartups` slots, scanners and
+     password guessers included, and nodes log in by key in well under a
+     second.
+   * `PerSourcePenaltyExemptList` with those nodes' `primary_ip` and
+     `public_ip`, on OpenSSH 9.8 and later (older sshd has no penalties and
+     rejects the option). Those versions refuse a source address for a
+     while after a run of failed or aborted connections, which would fail
+     that node's whole sweep.
+
+   Nodes reach the server over ssh. `firewall_allow_ssh_from` narrows ssh to
+   the listed sources, and `roles/firewall` then still accepts every node, so
+   narrowing it never stops their backups. That is
+   worth doing on an internet-facing server: scanners then cannot take the
+   pre-authentication slots at all.
+
+   The real ceiling as the fleet grows is the server itself: one `borg serve`
+   per session, each holding its repository index in memory, all writing to
+   one filesystem. Size RAM and disk for the session count above.
 
 There is **no NFS**, no root SSH configuration, and no borg compaction cron:
 compaction runs in-agent since cs-agent v3.x.
@@ -108,6 +149,15 @@ server (they describe the existing environment and have no safe default):
 Set `backup_server_install_borg: true` to install v2's pinned borg alongside
 the existing one anyway — and then point `backup_borg_remote_path` at it.
 
+Its sshd is left alone too. Set `backup_server_sshd_manage: true` to write
+the drop-in there anyway. The attach inventory lists only the nodes being
+attached, so the run then requires a size — `backup_server_sshd_fleet_node_count`
+(the number of nodes the server serves) or `backup_server_sshd_max_startups_min`
+— and `backup_server_sshd_penalty_exempt_extra` (the nodes' subnets, which stay
+right as the fleet grows), and fails without them. Keep them in the attach
+inventory's `host_vars` for the server. `MaxStartups` never goes down on a
+run; the exemption list is rewritten from these values every time.
+
 ## Variables
 
 | Variable | Default | Purpose |
@@ -120,9 +170,16 @@ the existing one anyway — and then point `backup_borg_remote_path` at it.
 | `backup_server_borg_asset` | `borg-linux-glibc231-x86_64` | Upstream release asset (amd64 only — preflight asserts the architecture). |
 | `backup_server_borg_keyservers` | 3 keyservers | Tried in turn; all failing is a hard error. |
 | `backup_server_install_borg` | `false` | Install borg on an `existing_env` server anyway. |
+| `backup_server_sshd_manage` | `true`, `false` on an `existing_env` server | Write the sshd drop-in. |
+| `backup_server_sshd_login_grace_time` | `30` | Seconds an unauthenticated connection may hold a slot. |
+| `backup_server_sshd_max_startups_min` | `0` | A floor for the `MaxStartups` start, to run it above what the inventory implies. |
+| `backup_server_sshd_fleet_node_count` | — | Attach mode with `backup_server_sshd_manage`: the nodes the server serves (or set the floor above). |
+| `backup_server_sshd_backups_per_node` | `4` | Concurrent backups per node for `backup_server_sshd_fleet_node_count`. A v2 server reads each node's `cs_agent_queue_numworkers` + 1 instead. |
+| `backup_server_sshd_penalty_exempt_extra` | `[]` | More `address[/masklen]` entries for `PerSourcePenaltyExemptList`, such as node subnets. Required in attach mode with `backup_server_sshd_manage`. |
 
 Consumed, not owned: `borg_version`, `borg_release_gpg_fingerprint`,
 `borg_binary_path` (versions.yml), `backup_host_path`, `site`, `existing_env`
-(inventory). The role reads no site map itself; `site` matters here only
-because `cs_agent` and `validate` use it to decide which backup server a given
-node belongs to.
+(inventory). The role reads no site map itself; it reads `cs_site`,
+`primary_ip`, `public_ip` and `cs_agent_queue_numworkers` of the nodes in its
+own site for sshd, and `cs_agent` and `validate` use `site`
+to decide which backup server a given node belongs to.

@@ -191,6 +191,8 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/tailscale_routing.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/backup_server_sshd.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/backup_server_sshd.yml
 	@echo "check: inventories parse, region groups exist, site contract resolves,"
 	@echo "       bootstrap manifest renders and parses as schema 1,"
 	@echo "       load balancer record plan follows the ownership rules,"

@@ -342,3 +342,15 @@
   any_errors_fatal: false
   roles:
     - validate
+
+# Last, so it is the final thing on screen: the new nodes' ssh is open to
+# anywhere until an operator narrows it (roles/firewall).
+- name: Remaining by hand
+  hosts: nodes
+  gather_facts: false
+  tasks:
+    - name: Remind the operator to lock down ssh
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: ssh_open_reminder
+      tags: [always]
