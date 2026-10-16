@@ -2,6 +2,16 @@
 
 ## October 16, 2026
 
+* **Node alerts name their node, and the disk-space alerts work.**
+  HighCpuLoad aggregated with `by(instance)`, which dropped the `node`
+  label, so the controller could never tell which node an alert was about;
+  it now keeps every target label. OutOfDiskSpace and OutOfInodes matched
+  only a `/rootfs` mountpoint that no node_exporter reports, so they never
+  fired; they now watch `/` and `/var/lib/docker`. An existing metrics host
+  picks this up only when the metrics role runs there (attach mode does not
+  install alert rules). HighCpuLoad alerts get new fingerprints, so resolve
+  the old node-less ones in the controller by hand.
+
 * **maintain-nodes applies the pending OS updates live, inside the hold.**
   They used to be applied only when the run stopped a node's tenant
   containers for another reason, so on a node that needed no stop they were
