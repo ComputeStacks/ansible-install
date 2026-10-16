@@ -119,6 +119,7 @@
                     playbook_dir ~ '/../roles/firewall/templates/cs-static.nft.j2').splitlines()
              | select('search', 'tcp dport ' ~ sshd_test_port ~ ' accept')
              | reject('search', '192\.0\.2\.250')
+             | reject('search', '@ssh_run[46] ')
              | map('regex_replace', '^\s*ip6? saddr (\S+) .*$', '\1') | unique | sort }}
       ansible.builtin.assert:
         that:

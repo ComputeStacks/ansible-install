@@ -33,6 +33,7 @@
 {% set ssh_port_self = ssh_port | default(ports.ssh) %}
 {% set tailnet_self = inventory_hostname in (firewall_tailnet_hosts | default([])) %}
 {% set tailnet_routed_self = inventory_hostname in (firewall_tailnet_routed_hosts | default([])) %}
+{% set ssh_narrowed = firewall_allow_ssh_from | length > 0 %}
 {% macro peer_addresses(host) %}{{ [hostvars[host].primary_ip | default(''), hostvars[host].public_ip | default('')] | reject('equalto', '') | unique | join(' ') }}{% endmacro %}
 {#
   accept_from(hosts, rule) — the pairwise accept helper. DO NOT reduce it to the
@@ -56,6 +57,21 @@ table inet {{ firewall_table }}
 delete table inet {{ firewall_table }}
 
 table inet {{ firewall_table }} {
+{% if ssh_narrowed %}
+    # This ansible run's own source, allowed ssh for a while when the operator
+    # opts in (firewall_ssh_allow_this_run, playbooks/firewall.yml only).
+    # Filled by roles/firewall right after an apply, with a timeout; never
+    # written here, so every apply and every reboot starts them empty.
+    set ssh_run4 {
+        type ipv4_addr
+        flags timeout
+    }
+    set ssh_run6 {
+        type ipv6_addr
+        flags timeout
+    }
+
+{% endif %}
     chain input {
         type filter hook input priority filter; policy drop;
 
@@ -77,10 +93,12 @@ table inet {{ firewall_table }} {
         ip6 daddr fe80::/64 udp dport 546 accept
 
         # --- every host --------------------------------------------------
-{% if firewall_allow_ssh_from | length > 0 %}
+{% if ssh_narrowed %}
 {% for address in firewall_allow_ssh_from %}
         {{ 'ip6' if ':' in address else 'ip' }} saddr {{ address }} tcp dport {{ ssh_port_self }} accept    comment "ssh"
 {% endfor %}
+        ip saddr @ssh_run4 tcp dport {{ ssh_port_self }} accept    comment "this ansible run"
+        ip6 saddr @ssh_run6 tcp dport {{ ssh_port_self }} accept    comment "this ansible run"
 {% else %}
         tcp dport {{ ssh_port_self }} accept    comment "ssh"
 {% endif %}
@@ -120,6 +138,13 @@ table inet {{ firewall_table }} {
         tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published tenant ports"
         udp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published tenant ports"
 
+{% if ssh_narrowed %}
+        # controller -> root ssh (volumes, haproxy certificate deploys, load
+        # balancer reloads). With ssh open to anywhere the accept above covers
+        # it; with firewall_allow_ssh_from set, the controller is accepted here
+        # so the list never has to name it.
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ssh_port_self ~ ' accept') }}
+{% endif %}
         # controller -> dockerd (mTLS).
 {{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.docker_tls ~ ' accept') }}
         # controller -> cs-agent admin API. NEVER public: the admin Bearer is
@@ -159,7 +184,13 @@ table inet {{ firewall_table }} {
 {% if 'registry' in group_names %}
 
         # --- registry ----------------------------------------------------
+{% if ssh_narrowed %}
+        # controller -> ssh (DockerSSH). Open to anywhere, the global ssh
+        # accept covers it; narrowed, the controller is accepted here.
+{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ssh_port_self ~ ' accept') }}
+{% else %}
         # ssh from the controller (DockerSSH) rides the global ssh accept above.
+{% endif %}
         tcp dport {{ ports.controller_http }} accept    comment "acme http-01"
         tcp dport {{ ports.tenant_https }} accept    comment "tenant registries"
         tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published registry ports"
@@ -181,7 +212,7 @@ table inet {{ firewall_table }} {
         # accept covers them; with firewall_allow_ssh_from set, every node is
         # accepted here, so narrowing ssh never stops their backups. Every
         # node, not this site's: see README "Sites are deliberately ignored".
-{% if firewall_allow_ssh_from | length > 0 %}
+{% if ssh_narrowed %}
 {{ accept_from(groups['nodes'] | default([]), 'tcp dport ' ~ ssh_port_self ~ ' accept') }}
 {% endif %}
 {% endif %}
