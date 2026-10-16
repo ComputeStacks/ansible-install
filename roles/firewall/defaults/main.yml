@@ -68,8 +68,38 @@ firewall_container_ports: >-
 
 # Empty list = ssh accepted from anywhere (the default; every host is reached
 # over ssh by the operator, and nodes/registry are reached by the controller).
-# Set to a list of CIDRs/addresses to restrict it.
+# Set to a list of CIDRs/addresses to restrict it: the machines you run
+# ansible from. With it set, the table also accepts ssh from the controller
+# on nodes and the registry, and from every node on a backup server, without
+# their being listed. roles/preflight refuses a run whose own source the
+# resulting set does not cover (README.md, "Restricting ssh").
 firewall_allow_ssh_from: []
+
+# `make lock-ssh` sets this: roles/preflight then refuses any targeted host
+# whose firewall_allow_ssh_from is empty, so the lock-down cannot silently
+# leave a host open.
+firewall_require_ssh_allowlist: false
+
+# Opt-in, playbooks/firewall.yml only (roles/preflight refuses it anywhere
+# else): skip preflight's "does the list cover this run's source" refusal, and
+# instead add the source to the table's `ssh_run4` / `ssh_run6` set right
+# after each apply, for `firewall_ssh_run_allow_timeout` (an nft duration).
+# Never written to disk: an expiry, a reboot or the next apply removes it.
+# The rollback then only proves the new table loads, not that the list
+# covers anyone.
+firewall_ssh_allow_this_run: false
+firewall_ssh_run_allow_timeout: "1h"
+
+# Safe apply (tasks/apply.yml). Each apply schedules an automatic restore of
+# the last verified table this many seconds out, and cancels it only once a
+# FRESH ssh connection has come back through the new one. It must outlast
+# the slowest host's verify, which waits up to `firewall_verify_timeout`
+# (and a blocked ssh attempt with ConnectionAttempts=5 takes ~50 s).
+firewall_rollback_seconds: 180
+firewall_verify_timeout: 60
+# What the safe apply keeps between runs: the sha256 and a copy of the last
+# table that was applied AND verified, and the rollback script.
+firewall_state_dir: /var/lib/cs-firewall
 
 # Escape hatches (v1 parity: extra_allowed_ipv4_addresses / _ipv6_addresses).
 firewall_extra_allowed_ipv4: []

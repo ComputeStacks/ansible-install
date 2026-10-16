@@ -67,6 +67,14 @@
   any_errors_fatal: true
   max_fail_percentage: 0
   tasks:
+    # A node reboots during its upgrade, and the run reconnects through its
+    # firewall's persistent table: refuse a run whose source a narrowed
+    # firewall_allow_ssh_from does not cover (roles/preflight/README.md).
+    - name: Check this run can reach each node again after a reboot
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: ssh_source
+
     # First, before node_upgrade's own preflight: docker 29 keeps images and
     # container layers under /var/lib/containerd, so upgrading a node whose
     # docker and containerd state is not on its data disk would move every

@@ -40,9 +40,13 @@
 # so their handlers are in the play. docker_tls is left out on purpose: its
 # "Restart docker" must never run here, and a docker_tls file newer than the
 # running dockerd is detected by maintain_decide.yml anyway (the deferred
-# restart path). docker_config's handler is a SIGHUP reload, which stops
+# restart path). The firewall's apply handler is left out too: a plain
+# restart would load the table outside roles/firewall's safe apply, and that
+# role already re-applies, with its rollback, whenever the table on disk is
+# not the one it last verified -- so a lost apply is caught on the resumed
+# converge itself. docker_config's handler is a SIGHUP reload, which stops
 # nothing. tests/maintain_nodes.yml keeps this list equal to the handlers
-# of the converged roles minus docker_tls.
+# of the converged roles minus docker_tls' and the firewall apply.
 - name: Re-apply what an interrupted converge may have left pending
   ansible.builtin.debug:
     msg: >-
@@ -58,7 +62,6 @@
     - "node_observability : Restart cadvisor"
     - "node_observability : Restart fluentd"
     - "firewall : Reload systemd for the ComputeStacks firewall"
-    - "firewall : Apply the ComputeStacks firewall"
     - "cs_agent : Restart cs-agent"
   when: node_upgrade_maintain_converge_resumed | bool
 

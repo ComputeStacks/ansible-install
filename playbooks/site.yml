@@ -301,3 +301,17 @@
   any_errors_fatal: false
   roles:
     - validate
+
+
+# Last, so it is the final thing on screen. The firewall leaves ssh open to
+# anywhere until an operator narrows it (roles/firewall), and nothing here can
+# know the right sources, so the run ends by saying which hosts still are.
+- name: Remaining by hand
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Remind the operator to lock down ssh
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: ssh_open_reminder
+      tags: [always]

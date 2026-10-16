@@ -373,6 +373,21 @@
   roles:
     - validate
 
+# Near the end, so it is among the last things on screen: the new nodes' ssh
+# is open to anywhere until an operator narrows it (roles/firewall). Only the
+# two-step attach summary below comes after it; a two-step attach's phase 1
+# skips it like every play after the seed, and phase 2 prints it.
+- name: Remaining by hand
+  hosts: nodes
+  gather_facts: false
+  pre_tasks:
+    - *preview_stop_guard
+  tasks:
+    - name: Remind the operator to lock down ssh
+      ansible.builtin.include_role:
+        name: firewall
+        tasks_from: ssh_open_reminder
+
 # Last, so it is the last thing a two-step attach's phase 1 prints. Skipped
 # on every other run.
 - name: Two-step attach summary

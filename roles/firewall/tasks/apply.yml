@@ -1,0 +1,330 @@
+---
+# The safe apply (README.md, "Applying the table safely"; the step numbers
+# are that section's). Included from tasks/nftables.yml when it decided the
+# table needs applying (step 1), never in check mode. Every host that includes
+# it runs these tasks in lockstep:
+#
+#   2. refuse if an earlier run's rollback is still pending, clean up the
+#      ones that are not, and schedule a restore of the last verified table,
+#      firewall_rollback_seconds out, in a transient systemd timer that
+#      outlives any ssh connection;
+#   3. apply the new table (restart cs-firewall), then with
+#      firewall_ssh_allow_this_run allow this run's source for a while;
+#   4. drop the ssh connection and open a FRESH one through the new table --
+#      the old one would survive any table (`ct state established`);
+#   5. cancel the restore on every host that came back, make sure it had not
+#      already fired, and record what was applied;
+#   6. fail every host that did not come back.
+#
+# From step 3 to step 6 no task fails a host by itself. ansible.cfg makes
+# every play any_errors_fatal, so one host failing early would stop the run
+# for every host before their restores were cancelled, and hosts whose new
+# table works would roll back with it. Each step registers its result, the
+# first problem a host meets is kept in `firewall_apply_problem`, and step 6
+# fails exactly the hosts that have one.
+
+- name: Prepare this apply's rollback
+  ansible.builtin.set_fact:
+    firewall_apply_problem: ""
+    firewall_apply_rolled_back: false
+    firewall_rollback_unit: "cs-firewall-rollback-{{ now(utc=true, fmt='%Y%m%dT%H%M%S') }}-{{ 99999 | random }}"
+    # The table a rollback puts back: the last verified apply's copy, else
+    # the snapshot of the running table taken in tasks/nftables.yml, else
+    # none -- no table of ours was running, and a rollback removes the new one.
+    firewall_rollback_source: >-
+      {{ (firewall_state_dir ~ '/applied.nft') if firewall_previous.stat.exists
+         else ((firewall_state_dir ~ '/adopted.nft') if firewall_adopted.stat.exists | default(false) else '') }}
+
+# Over the connection the run already has, which the old table let in. Step 4
+# (the verify) requires a different client port, which proves its connection is a new one.
+- name: Read the ssh connection the run is using before the apply
+  ansible.builtin.command:
+    argv: [printenv, SSH_CONNECTION]
+  register: firewall_ssh_before
+  changed_when: false
+
+# A pending one means an earlier run's apply was never verified, and it
+# replaces the running table within minutes whatever this run does: cancelling
+# it would keep a table nobody verified, and racing it could leave either.
+# roles/preflight refuses such a run before anything changes; this is the
+# second guard, on what tasks/nftables.yml read. Before step 3 on every host,
+# so failing here applies nothing anywhere.
+- name: Refuse while an earlier run's rollback is pending
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} has a firewall rollback from an earlier run
+      pending ({% for t in firewall_rollback_pending %}{{ t.unit | regex_replace('\.timer$', '') }},
+      fires within {{ [0, (((t.next | int) - (firewall_rollback_now | int)) / 1000000) | round(0, 'ceil') | int] | max }}
+      s{{ '' if loop.last else '; ' }}{% endfor %}): that run did not verify
+      its table. Wait for it to fire (or cancel it on the host with
+      systemctl stop {{ firewall_rollback_pending | map(attribute='unit') | join(' ') }}
+      once you have confirmed the running table lets you in), then re-run.
+      The new table was not applied.
+  when: firewall_rollback_pending | length > 0
+
+# What is left of rollbacks that fired, or were cancelled, in earlier runs: a
+# fired service stays loaded (RemainAfterExit). A timer still waiting to fire
+# is never touched here, whatever the guard above saw.
+- name: Clean up rollbacks earlier runs left behind
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      names=$(systemctl list-units --all --plain --no-legend --type=timer,service \
+                'cs-firewall-rollback-*' | awk '{print $1}' | sed -E 's/\.(timer|service)$//' | sort -u)
+      for name in $names; do
+        if [ "$(systemctl show -p SubState --value "$name.timer" 2>/dev/null || true)" = waiting ]; then
+          continue
+        fi
+        # Stopping one half of a transient timer/service pair can unload the
+        # other, so either may already be gone.
+        for unit in "$name.timer" "$name.service"; do
+          systemctl stop "$unit" 2>/dev/null || true
+          systemctl reset-failed "$unit" 2>/dev/null || true
+        done
+        echo "$name"
+      done
+  register: firewall_rollback_leftover
+  changed_when: firewall_rollback_leftover.stdout | trim | length > 0
+
+- name: Schedule the automatic rollback
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - "--unit={{ firewall_rollback_unit }}"
+      - --description=Restore the last verified ComputeStacks firewall table
+      - "--on-active={{ firewall_rollback_seconds }}s"
+      - --timer-property=AccuracySec=1s
+      # Stays loaded after it has run, so step 5 (the keep) can see that it did.
+      - --property=RemainAfterExit=yes
+      - /bin/sh
+      - "{{ firewall_state_dir }}/rollback.sh"
+      - "{{ firewall_state_dir }}/{{ firewall_rollback_unit }}.fired"
+      - "{{ firewall_rollback_source }}"
+  changed_when: true
+
+- name: Apply the new table
+  ansible.builtin.systemd_service:
+    name: "{{ firewall_service }}"
+    state: restarted
+  register: firewall_apply_restart
+  ignore_errors: true
+  ignore_unreachable: true
+
+- name: Note a failed apply
+  ansible.builtin.set_fact:
+    firewall_apply_problem: >-
+      restarting {{ firewall_service }} failed:
+      {{ firewall_apply_restart.msg | default('unreachable') | trim }}
+  when: firewall_apply_restart is failed or firewall_apply_restart is unreachable
+
+# The opt-in. preflight has already refused it outside playbooks/firewall.yml
+# (which sets firewall_ssh_allow_this_run_permitted); checked again here so
+# the role never fills the set behind a playbook that did not ask.
+- name: Allow this run's source ssh until the timeout
+  ansible.builtin.command:
+    argv:
+      - "{{ firewall_nft_bin }}"
+      - add
+      - element
+      - inet
+      - "{{ firewall_table }}"
+      - "{{ 'ssh_run6' if ':' in preflight_ssh_source else 'ssh_run4' }}"
+      - "{ {{ preflight_ssh_source }} timeout {{ firewall_ssh_run_allow_timeout }} }"
+  register: firewall_ssh_run_element
+  changed_when: true
+  ignore_errors: true
+  ignore_unreachable: true
+  when:
+    - firewall_apply_problem == ''
+    - firewall_ssh_allow_this_run | bool
+    - firewall_ssh_allow_this_run_permitted | default(false) | bool
+    - firewall_allow_ssh_from | length > 0
+
+- name: Note a failed temporary allowance
+  ansible.builtin.set_fact:
+    firewall_apply_problem: >-
+      adding {{ preflight_ssh_source | default('this run') }} to the temporary
+      ssh allowance failed: {{ firewall_ssh_run_element.stderr | default(firewall_ssh_run_element.msg | default('')) | trim }}
+  when:
+    - firewall_apply_problem == ''
+    - firewall_ssh_run_element is not skipped
+    - firewall_ssh_run_element is failed or firewall_ssh_run_element is unreachable
+
+- name: Say how long this run's source is allowed
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} accepts ssh from {{ preflight_ssh_source }}
+      until about {{ '%Y-%m-%d %H:%M' | strftime(now().timestamp() + (firewall_ssh_run_allow_seconds | int), utc=true) }}
+      UTC (firewall_ssh_run_allow_timeout {{ firewall_ssh_run_allow_timeout }}),
+      or until its next reboot or firewall apply. After that it accepts ssh only
+      from what firewall_allow_ssh_from and the peers cover, which this run did
+      NOT check: the verify below proves the new table loads, not that the
+      list lets anyone in.
+  vars:
+    firewall_ssh_run_allow_seconds: >-
+      {% set total = namespace(s=0) %}
+      {% for n, unit in firewall_ssh_run_allow_timeout | regex_findall('([0-9]+)([dhms])') %}
+      {% set total.s = total.s + (n | int) * {'d': 86400, 'h': 3600, 'm': 60, 's': 1}[unit] %}
+      {% endfor %}{{ total.s }}
+  when:
+    - firewall_apply_problem == ''
+    - firewall_ssh_run_element is not skipped
+
+# No `when`: meta tasks do not take one. Resetting a host whose apply already
+# failed costs nothing.
+- name: Drop the ssh connection the old table let in
+  ansible.builtin.meta: reset_connection
+
+- name: Verify a fresh ssh connection comes back through the new table
+  ansible.builtin.wait_for_connection:
+    timeout: "{{ firewall_verify_timeout }}"
+  register: firewall_verify_connect
+  ignore_errors: true
+  ignore_unreachable: true
+  when: firewall_apply_problem == ''
+
+- name: Note a failed verify
+  ansible.builtin.set_fact:
+    firewall_apply_problem: >-
+      no fresh ssh connection came back through the new table within
+      {{ firewall_verify_timeout }} s ({{ firewall_verify_connect.msg | default('unreachable') | trim }})
+  when:
+    - firewall_apply_problem == ''
+    - firewall_verify_connect is failed or firewall_verify_connect is unreachable
+
+- name: Read the ssh connection the verify came back on
+  ansible.builtin.command:
+    argv: [printenv, SSH_CONNECTION]
+  register: firewall_ssh_after
+  changed_when: false
+  ignore_errors: true
+  ignore_unreachable: true
+  when: firewall_apply_problem == ''
+
+- name: Note a verify that did not open a fresh connection
+  ansible.builtin.set_fact:
+    firewall_apply_problem: >-
+      {{ ('reading SSH_CONNECTION over the fresh connection failed: '
+          ~ (firewall_ssh_after.msg | default('unreachable') | trim))
+         if (firewall_ssh_after is failed or firewall_ssh_after is unreachable)
+         else ('the verify reused the connection opened before the apply (client port '
+               ~ firewall_ssh_port_after ~ '), so it proved nothing about the new table') }}
+  vars:
+    firewall_ssh_port_before: "{{ (firewall_ssh_before.stdout | default('')).split()[1] | default('') }}"
+    firewall_ssh_port_after: "{{ (firewall_ssh_after.stdout | default('')).split()[1] | default('') }}"
+  when:
+    - firewall_apply_problem == ''
+    - >-
+      firewall_ssh_after is failed or firewall_ssh_after is unreachable
+      or firewall_ssh_port_after == '' or firewall_ssh_port_after == firewall_ssh_port_before
+
+# Its own result decides nothing: a timer that has already fired is gone, and
+# stopping it fails. The check below looks at what actually happened.
+- name: Cancel the rollback on every host that came back
+  ansible.builtin.command:
+    argv: [systemctl, stop, "{{ firewall_rollback_unit }}.timer"]
+  changed_when: true
+  failed_when: false
+  ignore_unreachable: true
+  when: firewall_apply_problem == ''
+
+# RemainAfterExit keeps the service loaded once it has run, and the script's
+# first act is the marker file, so either one shows a rollback that fired
+# before the cancel -- the slowest host's verify holding every host up past
+# firewall_rollback_seconds. A timer still active means the cancel did not
+# take, and the restore would land after the record below.
+- name: Check the rollback is cancelled and never ran
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -uo pipefail
+      started=$(systemctl show -p ExecMainStartTimestampMonotonic --value '{{ firewall_rollback_unit }}.service' 2>/dev/null || true)
+      if [ -e '{{ firewall_state_dir }}/{{ firewall_rollback_unit }}.fired' ] \
+         || { [ -n "$started" ] && [ "$started" != 0 ]; }; then
+        echo fired
+      elif systemctl is-active --quiet '{{ firewall_rollback_unit }}.timer'; then
+        echo pending
+      else
+        echo cancelled
+      fi
+  register: firewall_rollback_state
+  changed_when: false
+  ignore_errors: true
+  ignore_unreachable: true
+  when: firewall_apply_problem == ''
+
+- name: Note a rollback that fired, or would still fire
+  ansible.builtin.set_fact:
+    firewall_apply_problem: >-
+      {% if firewall_rollback_state is failed or firewall_rollback_state is unreachable %}checking
+      the rollback ({{ firewall_rollback_unit }}) failed:
+      {{ firewall_rollback_state.msg | default('unreachable') | trim }}; it may
+      still fire{% elif firewall_rollback_state.stdout | trim == 'fired' %}the
+      rollback FIRED before it was cancelled, so {% if firewall_rollback_source | length > 0 %}{{ inventory_hostname }}
+      runs its previous firewall again and the new table is NOT applied{% else %}{{ inventory_hostname }}
+      now has NO firewall from this role: it had none before this apply, so
+      the rollback deleted table inet {{ firewall_table }}, moved
+      {{ firewall_config_file }} to {{ firewall_config_file }}.failed and
+      disabled {{ firewall_service }}{% endif %}. The run took longer than firewall_rollback_seconds ({{ firewall_rollback_seconds }})
+      between scheduling and cancelling it; raise it, or limit the run to fewer
+      hosts{% else %}the rollback timer {{ firewall_rollback_unit }}.timer is
+      still active after the cancel{% endif %}
+    firewall_apply_rolled_back: "{{ firewall_rollback_state.stdout | default('') | trim == 'fired' }}"
+  when:
+    - firewall_apply_problem == ''
+    - firewall_rollback_state.stdout | default('') | trim != 'cancelled'
+
+- name: Record the table as applied and verified
+  ansible.builtin.copy:
+    src: "{{ firewall_config_file }}"
+    dest: "{{ firewall_state_dir }}/applied.nft"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  when: firewall_apply_problem == ''
+
+- name: Record the applied table's checksum
+  ansible.builtin.copy:
+    content: "{{ firewall_table_now.stat.checksum }}\n"
+    dest: "{{ firewall_state_dir }}/applied.sha256"
+    owner: root
+    group: root
+    mode: "0600"
+  when: firewall_apply_problem == ''
+
+- name: Forget the adopted pre-existing table
+  ansible.builtin.file:
+    path: "{{ firewall_state_dir }}/adopted.nft"
+    state: absent
+  when: firewall_apply_problem == ''
+
+- name: Fail every host whose new table was not verified
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }}: {{ firewall_apply_problem }}.
+      {% if firewall_apply_rolled_back | bool %}
+      {% elif firewall_rollback_source | length > 0 %}
+      It restores its previous firewall ({{ firewall_rollback_source }}) by
+      itself within {{ firewall_rollback_seconds }} s of the apply, whatever
+      happens to this run.
+      {% else %}
+      It had no firewall from this role before this apply, so within
+      {{ firewall_rollback_seconds }} s of the apply it deletes the new table,
+      moves {{ firewall_config_file }} to {{ firewall_config_file }}.failed and
+      disables {{ firewall_service }}: it then has NO firewall from this role
+      until a run applies one.
+      {% endif %}
+      Hosts whose new table is not in place:
+      {{ firewall_apply_failed_hosts | join(', ') }}. Every other host this run
+      applied passed, and keeps its new table. Check that firewall_allow_ssh_from covers the
+      address preflight reported for each host, fix the inventory and run
+      again once the rollback has run.
+  vars:
+    firewall_apply_failed_hosts: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars)
+         | selectattr('firewall_apply_problem', 'defined')
+         | rejectattr('firewall_apply_problem', 'equalto', '')
+         | map(attribute='inventory_hostname') | list | sort }}
+  when: firewall_apply_problem != ''

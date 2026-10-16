@@ -303,12 +303,15 @@
     # the resumed converge notifies them all again. Kept equal to the
     # converged roles' handlers, so a handler added to one of them is
     # re-applied too; docker_tls' are left out (its restart must never run
-    # here; maintain_decide.yml's file check covers a lost one).
+    # here; maintain_decide.yml's file check covers a lost one), and so is
+    # the firewall's plain apply (its safe apply re-applies a lost one).
     - name: "Assert: a resumed converge re-applies every converged role's handler but docker_tls'"
       vars:
         mn_reapply_name: Re-apply what an interrupted converge may have left pending
         mn_reapply: "{{ (mn_nu_tasks | maintain_task_notifies)['maintain_converge_phase.yml: ' ~ mn_reapply_name] | default([]) }}"
-        mn_expected: "{{ mn_handlers | maintain_handler_refs(['docker_tls']) }}"
+        mn_expected: >-
+          {{ mn_handlers | maintain_handler_refs(['docker_tls'])
+             | reject('equalto', 'firewall : Apply the ComputeStacks firewall') | list }}
         mn_docker_restarters: "{{ mn_handlers | maintain_docker_restarts }}"
         mn_phase_steps: "{{ mn_phase | maintain_flattened_task_names }}"
         mn_task: "{{ mn_phase | selectattr('name', 'equalto', mn_reapply_name) | first }}"
@@ -317,6 +320,8 @@
           - mn_reapply | length > 0
           - mn_reapply | sort == mn_expected | sort
           - mn_reapply | select('search', '^docker_tls ') | list == []
+          # the firewall applies only through its safe apply (roles/firewall)
+          - "'firewall : Apply the ComputeStacks firewall' not in mn_reapply"
           # none of the re-applied handlers can restart dockerd, gated or
           # not (and the detector does see docker_tls' restart)
           - "'docker_tls : Restart docker' in mn_docker_restarters"

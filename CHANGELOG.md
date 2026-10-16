@@ -50,6 +50,57 @@
   times, 30s apart, when it placed no hold because the controller had not
   polled the agent with maintenance support yet (common right after an agent
   restart). Every other outcome fails as before.
+* **Backup servers' sshd is sized for the nodes' backup sweep.** Every
+  node fires its due backups on the same schedule (`@hourly` by default)
+  with 4 borg sessions each, and stock sshd (`MaxStartups 10:30:100`) drops
+  new connections at random past 10 unauthenticated handshakes, failing
+  backups. `backup_server` now writes
+  `/etc/ssh/sshd_config.d/40-computestacks-backup.conf` with `MaxStartups`
+  sized from the nodes in the server's site (never lowered by a run; raise it
+  with `backup_server_sshd_max_startups_min`), `LoginGraceTime 30` and, on
+  OpenSSH 9.8 and later,
+  the nodes' addresses in `PerSourcePenaltyExemptList`, and reloads sshd. An
+  `existing_env` backup server is left alone unless
+  `backup_server_sshd_manage: true`, which then requires a size and
+  `backup_server_sshd_penalty_exempt_extra`; see
+  `roles/backup_server/README.md`.
+* **`firewall_allow_ssh_from` no longer cuts a backup server off from its
+  nodes.** On a backup server it now also accepts ssh from every node.
+  Before, a narrowed list had to name every node by hand, or their backups
+  failed.
+* **`site.yml` and `add-region.yml` end with a "lock down ssh" TODO** naming
+  every host whose firewall still accepts ssh from anywhere
+  (`firewall_allow_ssh_from` unset). Narrow it and run `make lock-ssh`; see
+  the README's "Restricting ssh".
+* **`make lock-ssh ENV=<env>` locks ssh down as its own step.** It runs
+  `playbooks/firewall.yml` and refuses any host whose
+  `firewall_allow_ssh_from` is empty, then checks the controller's root ssh
+  to the nodes and the registry and the nodes' borg ssh to the backup
+  server. Preview it with `ARGS='--check --diff'`.
+* **With `firewall_allow_ssh_from` set, nodes and the registry accept ssh
+  from the controller** without its being listed, as a backup server
+  already accepts its nodes. The list now only needs the machines you run
+  ansible from.
+* **A run is refused, before anything changes, if a host's narrowed ssh
+  list does not cover the address the run reaches it from** (read on the
+  host, so NAT and bastions count). Every playbook checks it, including
+  `upgrade-docker.yml`. For one deliberate run from an uncovered address,
+  `make lock-ssh ARGS='-e firewall_ssh_allow_this_run=true'` allows it for
+  `firewall_ssh_run_allow_timeout` (1h) instead; only `firewall.yml` honors
+  that.
+* **Every firewall apply rolls itself back unless ansible can reconnect.**
+  The new table is applied with a restore scheduled
+  `firewall_rollback_seconds` (180) out, cancelled only once a fresh ssh
+  connection has come back through it; a host that does not come back
+  restores its previous table by itself and the run fails naming it. A table
+  is now applied when it differs from the last one applied and verified
+  (`/var/lib/cs-firewall/applied.sha256`), so the first run after this
+  change re-applies every host's table once, through the same check. A host
+  whose firewall is not running (`cs-firewall` stopped, or its table gone
+  from the kernel) has it applied again. A run is refused, before anything
+  changes, while a rollback an earlier run scheduled is still pending on a
+  host.
+
 ## October 14, 2026
 
 * **`make deps` reinstalls galaxy roles** (`--force`), so a changed pin

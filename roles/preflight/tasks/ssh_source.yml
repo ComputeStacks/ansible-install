@@ -1,0 +1,161 @@
+---
+# Will this host's firewall still let ansible in from here once roles/firewall
+# has applied it? (README.md, "Restricting ssh".)
+#
+# A narrowed `firewall_allow_ssh_from` closes ssh to every source it does not
+# cover the moment the table is applied, and the connection the run is using
+# survives that (`ct state established`), so the run itself would notice
+# nothing until its next connection -- a reboot in node_upgrade, a later play,
+# the next run. So, before any host is changed, each v2-built host (never an
+# existing_env one: its firewall is not re-rendered) whose list is non-empty
+# reads where this run reaches it from, and the run stops unless the host's
+# EFFECTIVE ssh accept set covers that address (filter_plugins/preflight_ssh.py
+# says what that set is). Read on the host, from sshd's own SSH_CONNECTION, so
+# a NAT, a jump host or a bastion in between is accounted for: what matters
+# is the address the host sees.
+#
+# Also here, because they are the same family and must stop the run just as
+# early: the opt-in that allows this run's source temporarily
+# (`firewall_ssh_allow_this_run`) is refused outside playbooks/firewall.yml,
+# `make lock-ssh` (`firewall_require_ssh_allowlist`) refuses a host whose
+# list is empty, and every v2 host is refused while a firewall rollback an
+# earlier run scheduled is still waiting to fire.
+#
+# Included from tasks/main.yml (site.yml, add-region.yml, firewall.yml) and
+# from upgrade-docker.yml's preflight play, whose node reboots open new
+# connections through the persistent table.
+
+# The temporary allowance lives in an nftables set that every apply and every
+# reboot empties. Only firewall.yml (`make lock-ssh`) applies the firewall and
+# nothing else, so only there does it last as long as the run needs it.
+- name: Refuse firewall_ssh_allow_this_run outside playbooks/firewall.yml
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (firewall_ssh_allow_this_run | default(false) | bool)
+        or (firewall_ssh_allow_this_run_permitted | default(false) | bool)
+    fail_msg: >-
+      {{ inventory_hostname }}: firewall_ssh_allow_this_run is honored only by
+      playbooks/firewall.yml (`make lock-ssh`). In this playbook a reboot or a
+      later firewall restart would drop the temporary allowance mid-run and
+      leave the run unable to reach the host. Remove it (drop the -e) and run
+      again, or lock ssh first with `make lock-ssh`. Nothing was changed.
+    quiet: true
+
+- name: Assert the temporary allowance's timeout is an nft duration
+  ansible.builtin.assert:
+    that:
+      - (firewall_ssh_run_allow_timeout | default('1h') | string) is match('^([0-9]+[dhms])+$')
+    fail_msg: >-
+      {{ inventory_hostname }}: firewall_ssh_run_allow_timeout
+      '{{ firewall_ssh_run_allow_timeout }}' is not an nft duration such as
+      1h, 30m or 1h30m. Nothing was changed.
+    quiet: true
+  when: firewall_ssh_allow_this_run | default(false) | bool
+
+- name: Require an ssh allowlist for make lock-ssh
+  ansible.builtin.assert:
+    that:
+      - preflight_ssh_allow_from | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }}: `make lock-ssh` locks ssh down to
+      firewall_allow_ssh_from, and it is empty here, so this host would keep
+      accepting ssh from anywhere. Set it, in group_vars or per host, to the
+      machines you run ansible from (a bastion, a CI runner); the controller
+      is added on the nodes and the registry, and every node on a backup
+      server, without being listed. Preview with
+      `make lock-ssh ARGS='--check --diff'`. Nothing was changed.
+    quiet: true
+  when:
+    - firewall_require_ssh_allowlist | default(false) | bool
+    - not (existing_env | default(false) | bool)
+
+# A rollback timer roles/firewall scheduled in an earlier run and that is
+# still waiting means that run never verified the table it applied. Nothing
+# can tell from here whether the running table lets anyone in, and the timer
+# will replace it within minutes whatever this run does, so the run waits for
+# it: never cancelled, never raced. Read-only, so check mode reads it too.
+- name: Refuse while an earlier run's firewall rollback is pending
+  when: not (existing_env | default(false) | bool)
+  block:
+    - name: Read the firewall rollback timers on the host
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -euo pipefail
+          timers=$(systemctl list-timers --all --no-legend --output=json 'cs-firewall-rollback-*')
+          printf '{"now": %s, "timers": %s}\n' "$(date +%s%6N)" "${timers:-[]}"
+      register: preflight_rollback_timers
+      changed_when: false
+      check_mode: false
+
+    - name: Assert no firewall rollback from an earlier run is pending
+      ansible.builtin.assert:
+        that:
+          - preflight_rollback_pending_now | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} has a firewall rollback from an earlier run
+          pending ({% for t in preflight_rollback_pending_now %}{{ t.unit }},
+          fires within {{ t.seconds }} s{{ '' if loop.last else '; ' }}{% endfor %}): that run did
+          not verify its table. Wait for it to fire (or cancel it on the host
+          with systemctl stop {{ preflight_rollback_pending_now
+          | map(attribute='unit') | map('regex_replace', '$', '.timer') | join(' ') }}
+          once you have confirmed the running table lets you in), then re-run.
+          Nothing was changed.
+        quiet: true
+      vars:
+        preflight_rollback_pending_now: "{{ preflight_rollback_timers.stdout | preflight_rollback_pending }}"
+
+- name: Check this run's ssh source against the allowlist
+  when:
+    - not (existing_env | default(false) | bool)
+    - preflight_ssh_allow_from | length > 0
+  block:
+    - name: Read the address this run reaches the host from
+      ansible.builtin.command:
+        argv: [printenv, SSH_CONNECTION]
+      register: preflight_ssh_connection_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Plain facts, so roles/firewall can read them later in the run.
+    - name: Record this run's ssh source
+      ansible.builtin.set_fact:
+        preflight_ssh_source: "{{ preflight_ssh_parsed.address }}"
+        preflight_ssh_source_port: "{{ preflight_ssh_parsed.port }}"
+      vars:
+        preflight_ssh_parsed: "{{ preflight_ssh_connection_raw.stdout | default('') | preflight_ssh_connection }}"
+
+    - name: Assert this run's ssh source is known
+      ansible.builtin.assert:
+        that:
+          - preflight_ssh_source | length > 0
+        fail_msg: >-
+          {{ inventory_hostname }} sets firewall_allow_ssh_from, but this run
+          could not tell where it reaches the host from (SSH_CONNECTION on the
+          host was '{{ preflight_ssh_connection_raw.stdout | default('') }}'),
+          so it cannot check the list still lets it in. Run over plain ssh.
+          Nothing was changed.
+        quiet: true
+
+    - name: Refuse a run the allowlist would lock out
+      ansible.builtin.assert:
+        that:
+          - preflight_ssh_source | preflight_ssh_covered(preflight_ssh_allow_from, preflight_ssh_also)
+        fail_msg: >-
+          {{ inventory_hostname }} sees this run coming from
+          {{ preflight_ssh_source }}, and its firewall_allow_ssh_from
+          ({{ preflight_ssh_allow_from | join(', ') }}) does not cover it{{
+          '' if preflight_ssh_unparsed | length == 0 else
+          ' (these entries are not an address or a network and were not counted: '
+          ~ preflight_ssh_unparsed | join(', ') ~ ')' }}. Once the table is
+          applied, ansible could not open another connection to this host from
+          here. Add {{ preflight_ssh_source }}, or its network, to the list, or
+          run from a machine the list covers. For one deliberate run from here,
+          `make lock-ssh ARGS='-e firewall_ssh_allow_this_run=true'` allows
+          this source for {{ firewall_ssh_run_allow_timeout | default('1h') }}
+          only. Nothing was changed.
+        success_msg: "{{ inventory_hostname }}: this run's source {{ preflight_ssh_source }} is allowed ssh"
+        quiet: true
+      when: not (firewall_ssh_allow_this_run | default(false) | bool)

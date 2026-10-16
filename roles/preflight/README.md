@@ -19,6 +19,7 @@ to a host.
 | `upgrade-docker.yml` | "Every targeted node is reachable" (`tasks_from: reachable`) | `node_upgrade_targets` |
 | `maintain-nodes.yml` | "Every targeted host is reachable" (`tasks_from: reachable`) | the nodes it maintains, the controller and their backup hosts |
 | `maintain-nodes.yml` | "Preflight validation" (and `tasks_from: attach` on an attach inventory) | the same hosts |
+| `upgrade-docker.yml` (`tasks_from: ssh_source`) | "Preflight every targeted node" | `node_upgrade_targets` |
 | `unseal.yml` | not run | — |
 
 The reachability play runs first in every playbook, with `gather_facts:
@@ -28,7 +29,9 @@ false`; the preflight play follows with `gather_facts: true` and
 `public_ipv6` and backup export checks (`preflight_verify_registries`,
 `preflight_check_app_domain_dns`, `preflight_check_node_storage`,
 `preflight_check_public_ipv6`, `preflight_check_backup_export`), none of
-which bear on a firewall change.
+which bear on a firewall change, and sets
+`firewall_ssh_allow_this_run_permitted`, the one place the
+[ssh source](#this-runs-ssh-source-tasksssh_sourceyml) opt-in is honored.
 
 `maintain-nodes.yml` turns off the load balancer DNS, data disk (it checks
 `ready` itself, as upgrade-docker.yml does) and controller image checks;
@@ -167,6 +170,11 @@ change nothing.
 - Every host's `hostname` (where defined), including nodes and shared hosts,
   is a single lowercase word — letters, digits, hyphens only, no dots, no
   uppercase (not an FQDN).
+- **This run's ssh source** is covered by each narrowed host's ssh accept
+  set, the ssh opt-in is used only where it is honored, `make lock-ssh`
+  leaves no host open to anywhere, and no firewall rollback from an earlier
+  run is pending — see
+  [below](#this-runs-ssh-source-tasksssh_sourceyml).
 - `secret_key_base` and `user_auth_secret` are defined, at least 128
   characters, and not the `CHANGEME` sample placeholders. **This role never
   generates these values** — they are immutable install inputs
@@ -202,6 +210,50 @@ change nothing.
   split-horizon control machine or records published after the converge. See
   below. Neither judges whether an address is publicly routable, so a
   private-addressed test environment passes.
+
+## This run's ssh source (`tasks/ssh_source.yml`)
+
+A narrowed `firewall_allow_ssh_from` locks out every source it does not cover
+as soon as roles/firewall applies the table, and the connection the run is
+using survives the apply, so nothing in the run would notice before its next
+connection. Included from `tasks/main.yml` (so `site.yml`, `add-region.yml`
+and `firewall.yml`) and from `upgrade-docker.yml`, whose reboots reconnect
+through the persistent table, it checks:
+
+- **`firewall_ssh_allow_this_run` is refused** unless the playbook sets
+  `firewall_ssh_allow_this_run_permitted` (only `firewall.yml` does). The
+  allowance it grants lives in an nftables set that every reboot and every
+  later apply empties, so anywhere else it would vanish mid-run. With the
+  opt-in, `firewall_ssh_run_allow_timeout` must be an nft duration (`1h`,
+  `30m`, `1h30m`).
+- **`make lock-ssh`** (`firewall_require_ssh_allowlist`) refuses every v2
+  host (not `existing_env`) whose `firewall_allow_ssh_from` is empty.
+- **The source.** On each v2 host whose list is non-empty, the run reads
+  `SSH_CONNECTION` on the host — the address the host really sees, after any
+  NAT, jump host or bastion — and records `preflight_ssh_source` (an
+  IPv4-mapped IPv6 address unwrapped to IPv4) and `preflight_ssh_source_port`
+  as facts; roles/firewall uses the source for the opt-in. Unless the opt-in
+  is on, the run stops if the host's **effective** ssh accept set does not
+  cover the source: the list, the peers the table adds (the controller's
+  `primary_ip` / `public_ip` on nodes and the registry, every node's on a
+  backup server), `firewall_extra_allowed_ipv4` / `_ipv6`, and loopback. The
+  tailnet accepts and `firewall_extra_input_rules` are not counted, so the
+  check can only refuse a run the table would let in, never the reverse. A
+  list entry that is not an address or a network is named in the message and
+  counts for nothing.
+- **A pending firewall rollback.** On every v2 host, list or no list, the run
+  reads `systemctl list-timers --all 'cs-firewall-rollback-*'` and stops if
+  a rollback roles/firewall scheduled in an earlier run is still waiting to
+  fire: that run never verified its table, and the timer replaces it
+  whatever this run does. The message names the unit, when it fires, and
+  how to cancel it once you have confirmed the running table lets you in.
+
+Every message names the host, the source and the fix, and ends "Nothing was
+changed." The decisions are `filter_plugins/preflight_ssh.py`
+(`preflight_ssh_connection`, `preflight_ssh_covered`,
+`preflight_ssh_unparsed`, python `ipaddress`; `preflight_rollback_pending`); `tests/firewall_ssh_source.yml`
+proves them, and renders every host's real table to prove that the filter and
+the template agree on which sources are accepted.
 
 ## The load balancer DNS checks
 
@@ -328,10 +380,15 @@ not earn.
 | `preflight_registry_credentials_hint` | see `defaults/main.yml` | What a `401` from the token endpoint means, as an operator-facing sentence. |
 | `preflight_image_pin_hint` | see `defaults/main.yml` | Why a floating controller tag is refused, and how to override, as an operator-facing sentence. |
 | `preflight_registry_manifest_accept` | OCI + docker, index + manifest | `Accept` header for the manifest read. Which type comes back depends on how the image was built and pushed. |
+| `preflight_ssh_allow_from` | `firewall_allow_ssh_from` | The list the ssh source check reads. |
+| `preflight_ssh_peer_hosts` / `preflight_ssh_also` | derived | The peers roles/firewall accepts ssh from on this host, and every address besides the list the check counts. Read only on the executing host. |
+| `preflight_ssh_unparsed` | derived | List entries that are not an address or a network. |
 
-Every derived variable above references `hostvars`, so every assertion that
-reads one is `run_once` and evaluates in the executing host's own context —
-the only place such a variable is valid (docs/contracts.md §Variable scope).
+Every derived variable above references `hostvars`, so each is read only in
+the executing host's own context — the only place such a variable is valid
+(docs/contracts.md rule 10, §Variable scope): most in `run_once` assertions,
+and `preflight_ssh_peer_hosts` / `preflight_ssh_also` in the per-host ssh
+source check, for the host it runs on.
 The single exception is `hostvars[h].cs_app_domain`, which is safe to read
 cross-host by construction and is why that name exists (§Variable scope
 again); this role still only reads it `run_once`.
@@ -346,7 +403,10 @@ the retired `controller_wildcard_domain`, `dns_driver`, `powerdns_name` and
 `existing_env`, `secret_key_base`, `user_auth_secret`, `tailscale_authkey`,
 `tailscale_enabled`, `cs_registry_logins` / `cs_controller_registry` (composed
 in `playbooks/group_vars/all/registries.yml`), `controller_image_repo`,
-`controller_image_tag`, `controller_image_allow_floating_tag`.
+`controller_image_tag`, `controller_image_allow_floating_tag`,
+`firewall_allow_ssh_from`, `firewall_extra_allowed_ipv4` / `_ipv6`,
+`firewall_require_ssh_allowlist`, `firewall_ssh_allow_this_run`,
+`firewall_ssh_allow_this_run_permitted`, `firewall_ssh_run_allow_timeout`.
 
 ## Failure messages
 

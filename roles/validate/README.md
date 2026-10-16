@@ -10,6 +10,7 @@ leg would otherwise be silent.
 | `add-region.yml` | "Validate the new region" | `controller:nodes` |
 | `upgrade-docker.yml` (`include_role`, after each node's upgrade) | "Upgrade docker, one node at a time" | `node_upgrade_targets`, one node at a time (`serial: 1`) |
 | `maintain-nodes.yml` (`include_role`, after each node's maintenance) | "Maintain the nodes, one at a time" | `maintain_node_targets`, one node at a time (`serial: 1`) |
+| `firewall.yml` (`tasks_from: ssh`, `tasks_from: borg`) | "Validate the ssh paths a narrowed firewall keeps open" | `nodes:registry` whose own ssh (`ssh`) or whose backup server's ssh (`borg`) is narrowed by `firewall_allow_ssh_from`; not in check mode |
 | `unseal.yml` | not run | — |
 
 **Attach mode:** runs on the controller and the new node only, and asserts no

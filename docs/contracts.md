@@ -82,13 +82,19 @@ hosts and backup hosts; unset everywhere means the single site called
    NEVER `flush ruleset` (it destroys docker's and the agent's `cs_agent`
    tables; docker does not recover until dockerd restarts). No forward-hook
    drop chain. Do not create v1's `expose-ports`/`container-inbound` chains.
+   A rendered table is applied only through `roles/firewall`'s safe apply
+   (`tasks/apply.yml`: a scheduled rollback, cancelled only once a fresh ssh
+   connection has come back through the new table), never a bare restart;
+   the attach-mode appends, which only add accepts, are the one exception.
 8. **SECRET_KEY_BASE / USER_AUTH_SECRET are immutable inputs.** Never
    generated, never re-rendered on existing controllers. Preflight fails on a
    blank or short one.
 9. **Attach mode (`existing_env: true`):** the inventory is a PARTIAL view of
    the fleet — no shared-host file is rendered whole. Additive fragments and
-   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script
-   and NEW per-az `file_sd` fragment files. `/etc/default/computestacks` is
+   lineinfile appends only. Whole-file exceptions: the v2 `cstacks` script,
+   NEW per-az `file_sd` fragment files, and — only when the operator sets
+   `backup_server_sshd_manage` — the backup server's sshd drop-in, rendered
+   from operator-supplied fleet values. `/etc/default/computestacks` is
    append-only, always. See §Attach mode.
 10. **A variable defined in `playbooks/group_vars/` that references
     `hostvars` may only be read on the host currently executing.** NEVER
@@ -141,7 +147,8 @@ could plausibly write have exactly one owner:
 
 * the `ops` docker network → `metrics`;
 * `/etc/update-motd.d/50-computestacks` → `common`;
-* `/etc/modules-load.d/cs-firewall.conf` → `firewall`;
+* `/etc/modules-load.d/cs-firewall.conf` and `/var/lib/cs-firewall/` →
+  `firewall`;
   `/etc/modules-load.d/cs-node.conf` → `node_kernel` (separate files, no
   sharing);
 * on nodes, the `docker_data_device` filesystem, its fstab entries (the data

@@ -468,6 +468,13 @@
   when: hostvars[item].ansible_port is defined
   run_once: true
 
+# Before anything is changed, and on every entry point that applies or
+# reboots through the firewall: a narrowed firewall_allow_ssh_from that does
+# not cover the address this run comes from would lock the run out at its
+# next connection. tasks/ssh_source.yml says why each check is there.
+- name: Check this run can still reach each host once its firewall is applied
+  ansible.builtin.include_tasks: ssh_source.yml
+
 - name: Assert secret_key_base is present, long enough, and not the placeholder
   ansible.builtin.assert:
     that:

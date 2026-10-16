@@ -196,7 +196,8 @@ Exactly this, and nothing else:
 | controller | firewall: one accept per new node address | **v1-built host:** v1's own `lineinfile` idiom against `/usr/local/bin/cs-recover_iptables`, plus the same rules made live. **v2-built host:** one `add rule` line per address appended to `/etc/nftables.d/cs-peers.nft`, which `cs-firewall.service` loads straight after `cs-static.nft`. Neither path re-renders anything. |
 | metrics | `/etc/prometheus/{node_exporter,cadvisor,haproxy}/<az>.yml` | New per-AZ fragment files, in v1's exact paths, on **the metrics host in the new node's site** and no other. Prometheus picks them up within one scrape interval; nothing is restarted. The other whole-file exception. |
 | metrics | firewall: the same node-address appends | |
-| backup | the `cstacks` account's `~/.ssh` | On **the backup server in the new node's site**. The repository path is only `stat`ed, never chowned — v1's value is `/mnt`, and 0770 on it would clear world traverse for every unrelated process reading a filesystem mounted underneath. The existing account's shell and shadow entry are left alone. v2's borg is **not** installed over the server's existing one. |
+| backup | the `cstacks` account's `~/.ssh` | On **the backup server in the new node's site**. The repository path is only `stat`ed, never chowned — v1's value is `/mnt`, and 0770 on it would clear world traverse for every unrelated process reading a filesystem mounted underneath. The existing account's shell and shadow entry are left alone. v2's borg is **not** installed over the server's existing one, and its sshd is not resized. |
+| backup | `/etc/ssh/sshd_config.d/40-computestacks-backup.conf` | **Only with `backup_server_sshd_manage: true`** on the server — a whole-file exception, rendered from operator-supplied fleet values (`backup_server_sshd_fleet_node_count` or `backup_server_sshd_max_startups_min`, and `backup_server_sshd_penalty_exempt_extra`), which the run requires, never from the partial inventory alone. `MaxStartups` is never lowered. See roles/backup_server/README.md. |
 | backup | one `authorized_keys` entry for the new node | Added by `cs_agent`, commented with the node's hostname. |
 | backup | firewall: the same node-address appends | Latent on most v1 servers — their script's `default_allow_ssh` accepts 22 from anywhere, so borg already reaches them. On a server built with `default_allow_ssh: false` the appends are what keeps the new node's backups from failing silently. |
 | controller | the new az's `public_ipv6` as a `public` LoadBalancerAddr, through `cstacks runner` | Only for a new node that sets `public_ipv6`, after the seed apply, on the new az's load balancer only. Additive; an address already on it under another role fails the run before the apply. |
@@ -364,6 +365,16 @@ is not this repository's to assert. To re-run just the checks later, use
 
 Then confirm in the portal that the new Location/Region/Node exist and the
 node reports capacity.
+
+Finally, **lock down ssh** on the new node if the inventory does not already
+set `firewall_allow_ssh_from`: its firewall accepts ssh from anywhere until
+then, and the run ends by naming it. Set the list to the machines you run
+ansible from (the controller is accepted on the node without being listed),
+then `make lock-ssh ENV=<name> ARGS='--check --diff'` and
+`make lock-ssh ENV=<name>`. On an attach inventory it re-renders the new
+node's table only; the existing hosts get the same node-address appends as
+this run, and their own ssh rules are not touched. See the README's
+"Restricting ssh".
 
 ## What attach mode is not
 

@@ -305,3 +305,28 @@ preflight_lb_records_managed: >-
 # asked must return the same delegation; more than a few adds time without
 # adding much (a TLD parent has thirteen, all serving the same data).
 preflight_app_zone_delegation_servers: 3
+
+# --- this run's ssh source (tasks/ssh_source.yml) ---------------------------
+# What the check reads, on the host it runs for. roles/firewall's own defaults
+# are not in scope here, so each `default` restates its default (empty).
+preflight_ssh_allow_from: "{{ firewall_allow_ssh_from | default([]) }}"
+
+# The peers roles/firewall accepts ssh from on this host without their being
+# listed, the same groups templates/cs-static.nft.j2 renders them for: the
+# controller on nodes and the registry, every node on a backup server.
+# Inventory vars only, read on the executing host (docs/contracts.md rule 10).
+preflight_ssh_peer_hosts: >-
+  {{ ((groups['controller'] | default([])) if ('nodes' in group_names or 'registry' in group_names) else [])
+     + ((groups['nodes'] | default([])) if 'backup' in group_names else []) }}
+
+# Every other address or network the host accepts ssh from: the peers above
+# and the blanket operator accepts. Loopback is the filter's own.
+preflight_ssh_also: >-
+  {{ ((firewall_extra_allowed_ipv4 | default([])) + (firewall_extra_allowed_ipv6 | default([]))
+      + (preflight_ssh_peer_hosts | map('extract', hostvars) | map(attribute='primary_ip', default='') | list)
+      + (preflight_ssh_peer_hosts | map('extract', hostvars) | map(attribute='public_ip', default='') | list))
+     | reject('equalto', '') | list }}
+
+# Entries of the list the check cannot read as an address or a network; named
+# in the refusal, so a hostname in the list is not a mystery.
+preflight_ssh_unparsed: "{{ preflight_ssh_allow_from | preflight_ssh_unparsed }}"

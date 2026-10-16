@@ -12,8 +12,10 @@ additive append path for existing shared hosts in attach mode.
 | `add-region.yml` (`tasks_from: append`) | "Existing controller — firewall appends only" | `controller` |
 | `add-region.yml` (`tasks_from: append`) | "Existing backup server — account, repository path, firewall appends" | `backup` |
 | `firewall.yml` | "Host firewalls" | every host not `existing_env`; on an attach inventory, `nodes` only |
+| `firewall.yml` via `make lock-ssh` (`-e firewall_require_ssh_allowlist=true`) | "Host firewalls" | the same hosts; preflight first refuses any of them whose `firewall_allow_ssh_from` is empty |
 | `firewall.yml` (`tasks_from: append`) | "Existing shared hosts — new node address appends only" | `controller`, `metrics`, `backup` that are `existing_env` |
 | `maintain-nodes.yml` (via `node_upgrade` `tasks_from: maintain`) | "Maintain the nodes, one at a time" | `maintain_node_targets` (live nodes, inside a maintenance hold) |
+| `site.yml`, `add-region.yml` (`tasks_from: ssh_open_reminder`) | "Remaining by hand" | `all`; `nodes` (the new node) — prints which hosts still accept ssh from anywhere |
 | `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
 **Attach mode:** the nftables table is never rendered on an `existing_env`
@@ -21,6 +23,10 @@ host; `tasks_from: append` adds the new node's addresses to whichever firewall
 the host already runs (see [attach mode](#attach-mode-existing_env-true)).
 `playbooks/firewall.yml` re-runs exactly these two paths on their own, for an
 inventory change only this role reads (README.md, "Changing the firewall").
+Every apply of the table is a [safe apply](#applying-the-table-safely): an
+automatic rollback, cancelled only once a fresh ssh connection comes back
+through the new table. The attach-mode appends keep the plain restart: they
+only ever add accepts.
 **Requires:** `community.general` (`modprobe`). Tailnet membership is read
 from inventory, so it does not depend on `tailscale` having run.
 
@@ -39,6 +45,10 @@ applied by a role-owned oneshot unit. Also owns
 | `/etc/systemd/system/cs-firewall.service` | Oneshot `nft -f <file>`, `RemainAfterExit`, `WantedBy=sysinit.target`, ordered `Before=network-pre.target`. No `ExecStop`. |
 | `/etc/modules-load.d/cs-firewall.conf` | `nf_tables`, `nf_conntrack`, `xt_physdev` (also `modprobe`d immediately). |
 | `/etc/nftables.d/cs-peers.nft` | Attach mode on a v2-built host only: additive peer rules, loaded by the same unit after the table (a missing file is a no-op). |
+| `/var/lib/cs-firewall/rollback.sh` | The restore the safe apply schedules. |
+| `/var/lib/cs-firewall/applied.nft`, `applied.sha256` | A copy and the sha256 of the last table that was applied **and verified**. A table on disk with a different sha256 is applied on the next run. |
+| `/var/lib/cs-firewall/adopted.nft` | Only on a host converged before the safe apply existed, until its first verified apply: a snapshot of the table it is running (`nft list table`), kept as the rollback target. |
+| `cs-firewall-rollback-<time>-<n>.timer` / `.service` | Transient (`systemd-run`), one per apply; cancelled once the apply is verified. A `<unit>.fired` marker beside the state files means one ran. |
 
 The distro `nftables.service` is **stopped and disabled** (see below).
 
@@ -92,7 +102,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | — | any | `ct state established,related` (and `invalid` dropped) | — |
 | icmp / icmpv6 sane types | icmp | anywhere | — |
 | 546 | udp | `fe80::/64` destination (DHCPv6/SLAAC client) | — |
-| `ssh` (22, or the host's `ssh_port`) | tcp | anywhere, or `firewall_allow_ssh_from` | 1, 4, 11, 19 |
+| `ssh` (22, or the host's `ssh_port`) | tcp | anywhere, or `firewall_allow_ssh_from` plus the `ssh_run4` / `ssh_run6` sets (see [restricting ssh](#restricting-ssh)) | 1, 4, 11, 19 |
 | `node_exporter` (9100) | tcp | metrics addresses **+ `iifname tailscale0`** when both this host and the metrics host route over the tailnet | 9 |
 | 41641 | udp | anywhere — whenever this host is on the tailnet, access-only or not | — (peer WireGuard) |
 | `100.64.0.0/10`, `fd7a:115c:a1e0::/48` | any | **dropped** unless it arrives on `tailscale0` — only when this host is on the tailnet | — (anti-spoof) |
@@ -103,6 +113,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 |---|---|---|---|
 | `tenant_http` (80), `tenant_https` (443) | tcp | anywhere | 13 |
 | `tenant_port_begin`–`tenant_port_end` (10000–50000) | tcp + udp | anywhere | 13 |
+| `ssh` (22, or the node's `ssh_port`) | tcp | with `firewall_allow_ssh_from` set: controller addresses **+ `iifname tailscale0`** when both route over the tailnet (open to anywhere otherwise, above) | 4 |
 | `docker_tls` (2376) | tcp | controller addresses | 2 |
 | `agent_http` (8500) | tcp | see [the 8500 rule](#the-8500-rule) | 3, 8 |
 | `cadvisor` (8080), `haproxy_stats` (81) | tcp | metrics addresses **+ `iifname tailscale0`** when both this node and the metrics host route over the tailnet | 9 |
@@ -130,7 +141,7 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | `controller_http` (80) | tcp | anywhere — ACME HTTP-01 webroot (`acme_web` runs here) | — |
 | `tenant_https` (443) | tcp | anywhere | 18 |
 | `tenant_port_begin`–`tenant_port_end` | tcp | anywhere | 18 |
-| `ssh` (22, or the host's `ssh_port`) | tcp | covered by the global ssh accept (controller `DockerSSH`) | 19 |
+| `ssh` (22, or the host's `ssh_port`) | tcp | controller `DockerSSH`: the global accept when ssh is open; with `firewall_allow_ssh_from` set, controller addresses **+ `iifname tailscale0`** when both route over the tailnet | 19 |
 
 ### nameservers
 
@@ -142,7 +153,109 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 
 ### backup
 
-Nothing beyond the global ssh accept — nodes reach borg over ssh only (row 11).
+Nodes reach borg over ssh only. With `firewall_allow_ssh_from` empty the
+global ssh accept (row 11) covers them; with it set, ssh is also accepted from
+every node, pairwise, so narrowing ssh never stops a backup.
+
+## Restricting ssh
+
+`firewall_allow_ssh_from` empty (the default) accepts ssh from anywhere. Set,
+it accepts ssh from each listed address or network, and the table adds the
+peers that ssh in at runtime so the list never has to name them:
+
+* on nodes and the registry, the controller (root ssh for volumes, haproxy
+  certificate deploys and load balancer reloads; `DockerSSH` on the
+  registry);
+* on a backup server, every node (borg).
+
+Both go through `accept_from()`, so each also gets the `iifname "tailscale0"`
+accept when both ends route over the tailnet — which accepts ssh from **any**
+tailnet peer on that host, the trust boundary every other tailnet accept here
+already draws.
+
+With the list set, the table also carries two empty named sets, `ssh_run4`
+and `ssh_run6` (`flags timeout`), each with an ssh accept beside the list's.
+They hold this run's own source when the operator opts in with
+`firewall_ssh_allow_this_run: true`, honored by `playbooks/firewall.yml` only
+(`make lock-ssh ARGS='-e firewall_ssh_allow_this_run=true'`; roles/preflight
+refuses it elsewhere): right after the apply the role adds the address
+preflight read from `SSH_CONNECTION`, with `firewall_ssh_run_allow_timeout`
+(1h), and prints when it expires. Nothing writes the sets to disk, so the
+entry is gone at its timeout, the next apply or the next reboot.
+
+Without the opt-in, roles/preflight refuses the run before anything changes
+if the address it reaches a host from is not in that host's effective accept
+set — the list, the peers above, `firewall_extra_allowed_ipv4` / `_ipv6` and
+loopback (`roles/preflight/README.md`, "This run's ssh source"). The tailnet
+accepts are not counted, so a run over the tailnet must list its tailnet
+address or `100.64.0.0/10`.
+
+## Applying the table safely
+
+The table is applied by restarting `cs-firewall.service`, and the ssh
+connection ansible is using survives that whatever the new table says
+(`ct state established`). So a successful restart proves nothing about the
+next connection, and `tasks/apply.yml` applies every table like this:
+
+1. **When.** The table on disk is applied when its sha256 differs from
+   `/var/lib/cs-firewall/applied.sha256` (the last table applied *and
+   verified*), when there is no record yet — once, on a host converged before
+   this existed — when the unit changed, or when the firewall is not
+   running: `cs-firewall` not active, or `inet cs_static` not in the kernel.
+   Not on the template's `changed`: a run that stopped between rendering and
+   applying would otherwise leave an unapplied table on disk that the next
+   run sees as unchanged and the next reboot loads unverified. Check mode
+   applies nothing and schedules nothing; it says which hosts would be
+   applied, and why.
+2. **Rollback.** A transient `systemd-run` timer, `firewall_rollback_seconds`
+   (180) out, runs `rollback.sh`: copy `applied.nft` back and restart
+   `cs-firewall`. On a host converged before this existed it restores
+   `adopted.nft`, a snapshot of the table it was running, taken from the
+   kernel on each run until the first verified apply (never the file on
+   disk, which an interrupted run may have rewritten without applying). On a host that had no table of
+   ours at all, it deletes the new table, moves `cs-static.nft` aside to
+   `cs-static.nft.failed` and disables the unit: the host then has **no**
+   firewall, as before the run. The timer outlives any ssh connection. A
+   rollback timer an earlier run left pending is never cancelled: that run
+   did not verify its table, and the timer replaces it whatever this run
+   does. roles/preflight refuses the run while one is pending, and this step
+   refuses it again, naming the unit and when it fires; `adopted.nft` is not
+   rewritten while one is. What fired or cancelled rollbacks left behind is
+   cleaned up.
+3. **Apply**, then with the opt-in add this run's source to `ssh_run4/6`.
+4. **Verify.** `meta: reset_connection`, then `wait_for_connection`
+   (`firewall_verify_timeout`, 60 s): a new ssh connection from the control
+   machine, through the new table. The run then reads `SSH_CONNECTION` over it
+   and requires a client port different from the one before the apply, which
+   proves the connection really is new and not the old one reused.
+5. **Keep.** Every host that came back has its timer cancelled, and the
+   run confirms the rollback had not already fired (the service's
+   `ExecMainStartTimestampMonotonic` and the `.fired` marker) and that the
+   timer is no longer active. Then it records `applied.nft` and
+   `applied.sha256`.
+6. **Fail** the hosts that did not come back, each with its reason and the
+   list of every such host: within `firewall_rollback_seconds` of its apply
+   each restores its previous firewall by itself, or, on a host that had no
+   table of ours before, deletes the new one, moves the file to
+   `cs-static.nft.failed` and disables the unit, leaving it with **no**
+   firewall from this role.
+
+From step 3 to step 6 no task fails a host on its own. `ansible.cfg` makes
+every play `any_errors_fatal`, so one host failing early would stop the run
+before the others had cancelled their rollbacks, and tables that work would
+be rolled back with the one that does not.
+
+The hosts run these steps in lockstep, so the cancel waits for the slowest
+verify. A host whose ssh is blocked takes about 50 s per attempt
+(`ConnectionAttempts=5`), so allow `firewall_rollback_seconds` well past
+twice `firewall_verify_timeout`; with more hosts than `forks` (20) blocked at
+once, raise it further. A rollback that fires before its cancel is reported
+as a failure of its own: the host then runs its previous table, or no table
+of ours if it had none before.
+
+`tasks/v2_append.yml` (attach mode) keeps the plain "Apply the ComputeStacks
+firewall" handler: it only ever adds accepts to a running table, which cannot
+lock anyone out.
 
 ## Pairwise accepts: address path and tailnet path
 
@@ -268,10 +381,13 @@ accepted on `tailscale0`. Both stay correct under `--limit`, where un-targeted
 hosts have no facts at all — a fact-derived version would silently downgrade a
 tailnet-only 8500 rule into a public-address one.
 
-The ssh accept is not tailnet-aware. Tailscale SSH (`--ssh` in
+The operator's ssh accept is not tailnet-aware. Tailscale SSH (`--ssh` in
 `tailscale_extra_args`) is answered by `tailscaled` itself and needs no rule
-here; plain `ssh` to a host's tailnet address reaches sshd only when
-`firewall_allow_ssh_from` is empty or lists `100.64.0.0/10`.
+here; plain `ssh` to a host's tailnet address reaches sshd when
+`firewall_allow_ssh_from` is empty or lists `100.64.0.0/10`, and also —
+with the list set — on a node or the registry whose controller routes over
+the tailnet, and on a backup server any of whose nodes does, through the peer
+accepts' tailnet half ([restricting ssh](#restricting-ssh)).
 
 Consequence to know: `iifname "tailscale0" … accept` trusts *any* tailnet peer
 for that port, not just the specific peer host. The tailnet is the control
@@ -375,13 +491,24 @@ Current status of every port in the matrix that is served by a container:
 | `firewall_tailscale_udp_port` | `41641` | WireGuard peer port; see note below. |
 | `firewall_container_interfaces` | `["br-*", "docker0"]` | This host's own container bridges. |
 | `firewall_container_ports` | `agent_http` on nodes, `node_exporter` on metrics | Ports accepted from those bridges. |
-| `firewall_allow_ssh_from` | `[]` (anywhere) | Restrict ssh to these sources. |
+| `firewall_allow_ssh_from` | `[]` (anywhere) | Restrict ssh to these sources: the machines you run ansible from. The controller (nodes, registry) and every node (backup) are added. |
+| `firewall_require_ssh_allowlist` | `false` | Set by `make lock-ssh`: preflight refuses any targeted host whose list is empty. |
+| `firewall_ssh_allow_this_run` | `false` | Opt-in, `firewall.yml` only: skip preflight's source refusal and allow this run's source through `ssh_run4/6` for `firewall_ssh_run_allow_timeout`. |
+| `firewall_ssh_run_allow_timeout` | `1h` | How long that allowance lasts (an nft duration). |
+| `firewall_rollback_seconds` | `180` | When an unverified apply rolls itself back. |
+| `firewall_verify_timeout` | `60` | How long the verify waits for a fresh ssh connection. |
+| `firewall_state_dir` | `/var/lib/cs-firewall` | The last verified table, its sha256, the rollback script. |
 | `firewall_extra_allowed_ipv4` / `_ipv6` | `[]` | v1 parity (`extra_allowed_ipv4_addresses`). |
 | `firewall_extra_input_rules` | `[]` | Raw nft statements appended to the input chain. |
 | `firewall_log_dropped` | `false` | Rate-limited log before the drop policy. |
 | `firewall_v1_script` | `/usr/local/bin/cs-recover_iptables` | Attach-mode target. |
 
+`firewall_ssh_allow_this_run_permitted` is not an operator setting: it is a
+play var of `playbooks/firewall.yml` marking the one playbook where the
+opt-in is honored.
+
 Consumed, not owned: `cs_ports`, `primary_ip`, `public_ip`, `existing_env`,
+`preflight_ssh_source` (set by roles/preflight),
 `tailscale_enabled`, `tailscale_access_only`, `group_names`, `groups`.
 
 `firewall_tailscale_udp_port` is deliberately **not** in `cs_ports`: that file

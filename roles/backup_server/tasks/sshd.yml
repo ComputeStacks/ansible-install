@@ -1,0 +1,65 @@
+---
+# sshd sized for the backup sweep (defaults/main.yml, "sshd"). A drop-in, so
+# sshd_config itself is left to the distribution and to roles/common. sshd
+# reads the first value it meets and the drop-ins are included at the top of
+# sshd_config, so these settings win over it.
+
+# Attach mode sees only the nodes being attached; sizing from them would
+# shrink a live server's limits to one node's worth on every attach.
+- name: Gate - attach mode sizes sshd from the whole fleet
+  ansible.builtin.assert:
+    that:
+      - (backup_server_sshd_fleet_node_count | default(0) | int) > 0
+        or (backup_server_sshd_max_startups_min | int) > 0
+      - backup_server_sshd_penalty_exempt_extra | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} is an existing backup server (existing_env) with
+      backup_server_sshd_manage set, but an attach inventory lists only the nodes
+      being attached. Set backup_server_sshd_fleet_node_count to the number of
+      nodes it serves (or backup_server_sshd_max_startups_min outright) and
+      backup_server_sshd_penalty_exempt_extra to their subnets, or drop
+      backup_server_sshd_manage. Nothing was changed.
+    quiet: true
+  when: existing_env | default(false) | bool
+
+# A run never lowers MaxStartups: the start already on the server is a floor
+# (defaults/main.yml). Absent on the first run.
+- name: Read the drop-in already on the server
+  ansible.builtin.slurp:
+    src: "{{ backup_server_sshd_dropin }}"
+  register: backup_server_sshd_current
+  failed_when: false
+  check_mode: false
+
+- name: Record the MaxStartups start already on the server
+  ansible.builtin.set_fact:
+    backup_server_sshd_current_start: >-
+      {{ (backup_server_sshd_current.content | default('') | b64decode)
+         | regex_search('(?m)^MaxStartups\s+([0-9]+)', '\1')
+         | default(['0'], true) | first | int }}
+
+- name: Read the sshd version
+  ansible.builtin.command:
+    argv: [ssh, -V]
+  register: backup_server_ssh_version
+  changed_when: false
+  check_mode: false
+
+- name: Record whether sshd has PerSourcePenalties (OpenSSH 9.8 and later)
+  ansible.builtin.set_fact:
+    backup_server_sshd_has_penalties: >-
+      {{ (backup_server_ssh_version.stderr ~ backup_server_ssh_version.stdout)
+         | regex_search('OpenSSH_([0-9]+)\.([0-9]+)', '\1', '\2')
+         | default(['0', '0'], true) | map('int') | list >= [9, 8] }}
+
+- name: Write the backup sweep's sshd settings
+  ansible.builtin.template:
+    src: sshd-backup.conf.j2
+    dest: "{{ backup_server_sshd_dropin }}"
+    owner: root
+    group: root
+    mode: "0644"
+    # The drop-in on its own is a complete config for `sshd -t`, so an
+    # option this sshd does not know never reaches the running server.
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd for the backup sweep settings

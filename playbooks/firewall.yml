@@ -3,6 +3,8 @@
 #
 #   make firewall ENV=<env>
 #   make firewall ENV=<env> ARGS='--check --diff'     # show the table diff first
+#   make lock-ssh ENV=<env>                           # the same, and refuse any
+#                                                     # host left open to anywhere
 #   ansible-playbook -i inventories/<env> playbooks/firewall.yml --ask-vault-pass
 #
 # For an inventory change that only the firewall reads — `firewall_allow_ssh_from`,
@@ -51,11 +53,23 @@
 #
 # LOCKOUT. The new table is applied by restarting cs-firewall.service, and the
 # connection in progress survives it (`ct state established`); the NEXT one
-# does not. Before narrowing `firewall_allow_ssh_from`, make sure it still
-# covers the machine you run ansible from and every host that ssh's in at
-# runtime (the controller, to the nodes and the registry; the nodes, to the
-# backup server). Moving sshd itself is not done here -- see the README,
-# "Changing the firewall".
+# would not. Three things stand between a narrowed `firewall_allow_ssh_from`
+# and a lockout (README.md, "Restricting ssh"):
+#
+#   * preflight refuses the run, before any change, on a host whose list does
+#     not cover the address this run reaches it from;
+#   * roles/firewall applies each table with an automatic rollback, and
+#     cancels it only once a fresh ssh connection has come back through it;
+#   * with `-e firewall_ssh_allow_this_run=true` -- honored here and nowhere
+#     else, which is what `firewall_ssh_allow_this_run_permitted` below marks
+#     -- the refusal is skipped and this run's source is allowed for
+#     `firewall_ssh_run_allow_timeout` instead.
+#
+# The controller (on nodes and the registry) and every node (on a backup
+# server) are accepted without being listed. When any host's ssh is narrowed,
+# the run ends with roles/validate's `ssh` and `borg` checks, which prove those
+# two runtime paths still work. Moving sshd itself is not done here -- see the
+# README, "Changing the firewall".
 
 # First, before anything gathers facts: ansible drops an unreachable host
 # from the play and carries on without it, so this fails the run instead,
@@ -78,6 +92,7 @@
   gather_facts: true
   any_errors_fatal: true
   vars:
+    firewall_ssh_allow_this_run_permitted: true
     preflight_verify_registries: false
     preflight_check_app_domain_dns: false
     preflight_check_node_storage: false
@@ -97,6 +112,8 @@
 - name: Host firewalls
   hosts: all
   gather_facts: false
+  vars:
+    firewall_ssh_allow_this_run_permitted: true
   tasks:
     - name: Render and apply the ComputeStacks nftables table
       ansible.builtin.include_role:
@@ -119,3 +136,35 @@
         name: firewall
         tasks_from: append
       when: existing_env | default(false) | bool
+
+# The runtime ssh paths a narrowed firewall must keep open, checked after the
+# tables are in place: the controller's root ssh to each node and the
+# registry, each node's borg ssh to its site's backup server (roles/validate
+# `ssh` and `borg`). Each runs only where the ssh it crosses is narrowed; both
+# change nothing. Not any_errors_fatal, like every validate play, so one
+# failure does not hide the others. A `--limit` that leaves out the nodes
+# skips the borg check, which runs from them.
+- name: Validate the ssh paths a narrowed firewall keeps open
+  hosts: nodes:registry
+  gather_facts: false
+  any_errors_fatal: false
+  tasks:
+    - name: Assert the controller can reach this host over root ssh
+      ansible.builtin.include_role:
+        name: validate
+        tasks_from: ssh
+      when:
+        - not ansible_check_mode
+        - not (existing_env | default(false) | bool)
+        - firewall_allow_ssh_from | default([]) | length > 0
+
+    - name: Assert this node can reach its backup server as the borg user
+      ansible.builtin.include_role:
+        name: validate
+        tasks_from: borg
+      when:
+        - not ansible_check_mode
+        - "'nodes' in group_names"
+        - not (existing_env | default(false) | bool)
+        - cs_site in cs_site_backup_hosts
+        - hostvars[cs_site_backup_hosts[cs_site]].firewall_allow_ssh_from | default([]) | length > 0

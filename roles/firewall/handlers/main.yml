@@ -5,7 +5,9 @@
 
 - name: Apply the ComputeStacks firewall
   # Re-runs ExecStart (`nft -f`). The unit has no ExecStop, so a restart never
-  # leaves the host without a table for even an instant.
+  # leaves the host without a table for even an instant. Only the attach-mode
+  # appends (tasks/v2_append.yml) notify it: they only add accepts. A new
+  # cs-static.nft is applied through tasks/apply.yml instead, with a rollback.
   ansible.builtin.systemd_service:
     name: "{{ firewall_service }}"
     state: restarted

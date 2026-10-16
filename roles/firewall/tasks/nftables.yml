@@ -55,6 +55,109 @@
     group: root
     mode: "0755"
 
+# --- safe apply (tasks/apply.yml) -------------------------------------------
+# The table is applied when what is on disk differs from what was last applied
+# AND verified -- recorded in `firewall_state_dir` -- when the unit changed,
+# or when the firewall is not running: the unit not active, or our table not
+# in the kernel. Not on `changed`: a run that stopped between rendering the
+# file and applying it would leave a new file on disk that the next run sees
+# as unchanged, and the host would load it unverified at its next reboot.
+
+- name: Ensure the firewall state directory exists
+  ansible.builtin.file:
+    path: "{{ firewall_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the firewall rollback script
+  ansible.builtin.template:
+    src: cs-firewall-rollback.sh.j2
+    dest: "{{ firewall_state_dir }}/rollback.sh"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Look for the last verified table
+  ansible.builtin.stat:
+    path: "{{ firewall_state_dir }}/applied.nft"
+    get_checksum: false
+  register: firewall_previous
+
+# One still waiting means an earlier run never verified its apply, and it
+# restores adopted.nft when it fires, so nothing below rewrites that file
+# while one is. roles/preflight refuses such a run before this, and
+# tasks/apply.yml refuses it again; the same read, the same decision as
+# preflight's `preflight_rollback_pending` filter.
+- name: Read the firewall rollback timers
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      timers=$(systemctl list-timers --all --no-legend --output=json 'cs-firewall-rollback-*')
+      printf '{"now": %s, "timers": %s}\n' "$(date +%s%6N)" "${timers:-[]}"
+  register: firewall_rollback_timers
+  changed_when: false
+  check_mode: false
+
+# A timer with a next elapse is still waiting; one without has fired or was
+# cancelled. `firewall_rollback_now` is the host's clock, in usec, as `next`.
+- name: Note any rollback still waiting to fire
+  ansible.builtin.set_fact:
+    firewall_rollback_pending: "{{ (firewall_rollback_timers.stdout | from_json).timers | selectattr('next') | list }}"
+    firewall_rollback_now: "{{ (firewall_rollback_timers.stdout | from_json).now }}"
+
+# A host converged before the safe apply existed runs a table with no record
+# of it. Until the first verified apply records one, a rollback restores the
+# table that is RUNNING now -- snapshotted from the kernel, not copied from
+# disk: a run that stopped after rendering a new file but before applying it
+# leaves a file on disk that never ran, and restoring that one could be the
+# very lockout the rollback is for. Re-taken on every run until then, and
+# removed when nothing of ours is running (a rollback then deletes the table).
+# Read on every run: whether the table is in the kernel at all also decides
+# whether it needs applying, below.
+- name: Snapshot the running table to roll back to
+  ansible.builtin.command:
+    argv: ["{{ firewall_nft_bin }}", list, table, inet, "{{ firewall_table }}"]
+  register: firewall_running_table
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Keep the running table to roll back to
+  ansible.builtin.copy:
+    dest: "{{ firewall_state_dir }}/adopted.nft"
+    content: |
+      table inet {{ firewall_table }}
+      delete table inet {{ firewall_table }}
+      {{ firewall_running_table.stdout }}
+    owner: root
+    group: root
+    mode: "0600"
+  # Check mode creates no state directory to write into.
+  when:
+    - not ansible_check_mode
+    - not firewall_previous.stat.exists
+    - firewall_rollback_pending | length == 0
+    - firewall_running_table.rc | default(1) == 0
+
+- name: Forget a snapshot when no table of ours is running
+  ansible.builtin.file:
+    path: "{{ firewall_state_dir }}/adopted.nft"
+    state: absent
+  when:
+    - not ansible_check_mode
+    - not firewall_previous.stat.exists
+    - firewall_rollback_pending | length == 0
+    - firewall_running_table.rc | default(1) != 0
+
+- name: Look for a snapshot of the running table
+  ansible.builtin.stat:
+    path: "{{ firewall_state_dir }}/adopted.nft"
+    get_checksum: false
+  register: firewall_adopted
+
 - name: Render the ComputeStacks nftables table
   ansible.builtin.template:
     src: cs-static.nft.j2
@@ -63,7 +166,7 @@
     group: root
     mode: "0644"
     validate: "{{ (firewall_nft_bin ~ ' --check --file %s') if (firewall_validate_config | bool) else omit }}"
-  notify: Apply the ComputeStacks firewall
+  register: firewall_table_render
 
 - name: Install the ComputeStacks firewall unit
   ansible.builtin.template:
@@ -72,13 +175,70 @@
     owner: root
     group: root
     mode: "0644"
-  notify:
-    - Reload systemd for the ComputeStacks firewall
-    - Apply the ComputeStacks firewall
+  register: firewall_unit_render
 
-- name: Enable and start the ComputeStacks firewall
+# Enable only: the first start, like every later restart, is an apply, and
+# goes through tasks/apply.yml.
+- name: Enable the ComputeStacks firewall
   ansible.builtin.systemd_service:
     name: "{{ firewall_service }}"
     enabled: true
-    state: started
     daemon_reload: true
+
+- name: Read the record of the last verified apply
+  ansible.builtin.slurp:
+    src: "{{ firewall_state_dir }}/applied.sha256"
+  register: firewall_applied_record
+  failed_when: false
+
+- name: Checksum the table on disk
+  ansible.builtin.stat:
+    path: "{{ firewall_config_file }}"
+    checksum_algorithm: sha256
+  register: firewall_table_now
+
+# Read-only, so check mode reads it too and reports a stopped firewall.
+- name: Check the firewall unit is active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, "{{ firewall_service }}"]
+  register: firewall_service_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether the table needs applying
+  ansible.builtin.set_fact:
+    firewall_apply_reasons: >-
+      {{ ([firewall_unit_file ~ ' changed'] if firewall_unit_render is changed else [])
+         + ([firewall_config_file ~ ' is not the table last applied and verified']
+            if ((ansible_check_mode and firewall_table_render is changed)
+                or not (firewall_table_now.stat.exists | default(false))
+                or ((firewall_applied_record.content | default('') | b64decode | trim)
+                    != (firewall_table_now.stat.checksum | default(''))))
+            else [])
+         + ([firewall_service ~ ' is not active ('
+             ~ (firewall_service_state.stdout | default('') | trim | default('unknown', true)) ~ ')']
+            if firewall_service_state.rc | default(1) != 0 else [])
+         + (['table inet ' ~ firewall_table ~ ' is not loaded']
+            if firewall_running_table.rc | default(1) != 0 else []) }}
+
+- name: Note whether the table needs applying
+  ansible.builtin.set_fact:
+    firewall_apply_needed: "{{ firewall_apply_reasons | length > 0 }}"
+
+- name: Report the apply check mode would make
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} would apply {{ firewall_config_file }}
+      ({{ firewall_apply_reasons | join('; ') }}), with an automatic rollback
+      after {{ firewall_rollback_seconds }} s unless a fresh ssh connection
+      comes back through it.
+  when:
+    - ansible_check_mode
+    - firewall_apply_needed | bool
+
+- name: Apply the table, verify it and keep it or roll it back
+  ansible.builtin.include_tasks: apply.yml
+  when:
+    - not ansible_check_mode
+    - firewall_apply_needed | bool

@@ -1,0 +1,8 @@
+---
+# Ubuntu's sshd is socket-activated: when ssh.service is not running, the
+# next connection starts it with the new settings, so there is nothing to
+# reload. A reload leaves open sessions (a running backup) alone.
+- name: Reload sshd for the backup sweep settings
+  ansible.builtin.command:
+    argv: [systemctl, try-reload-or-restart, ssh.service]
+  changed_when: true
