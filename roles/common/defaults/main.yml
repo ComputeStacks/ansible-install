@@ -57,3 +57,8 @@ common_motd_keep:
 # Where diverted fragments live. Outside /etc/update-motd.d, so run-parts
 # never sees them.
 common_motd_disabled_dir: /etc/update-motd.d.disabled
+
+# One full OS upgrade (apt dist-upgrade) on a host's first build only; see
+# tasks/packages.yml. False skips it.
+common_initial_upgrade: true
+common_initial_upgrade_marker: /var/lib/computestacks/initial-os-upgrade

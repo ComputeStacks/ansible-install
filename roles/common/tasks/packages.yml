@@ -10,3 +10,53 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+# One full OS upgrade on a host's FIRST build, so a new host does not start
+# life on the image's stale packages (and an operator does not have to run
+# apt by hand afterwards). Ongoing updates are unattended-upgrades' job, and
+# on a live node maintain-nodes' (inside its hold) -- never a rerun of this
+# role. A host counts as already built when it has the marker below or the
+# ComputeStacks MOTD (tasks/motd.yml, written on every earlier converge), so
+# hosts built before this task existed, every live node, and every
+# maintain-nodes converge skip it. Packages held with `apt-mark hold` (docker,
+# once installed) stay held: a dist-upgrade respects holds. The reboot check
+# (tasks/reboot_if_required.yml) runs right after, so a new kernel is booted
+# before docker is installed.
+- name: Check whether this host already had its initial OS upgrade
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ common_initial_upgrade_marker }}"
+    - /etc/update-motd.d/50-computestacks
+  register: common_initial_upgrade_stat
+  when:
+    - common_initial_upgrade | bool
+    - not (existing_env | default(false))
+
+- name: Apply every pending OS update on the first build
+  when:
+    - common_initial_upgrade | bool
+    - not (existing_env | default(false))
+    - common_initial_upgrade_stat.results | selectattr('stat.exists') | list | length == 0
+  block:
+    - name: Upgrade all packages
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Ensure the marker directory exists
+      ansible.builtin.file:
+        path: "{{ common_initial_upgrade_marker | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Record that the initial OS upgrade ran
+      ansible.builtin.copy:
+        dest: "{{ common_initial_upgrade_marker }}"
+        content: "Initial OS upgrade applied by roles/common.\n"
+        owner: root
+        group: root
+        mode: "0644"

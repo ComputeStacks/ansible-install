@@ -21,6 +21,13 @@ itself when a node has a reboot pending.
 
 - Removes packages that conflict with the rest of the stack (`ufw`, `ntp`),
   installs a curated base package set (`common_packages`).
+- Applies every pending OS update (`apt` dist-upgrade) on a host's **first
+  build only**, so a new host does not keep the image's stale packages.
+  "Already built" means the marker `common_initial_upgrade_marker` or the
+  ComputeStacks MOTD exists, so reruns, hosts built before this existed, live
+  nodes and `maintain-nodes.yml` never run it; ongoing updates stay with
+  unattended-upgrades and `maintain-nodes`. Never on `existing_env` hosts.
+  Held packages (docker) stay held. The reboot check below follows it.
 - Reboots the host when `/var/run/reboot-required` exists (a kernel/module
   update pulled in by package install), unless `common_allow_reboot` is set
   false or the host is flagged `existing_env: true` — attach mode must never
@@ -78,6 +85,8 @@ itself when a node has a reboot pending.
 |---|---|---|
 | `common_packages` | see `defaults/main.yml` | Base package set installed on every host. |
 | `common_conflicting_packages` | `[ufw, ntp]` | Packages removed before install. |
+| `common_initial_upgrade` | `true` | One full OS upgrade on a host's first build. |
+| `common_initial_upgrade_marker` | `/var/lib/computestacks/initial-os-upgrade` | Written after that upgrade; its presence (or the MOTD's) skips it. |
 | `common_allow_reboot` | `true` | Reboot when `/var/run/reboot-required` exists. Never fires on `existing_env` hosts or on live nodes regardless of this setting. |
 
 Consumed, not owned: `hostname`, `primary_ip`, `region`, `az` (node inventory
@@ -90,7 +99,6 @@ kernel's `/lib/modules`, after which `modprobe` of `br_netfilter`/`nf_nat`/etc.
 fails and dockerd cannot build its firewall chains. The reboot check therefore
 lives here, before docker is ever installed, rather than in the docker roles,
 and it is targeted and convergent: reboot only when `/var/run/reboot-required`
-actually exists, never on `existing_env` hosts, never on a live node. `common`
-has no distinct "apt upgrade" task (package install uses `state: present`, not
-`state: latest`), so the check runs immediately after package install rather
-than after a separate upgrade step.
+actually exists, never on `existing_env` hosts, never on a live node. It runs
+immediately after package install and the first-build OS upgrade, so the
+kernel either of them pulled in is booted before docker is installed.

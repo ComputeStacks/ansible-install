@@ -2,6 +2,13 @@
 
 ## November 25, 2026
 
+* **A new host gets its OS updates on its first build.** `site.yml` and
+  `add-region.yml` now run one full package upgrade (docker stays held)
+  before the reboot check, so a fresh host no longer needs a separate
+  `apt upgrade` by hand. Hosts that were already built, live nodes and
+  `maintain-nodes` are never upgraded by it; set
+  `common_initial_upgrade: false` to skip it.
+
 * **Docker 29.10.1.** The pins move to docker-ce 29.10.1, containerd.io
   2.4.2 and buildx 0.39.1, for containerd's image-pull fixes (including a
   crafted-layer disk exhaustion), a dockerd hang under API load, a fluentd
