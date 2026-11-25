@@ -377,9 +377,11 @@ apply has committed by then, so a failure there says so instead of the
 block's "nothing was written"; a re-run converges both. In check mode
 neither runs.
 
-Adding the row does not make the controller re-check the domain; it checks
-when the load balancer's domain changes on save or the load balancer is
-deployed. That makes a race on every run that adds an address: the apply
+Before ComputeStacks controller v9.8.8, adding the row does not make the
+controller re-check the domain; it checks when the load balancer's domain
+changes on save or the load balancer is deployed. (From v9.8.8 adding a
+public or proxy address queues a check too, but asynchronously, so the
+synchronous re-check below still decides what validation reads next.) That makes a race on every run that adds an address: the apply
 saves the load balancer, whose `after_save` queues `ValidateDomainWorker`,
 and the worker can resolve the apex before this later step adds the IPv6
 address — on a fresh az as much as an existing one. If the apex has an
