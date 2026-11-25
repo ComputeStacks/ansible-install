@@ -198,6 +198,7 @@
         docker_packages_state: present
         docker_daemon_options: {}
         docker_install_compose: false
+        docker_install_compose_plugin: false   # nothing runs compose; unpinned and unheld, it drifted per build
         docker_users: []
     - docker_config
   post_tasks:

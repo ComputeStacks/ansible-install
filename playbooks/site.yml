@@ -170,6 +170,7 @@
         docker_packages_state: present
         docker_daemon_options: {}       # daemon.json is docker_config's
         docker_install_compose: false   # the standalone binary is unused
+        docker_install_compose_plugin: false   # nothing runs compose; unpinned and unheld, it drifted per build
         docker_users: []                # no non-root docker access anywhere
     - docker_config
   post_tasks:

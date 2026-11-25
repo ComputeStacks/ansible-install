@@ -118,17 +118,17 @@ nginx_image: "nginx:1.30.4"
 # `ansible_facts['distribution_release']`, which is `resolute` on 26.04.
 #
 # Pinned to the newest version each package had in
-# dists/resolute/stable/binary-amd64 on 2026-08-28. Every package carries its
+# dists/resolute/stable/binary-amd64 on 2026-11-25. Every package carries its
 # own version scheme -- containerd.io and the buildx plugin do NOT share
 # docker-ce's -- so one shared version variable would be wrong, and each
 # entry is pinned on its own. playbooks/site.yml and add-region.yml strip
 # `=<version>` before `apt-mark hold`, so pinned entries hold correctly.
 docker_apt_packages:
-  - "docker-ce=5:29.9.0-1~ubuntu.26.04~resolute"
-  - "docker-ce-cli=5:29.9.0-1~ubuntu.26.04~resolute"
-  - "docker-ce-rootless-extras=5:29.9.0-1~ubuntu.26.04~resolute"
-  - "containerd.io=2.4.1-2~ubuntu.26.04~resolute"
-  - "docker-buildx-plugin=0.38.0-1~ubuntu.26.04~resolute"
+  - "docker-ce=5:29.10.1-1~ubuntu.26.04~resolute"
+  - "docker-ce-cli=5:29.10.1-1~ubuntu.26.04~resolute"
+  - "docker-ce-rootless-extras=5:29.10.1-1~ubuntu.26.04~resolute"
+  - "containerd.io=2.4.2-4~ubuntu.26.04~resolute"
+  - "docker-buildx-plugin=0.39.1-1~ubuntu.26.04~resolute"
 
 # node_exporter is the distro package on every host (the plan keeps it that
 # way), installed and held by roles/node_exporter. Empty means "whatever

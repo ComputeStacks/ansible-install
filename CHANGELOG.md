@@ -2,6 +2,15 @@
 
 ## November 25, 2026
 
+* **Docker 29.10.1.** The pins move to docker-ce 29.10.1, containerd.io
+  2.4.2 and buildx 0.39.1, for containerd's image-pull fixes (including a
+  crafted-layer disk exhaustion), a dockerd hang under API load, a fluentd
+  log-driver panic and a `docker cp` read-only bind-mount escape. New nodes
+  install it; live nodes take it with `make upgrade-docker ENV=<env>` in a
+  maintenance window.
+  New builds no longer install `docker-compose-plugin`: nothing uses it,
+  and it was installed unpinned and never held. Existing hosts keep theirs.
+
 * **maintain-nodes reads each node's agent token hash from the controller
   once less.** The converge reuses the hash the pre-hold check read moments
   before, saving one `cstacks runner` call (about 20 s) per node. The
