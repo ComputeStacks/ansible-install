@@ -2,6 +2,13 @@
 
 ## November 25, 2026
 
+* **cs-agent 3.6.0** (was 3.5.0): changelog pages carry the node's
+  `control.db` `instance_id`, so the controller resets its cursor when a
+  node's database is replaced, and backups that start in the same second no
+  longer collide on the container name (see the cs-agent CHANGELOG). New
+  nodes install it, and `make maintain-nodes` upgrades live nodes to it
+  inside the hold.
+
 * **A shared tmux configuration on every host.** `/etc/tmux.conf` turns on
   the mouse, 50 000 lines of scrollback and drag-to-copy into your local
   clipboard over SSH (OSC 52; your terminal must allow it, as Windows
