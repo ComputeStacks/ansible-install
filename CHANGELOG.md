@@ -16,7 +16,8 @@
   install it; live nodes take it with `make upgrade-docker ENV=<env>` in a
   maintenance window.
   New builds no longer install `docker-compose-plugin`: nothing uses it,
-  and it was installed unpinned and never held. Existing hosts keep theirs.
+  and it came in unpinned and never held (docker-ce-cli recommends it, so
+  an apt pin at priority -1 keeps it out). Existing hosts keep theirs.
 
 * **maintain-nodes reads each node's agent token hash from the controller
   once less.** The converge reuses the hash the pre-hold check read moments

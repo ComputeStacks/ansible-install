@@ -151,6 +151,21 @@
         tasks_from: clear_stale_dropin
       when: "'nodes' in group_names"
 
+    # docker-ce-cli RECOMMENDS docker-compose-plugin, so apt installs it with
+    # the pinned packages even with the role's compose switches off. Nothing
+    # runs compose, and it would come in unpinned and unheld. A -1 priority
+    # keeps apt from ever installing it; a host that already has it keeps it.
+    - name: Keep apt from installing docker-compose-plugin
+      ansible.builtin.copy:
+        dest: /etc/apt/preferences.d/no-docker-compose-plugin
+        content: |
+          Package: docker-compose-plugin
+          Pin: release *
+          Pin-Priority: -1
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Release the docker apt holds before installing
       ansible.builtin.dpkg_selections:
         name: "{{ item | regex_replace('=.*$', '') }}"
@@ -170,7 +185,7 @@
         docker_packages_state: present
         docker_daemon_options: {}       # daemon.json is docker_config's
         docker_install_compose: false   # the standalone binary is unused
-        docker_install_compose_plugin: false   # nothing runs compose; unpinned and unheld, it drifted per build
+        docker_install_compose_plugin: false   # see the apt pin above
         docker_users: []                # no non-root docker access anywhere
     - docker_config
   post_tasks:
