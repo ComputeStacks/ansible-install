@@ -120,8 +120,20 @@
   ansible.builtin.include_tasks: read_token_hash.yml
   tags: [enroll]
 
+# maintain-nodes read this node's hash moments ago, in its pre-hold check
+# (tasks/immutable_check.yml); reuse that one read instead of booting the
+# controller's Rails again. Nothing between that check and here writes the
+# Node row. Any other caller has no handed-over hash and reads it fresh.
 - name: Fetch this node's admin token hash from the controller
   ansible.builtin.include_tasks: enroll.yml
+  when: cs_agent_prehold_token_hash | default('') | length == 0
+  tags: [enroll]
+
+- name: Reuse the admin token hash maintain-nodes' pre-hold check read
+  ansible.builtin.set_fact:
+    cs_agent_admin_token_hash: "{{ cs_agent_prehold_token_hash }}"
+    cs_agent_prehold_token_hash: ""
+  when: cs_agent_prehold_token_hash | default('') | length > 0
   tags: [enroll]
 
 # no_log because agent.yml carries `backups.key` (the borg repository

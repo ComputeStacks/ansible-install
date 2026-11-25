@@ -1,5 +1,12 @@
 # Changelog
 
+## November 25, 2026
+
+* **maintain-nodes reads each node's agent token hash from the controller
+  once less.** The converge reuses the hash the pre-hold check read moments
+  before, saving one `cstacks runner` call (about 20 s) per node. The
+  fleet-wide preflight and the per-node pre-hold check still each read it.
+
 ## October 16, 2026
 
 * **Node alerts name their node, and the disk-space alerts work.**

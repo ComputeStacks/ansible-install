@@ -82,6 +82,9 @@ Three things are different or worth knowing there:
 * **Enrollment is a read.** For an enrolled node the controller returns the
   hash the node already has, `agent.yml` is unchanged, and nothing is
   restarted for it.
+  Under `maintain-nodes.yml` the converge reuses the hash the pre-hold
+  immutable-key check read moments earlier rather than querying the
+  controller a second time.
 
 Everything a converge of this role does OFF the node, in any playbook:
 

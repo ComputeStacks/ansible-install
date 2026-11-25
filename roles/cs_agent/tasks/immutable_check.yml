@@ -37,6 +37,14 @@
 - name: Fetch this node's admin token hash from the controller
   ansible.builtin.include_tasks: enroll.yml
 
+# Hand the hash to this run's converge of the role (tasks/main.yml), which
+# would otherwise read the same row again (~20 s of `cstacks runner` boot per
+# node). Taken here, right before the node's hold, and consumed once; the
+# fleet-wide preflight's earlier value is overwritten by this per-node check.
+- name: Keep the controller's admin token hash for this run's converge
+  ansible.builtin.set_fact:
+    cs_agent_prehold_token_hash: "{{ cs_agent_admin_token_hash }}"
+
 - name: Compare the immutable agent.yml keys with what this role would render
   ansible.builtin.set_fact:
     cs_agent_immutable_problems: >-
