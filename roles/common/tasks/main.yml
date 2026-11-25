@@ -29,6 +29,15 @@
     group: root
     mode: "0644"
 
+- name: Install the shared tmux configuration
+  ansible.builtin.copy:
+    src: tmux.conf
+    dest: /etc/tmux.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_tmux_config | bool
+
 - name: Render the ComputeStacks MOTD
   ansible.builtin.import_tasks: motd.yml
 

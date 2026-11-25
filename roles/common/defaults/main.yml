@@ -35,6 +35,11 @@ common_packages:
   - python3-docker
   - python3-openssl
 
+# Install the shared /etc/tmux.conf (files/tmux.conf): mouse, 50k lines of
+# scrollback, drag-to-copy into the local clipboard over SSH (OSC 52), no
+# plugins. Users can still layer ~/.tmux.conf on top.
+common_tmux_config: true
+
 # Packages that conflict with our stack (ufw fights the nftables firewall
 # role; ntp fights chrony) and are removed if present.
 common_conflicting_packages:

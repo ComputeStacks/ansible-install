@@ -2,6 +2,13 @@
 
 ## November 25, 2026
 
+* **A shared tmux configuration on every host.** `/etc/tmux.conf` turns on
+  the mouse, 50 000 lines of scrollback and drag-to-copy into your local
+  clipboard over SSH (OSC 52; your terminal must allow it, as Windows
+  Terminal, iTerm2 and most modern terminals do), with the hostname in the
+  status bar. No plugins. Your own `~/.tmux.conf` still applies on top; set
+  `common_tmux_config: false` to skip it.
+
 * **A new host gets its OS updates on its first build.** `site.yml` and
   `add-region.yml` now run one full package upgrade (docker stays held)
   before the reboot check, so a fresh host no longer needs a separate

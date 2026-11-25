@@ -1,8 +1,8 @@
 # common
 
 Base system convergence for every host: packages, a reboot when one is
-pending, sshd hardening, chrony, unattended-upgrades, the MOTD fragment and
-root's SSH directory. Sole owner of `/etc/update-motd.d/50-computestacks`
+pending, sshd hardening, chrony, unattended-upgrades, the shared tmux config,
+the MOTD fragment and root's SSH directory. Sole owner of `/etc/update-motd.d/50-computestacks`
 (docs/contracts.md §Ownership).
 
 | Runs in | Play | Hosts |
@@ -48,6 +48,13 @@ itself when a node has a reboot pending.
 - Ensures `chrony` is installed, enabled, and running.
 - Installs and enables `unattended-upgrades` (periodic + unattended apt
   upgrades on).
+- Installs a shared `/etc/tmux.conf` (`files/tmux.conf`, no plugins): mouse
+  on, 50 000 lines of scrollback, vi copy mode, drag or double-click to copy
+  into the operator's local clipboard through SSH (OSC 52, so no `xclip` on
+  the host), `|`/`-` to split in the current directory, and the hostname in
+  the status bar. `escape-time` is 50 ms: quick for vim, and long enough that
+  Windows Terminal's replies split by SSH latency don't leak into the pane.
+  tmux reads `~/.tmux.conf` after it, so personal settings still apply.
 - Renders `/etc/update-motd.d/50-computestacks` (executable script) from
   **inventory vars only** — never gathered facts — so a fragment rendered
   under `--limit` still shows every region a shared host serves:
@@ -87,6 +94,7 @@ itself when a node has a reboot pending.
 | `common_conflicting_packages` | `[ufw, ntp]` | Packages removed before install. |
 | `common_initial_upgrade` | `true` | One full OS upgrade on a host's first build. |
 | `common_initial_upgrade_marker` | `/var/lib/computestacks/initial-os-upgrade` | Written after that upgrade; its presence (or the MOTD's) skips it. |
+| `common_tmux_config` | `true` | Install the shared `/etc/tmux.conf`. |
 | `common_allow_reboot` | `true` | Reboot when `/var/run/reboot-required` exists. Never fires on `existing_env` hosts or on live nodes regardless of this setting. |
 
 Consumed, not owned: `hostname`, `primary_ip`, `region`, `az` (node inventory
