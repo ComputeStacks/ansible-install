@@ -9,6 +9,23 @@
   status bar. No plugins. Your own `~/.tmux.conf` still applies on top; set
   `common_tmux_config: false` to skip it.
 
+* **The seed re-checks a load balancer's domain after adding its IPv6
+  address, and says how far a two-step attach got.** The controller checked
+  the domain when the apply saved the load balancer, which could be before
+  the seed added its `public_ipv6`, leaving it INVALID for an address it
+  holds. The seed now runs that check again, synchronously, for each load
+  balancer it just added an address to, and prints
+  a `VALIDATE|<az>|<yes, no or error>|...` line; a `no` or `error` is reported with the
+  remedy, never a failure. With `controller_seed_lb_le: true` that check may
+  order a Let's Encrypt certificate. Phase 2 of a two-step attach now prints
+  `controller_seed_applying_sha256=<hex>` before the apply and
+  `controller_seed_applied_sha256=<hex>` once everything has committed, and
+  a failure after the apply started says the seed may have partly applied
+  (do not attach again; fix the cause and run validation) instead of
+  "nothing was written". The validate play's INVALID remedy now points at
+  the admin UI's "Validate Domain" button: saving an unchanged domain
+  re-checks nothing.
+
 * **A new host gets its OS updates on its first build.** `site.yml` and
   `add-region.yml` now run one full package upgrade (docker stays held)
   before the reboot check, so a fresh host no longer needs a separate

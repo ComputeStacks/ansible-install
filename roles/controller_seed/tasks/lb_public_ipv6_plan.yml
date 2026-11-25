@@ -29,10 +29,11 @@
 #                                    sets public_ipv6, sorted by node
 #   controller_seed_lb_ipv6_program  the ruby for `cstacks runner`
 #   controller_seed_lb_ipv6_result   (only with output) {create, ok, conflict,
-#                                    missing, done}: each list holds one
-#                                    {az, ip[, role|why]} per line of that
-#                                    kind; `done` is whether the program ran
-#                                    to its end
+#                                    missing, validate, done}: each list holds
+#                                    one {az, ip[, role|why]} per line of that
+#                                    kind (validate: {az, status, detail,
+#                                    line}); `done` is whether the program
+#                                    reached DONE, i.e. its transaction ended
 #
 # THE PROGRAM prints one line per wanted address and a final DONE:
 #
@@ -46,6 +47,23 @@
 #                             of that name yet: expected in the plan for an az
 #                             this apply creates, a failure after it
 #   DONE
+#   VALIDATE|<az>|yes|<domain_valid_check>     apply only, after DONE: one per
+#   VALIDATE|<az>|no|<domain_valid_check>      load balancer this run CREATEd
+#   VALIDATE|<az>|error|<class: message>       an address for (see below)
+#
+# THE DOMAIN RE-CHECK. The manifest apply's save of a load balancer queues the
+# controller's ValidateDomainWorker, which can resolve the apex before the
+# address above exists and mark the load balancer INVALID; adding an address
+# queues nothing. So after the transaction has committed and DONE is printed,
+# the apply program runs that worker synchronously
+# (`LoadBalancerWorkers::ValidateDomainWorker.new.perform(id)`) for each load
+# balancer it created an address on -- only those: a load balancer that got
+# nothing new is never re-checked, so a re-run cannot flip a valid domain on
+# a transient DNS answer -- reloads it and prints its verdict. `error` means
+# the check raised, or recorded no new verdict. None of this can fail the
+# step: the rows are committed, DONE was printed first, and the validate play
+# is the gate. With `controller_seed_lb_le` true a valid domain may also have
+# a Let's Encrypt certificate ordered, as on the controller's own path.
 #
 # Addresses are compared as IPAddr, not text, against what the controller
 # holds (an inet column). The wanted list is passed base64-encoded JSON, so no
@@ -74,6 +92,7 @@
       {{ 'require "base64"; require "json"; require "ipaddr";'
          ~ ' want = JSON.parse(Base64.strict_decode64("' ~ (controller_seed_lb_ipv6_wanted | to_json | b64encode) ~ '"));'
          ~ ' apply = ' ~ ((controller_seed_lb_ipv6_apply | default(false) | bool) | ternary('true', 'false')) ~ ';'
+         ~ ' recheck = {};'
          ~ ' ActiveRecord::Base.transaction do'
          ~ ' want.each do |w|'
          ~ ' r = Region.find_by(name: w["az"]); lb = r&.load_balancer;'
@@ -82,12 +101,26 @@
          ~ ' hit = lb.ipaddrs.to_a.find { |a| a.ip_addr.is_a?(IPAddr) && a.ip_addr.ipv6? && a.ip_addr == ip };'
          ~ ' if hit.nil?'
          ~ ' then lb.ipaddrs.create!(ip_addr: w["ip"], role: "public", label: w["label"]) if apply;'
+         ~ ' recheck[lb.id] ||= w["az"] if apply;'
          ~ ' puts ["CREATE", w["az"], w["ip"]].join("|");'
          ~ ' elsif hit.role == "public" then puts ["OK", w["az"], w["ip"]].join("|");'
          ~ ' else puts ["CONFLICT", w["az"], w["ip"], hit.role.to_s].join("|"); end;'
          ~ ' end;'
          ~ ' end;'
-         ~ ' puts "DONE"' }}
+         ~ ' puts "DONE"; $stdout.flush;'
+         ~ ' recheck.each do |id, az|'
+         ~ ' begin'
+         ~ ' before = LoadBalancer.find(id).domain_valid_check;'
+         ~ ' LoadBalancerWorkers::ValidateDomainWorker.new.perform(id);'
+         ~ ' lb = LoadBalancer.find(id);'
+         ~ ' if lb.domain_valid_check.nil? || lb.domain_valid_check == before'
+         ~ ' then puts ["VALIDATE", az, "error", "the controller recorded no new verdict"].join("|");'
+         ~ ' else puts ["VALIDATE", az, (lb.domain_valid ? "yes" : "no"), lb.domain_valid_check.to_s].join("|"); end;'
+         ~ ' rescue StandardError, ScriptError => e;'
+         ~ ' puts ["VALIDATE", az, "error", [e.class.to_s, e.message.to_s].join(": ").split.join(" ")].join("|");'
+         ~ ' end;'
+         ~ ' $stdout.flush;'
+         ~ ' end' }}
 
 - name: Parse the runner output
   when: controller_seed_lb_ipv6_output is defined
@@ -95,7 +128,7 @@
     controller_seed_lb_ipv6_result: "{{ controller_seed_lb_ipv6_result_json | from_json }}"
   vars:
     controller_seed_lb_ipv6_result_json: >-
-      {%- set r = namespace(create=[], ok=[], conflict=[], missing=[], done=false) -%}
+      {%- set r = namespace(create=[], ok=[], conflict=[], missing=[], validate=[], done=false) -%}
       {%- for line in controller_seed_lb_ipv6_output | default([]) -%}
         {%- set f = (line | string | trim).split('|') -%}
         {%- if f == ['DONE'] -%}
@@ -108,7 +141,12 @@
           {%- set r.conflict = r.conflict + [{'az': f[1], 'ip': f[2], 'role': f[3]}] -%}
         {%- elif f[0] == 'MISSING' and (f | length) == 4 -%}
           {%- set r.missing = r.missing + [{'az': f[1], 'ip': f[2], 'why': f[3]}] -%}
+        {%- elif f[0] == 'VALIDATE' and (f | length) >= 4 and f[2] in ['yes', 'no', 'error'] -%}
+          {#- an error message may itself hold a `|` -#}
+          {%- set r.validate = r.validate + [{'az': f[1], 'status': f[2],
+                                              'detail': f[3:] | join('|'),
+                                              'line': line | string | trim}] -%}
         {%- endif -%}
       {%- endfor -%}
       {{ {'create': r.create, 'ok': r.ok, 'conflict': r.conflict, 'missing': r.missing,
-          'done': r.done} | to_json }}
+          'validate': r.validate, 'done': r.done} | to_json }}

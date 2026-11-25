@@ -139,10 +139,22 @@
         controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
         controller_seed_lb_ipv6_apply: true
 
-    - name: "Assert: the apply program writes"
+    - name: "Assert: the apply program writes, then re-checks only what it added to, after DONE"
       ansible.builtin.assert:
         that:
           - "'apply = true;' in controller_seed_lb_ipv6_program"
+          - "'recheck[lb.id] ||= w[\"az\"] if apply;' in controller_seed_lb_ipv6_program"
+          - "'LoadBalancerWorkers::ValidateDomainWorker.new.perform(id);' in controller_seed_lb_ipv6_program"
+          - "'perform_async' not in controller_seed_lb_ipv6_program"
+          - "'rescue StandardError, ScriptError => e;' in controller_seed_lb_ipv6_program"
+          # the re-check comes after the transaction and after DONE
+          - >-
+            controller_seed_lb_ipv6_program.index('puts \"DONE\"')
+            < controller_seed_lb_ipv6_program.index('ValidateDomainWorker')
+          - >-
+            controller_seed_lb_ipv6_program.index('ActiveRecord::Base.transaction do')
+            < controller_seed_lb_ipv6_program.index('puts \"DONE\"')
+        fail_msg: "{{ controller_seed_lb_ipv6_program }}"
         quiet: true
 
     - name: "Case: no new node sets public_ipv6"
@@ -190,7 +202,64 @@
             controller_seed_lb_ipv6_result.missing == [
               {'az': 'exm-065', 'ip': '2001:db8::165', 'why': 'NOREGION'},
               {'az': 'exm-066', 'ip': '2001:db8::166', 'why': 'NOLB'}]
+          - controller_seed_lb_ipv6_result.validate == []
           - controller_seed_lb_ipv6_result.done | bool
+        fail_msg: "{{ controller_seed_lb_ipv6_result | to_json }}"
+        quiet: true
+
+    - name: "Case: domain re-checks after DONE: yes, no, error, and malformed"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_output:
+          - "CREATE|exm-061|2001:db8::161"
+          - "CREATE|exm-063|2001:db8:0:1::a"
+          - "CREATE|exm-067|2001:db8::167"
+          - "DONE"
+          - "VALIDATE|exm-061|yes|2026-11-25 10:00:00 UTC"
+          - "I, [2026-11-25T10:00:01] INFO -- : rails noise"
+          - "VALIDATE|exm-063|no|2026-11-25 10:00:02 UTC"
+          - "VALIDATE|exm-067|error|Dnsruby::ResolvTimeout: timed out | retry 3"
+          - "VALIDATE|exm-068|maybe|2026-11-25 10:00:03 UTC"
+          - "VALIDATE|exm-069|yes"
+
+    - name: "Assert: each verdict is read, an error keeps its whole message, and DONE still counts"
+      ansible.builtin.assert:
+        that:
+          - controller_seed_lb_ipv6_result.done | bool
+          - controller_seed_lb_ipv6_result.create | length == 3
+          - >-
+            controller_seed_lb_ipv6_result.validate == [
+              {'az': 'exm-061', 'status': 'yes', 'detail': '2026-11-25 10:00:00 UTC',
+               'line': 'VALIDATE|exm-061|yes|2026-11-25 10:00:00 UTC'},
+              {'az': 'exm-063', 'status': 'no', 'detail': '2026-11-25 10:00:02 UTC',
+               'line': 'VALIDATE|exm-063|no|2026-11-25 10:00:02 UTC'},
+              {'az': 'exm-067', 'status': 'error',
+               'detail': 'Dnsruby::ResolvTimeout: timed out | retry 3',
+               'line': 'VALIDATE|exm-067|error|Dnsruby::ResolvTimeout: timed out | retry 3'}]
+          - >-
+            (controller_seed_lb_ipv6_result.validate | rejectattr('status', 'eq', 'yes')
+             | map(attribute='az') | list) == ['exm-063', 'exm-067']
+        fail_msg: "{{ controller_seed_lb_ipv6_result | to_json }}"
+        quiet: true
+
+    - name: "Case: an apply that created nothing re-checks nothing"
+      ansible.builtin.include_role:
+        name: controller_seed
+        tasks_from: lb_public_ipv6_plan
+      vars:
+        controller_seed_lb_ipv6_nodes: "{{ v6t_nodes }}"
+        controller_seed_lb_ipv6_output:
+          - "OK|exm-061|2001:db8::161"
+          - "DONE"
+
+    - name: "Assert: no VALIDATE lines, nothing to report"
+      ansible.builtin.assert:
+        that:
+          - controller_seed_lb_ipv6_result.done | bool
+          - controller_seed_lb_ipv6_result.validate == []
         fail_msg: "{{ controller_seed_lb_ipv6_result | to_json }}"
         quiet: true
 

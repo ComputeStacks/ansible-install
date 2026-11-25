@@ -11,6 +11,9 @@
 #   controller_seed_lb_ipv6_apply: true    after the apply has succeeded --
 #       writes the missing rows. Anything but CREATE/OK fails the run; the
 #       manifest apply has committed by then, and a re-run converges both.
+#       Then has the controller re-check the domain of each load balancer it
+#       added an address to (VALIDATE lines, after DONE); a re-check that
+#       did not pass is reported below, never a failure.
 
 - name: Render the load balancer public IPv6 program
   ansible.builtin.include_tasks: lb_public_ipv6_plan.yml
@@ -43,21 +46,24 @@
       {% for x in r.missing %}{{ x.az }}: {{ x.ip }} -- {{ 'the az' if x.why == 'NOREGION' else 'its load balancer' }}
       does not exist yet{{ controller_seed_lb_ipv6_later }}. {% endfor %}
       {% for x in r.conflict %}{{ x.az }}: {{ x.ip }} is already on this load balancer with role {{ x.role }}. {% endfor %}
+      {% for x in r.validate if x.status == 'yes' %}{{ x.az }}: the controller re-checked the domain and marked it valid at {{ x.detail }}. {% endfor %}
   vars:
     controller_seed_lb_ipv6_later: >-
       {{ '' if controller_seed_lb_ipv6_apply | bool
          else '; the apply creates it, and the address is added right after' }}
 
+# Keyed on DONE, not the exit code: DONE is printed once the transaction has
+# committed, and the domain re-check after it must never read as a failed
+# (let alone unwritten) step. A non-zero exit after DONE is reported below.
 - name: Assert the load balancer public IPv6 addresses can be seeded
   ansible.builtin.assert:
     that:
-      - controller_seed_lb_ipv6_cmd.rc == 0
       - controller_seed_lb_ipv6_result.done | bool
       - controller_seed_lb_ipv6_result.conflict | length == 0
       - (controller_seed_lb_ipv6_result.missing | length == 0) or not (controller_seed_lb_ipv6_apply | bool)
     fail_msg: >-
       {% set r = controller_seed_lb_ipv6_result %}
-      {% if controller_seed_lb_ipv6_cmd.rc != 0 or not (r.done | bool) %}
+      {% if not (r.done | bool) %}
       `cstacks runner` did not finish (rc {{ controller_seed_lb_ipv6_cmd.rc }}):
       {{ (controller_seed_lb_ipv6_cmd.stderr | default('') | trim)[-800:] }}
       {{ 'Nothing was written: the creates run in one transaction.' if controller_seed_lb_ipv6_apply | bool else '' }}
@@ -76,3 +82,30 @@
       not be added. Read the seed output above.
       {% endfor %}
     quiet: true
+
+# NOT a failure: the addresses are committed, and the validate play (roles/
+# validate, lb_domain) is the gate. Only after an apply, and only when the
+# assert above passed.
+- name: Report a load balancer domain re-check that did not pass
+  ansible.builtin.debug:
+    msg: >-
+      {% for x in controller_seed_lb_ipv6_result.validate if x.status != 'yes' %}
+      {{ x.line }} -- the controller {{ 'marked the domain of az ' ~ x.az ~ ' INVALID' if x.status == 'no'
+         else 'could not re-check the domain of az ' ~ x.az }} right after its public IPv6
+      address was added. The addresses are written; do not run the attach
+      again. Confirm the domain's A and AAAA records and its wildcard CNAME
+      resolve publicly to this load balancer, then use the "Validate Domain"
+      button (check-circle icon) on that load balancer's row of the
+      controller admin's Load Balancers page, and re-run validation.
+      {% endfor %}
+      {% if controller_seed_lb_ipv6_cmd.rc != 0 %}
+      `cstacks runner` exited {{ controller_seed_lb_ipv6_cmd.rc }} after
+      DONE, so the addresses are written but a domain re-check may not have
+      run: {{ (controller_seed_lb_ipv6_cmd.stderr | default('') | trim)[-800:] }}
+      Re-check the domain from the admin UI as above, then re-run validation.
+      {% endif %}
+  when:
+    - controller_seed_lb_ipv6_apply | bool
+    - >-
+      (controller_seed_lb_ipv6_result.validate | rejectattr('status', 'eq', 'yes') | list | length > 0)
+      or controller_seed_lb_ipv6_cmd.rc != 0

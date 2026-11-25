@@ -156,8 +156,11 @@
       adds it to the load balancer on the next run), add it on the controller
       by hand (admin UI, load balancer -> addresses, role public), or remove
       the AAAA. If the controller already marked the domain INVALID, have it
-      re-check from the admin UI (save the load balancer's domain, or deploy
-      it) once the address is listed: adding an address does not.
+      re-check with the "Validate Domain" button (check-circle icon) on that
+      load balancer's row of the admin UI's Load Balancers page once the
+      address is listed (from controller v9.8.8 it re-checks by itself when
+      a public or proxy address is added, changed or removed; older
+      controllers do not, and saving an unchanged domain queues nothing).
   when:
     - validate_lb_public_aaaa.rc == 0
     - validate_lb_public_aaaa_unknown | length > 0

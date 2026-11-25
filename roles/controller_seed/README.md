@@ -73,12 +73,17 @@ top-level key set before it writes anything.
    applied; with `controller_seed_expect_preview_sha256` fails before the
    pause and the apply unless this preview's fingerprint is that one (see
    "Two-step attach").
-8. Runs `cstacks seed`, prints the change log, and **deletes the manifest**.
-   A failed apply keeps the file on purpose and says so — the apply is one
-   transaction, so nothing was written to the database and the rendered
-   document is the thing to look at.
+8. Two-step attach phase 2: prints `controller_seed_applying_sha256=<hex>`
+   just before the apply. Runs `cstacks seed`, prints the change log, and
+   **deletes the manifest**. A failed apply keeps the file on purpose and
+   says so; the block's failure text says the seed may have partly applied
+   once the apply has started (see "Two-step attach").
 9. Adds each new node's `public_ipv6` to its az's load balancer as a
-   `public` LoadBalancerAddr (`tasks/lb_public_ipv6.yml`), after the apply.
+   `public` LoadBalancerAddr (`tasks/lb_public_ipv6.yml`), after the apply,
+   then has the controller re-check the domain of each load balancer it
+   added an address to.
+10. Two-step attach phase 2: prints `controller_seed_applied_sha256=<hex>`
+    once both writes have committed.
 
 ## Vocabulary mapping
 
@@ -373,17 +378,46 @@ block's "nothing was written"; a re-run converges both. In check mode
 neither runs.
 
 Adding the row does not make the controller re-check the domain; it checks
-when the load balancer's domain is saved or the load balancer is deployed.
-That makes a race on every run that adds an address: the apply saves the
-load balancer, whose `after_save` queues `ValidateDomainWorker`, and the
-worker can resolve the apex before this later step adds the IPv6 address —
-on a fresh az as much as an existing one. If the apex has an AAAA, the
-load balancer is then marked INVALID for an address it now holds, and
-re-running the seed does not help: the address is already there, so nothing
-is saved and nothing re-checks. Confirm the address is listed on the load
-balancer in the admin UI, then have the controller re-check the domain from
-there (save the domain, or deploy the load balancer); `validate --tags
-lb_domain` says the same when it finds the domain INVALID.
+when the load balancer's domain changes on save or the load balancer is
+deployed. That makes a race on every run that adds an address: the apply
+saves the load balancer, whose `after_save` queues `ValidateDomainWorker`,
+and the worker can resolve the apex before this later step adds the IPv6
+address — on a fresh az as much as an existing one. If the apex has an
+AAAA, the load balancer is then marked INVALID for an address it now holds.
+
+**The re-check.** So once the add's transaction has committed and the
+program has printed `DONE`, it runs that worker synchronously
+(`LoadBalancerWorkers::ValidateDomainWorker.new.perform(id)`) for each load
+balancer it created an address on — only those: a load balancer that got
+nothing new is never re-checked, so a re-run against a live region cannot
+flip a valid domain on a transient DNS answer. It prints one line per load
+balancer:
+
+    VALIDATE|<az>|yes|<domain_valid_check>
+    VALIDATE|<az>|no|<domain_valid_check>
+    VALIDATE|<az>|error|<exception class: message>
+
+`error` means the check raised, or recorded no new verdict. A `yes` is shown
+with the addresses; a `no` or `error` is reported by the non-failing task
+"Report a load balancer domain re-check that did not pass", quoting the
+line. Neither fails the seed: the rows are committed, the step's assert keys
+on `DONE` (not the exit code), and roles/validate's `lb_domain` check is the
+gate. The check resolves the apex and wildcard from the controller's own
+resolvers, so the DNS records must be published by then (roles/powerdns
+writes them earlier in add-region.yml); resolver lag can still give `no`.
+It writes an audit row and an event log entry on the controller like any
+domain check, and **with `controller_seed_lb_le: true` a valid domain may
+also have a Let's Encrypt certificate ordered** right then, as on the
+controller's own path. The runner blocks for the DNS lookups, seconds to
+tens of seconds per load balancer.
+
+If the re-check says `no` or `error`, or a re-run added nothing (and so
+re-checked nothing): confirm the address is listed on the load balancer in
+the admin UI and that the A and AAAA records and the wildcard CNAME resolve,
+then use the "Validate Domain" button (check-circle icon) on that load
+balancer's row of the admin UI's Load Balancers page — saving an unchanged
+domain queues nothing — and re-run validation; `validate --tags lb_domain`
+says the same when it finds the domain INVALID. Do not run the attach again.
 
 The program and the reading of its output are pure
 (`tasks/lb_public_ipv6_plan.yml`) and covered by `tests/lb_public_ipv6.yml`;
@@ -479,6 +513,23 @@ The role previews again and, before the `pause` and the apply, fails unless
 this preview's fingerprint equals the one given, printing both and saying
 nothing was applied. A preview that differs means the database or the
 inventory changed after the review, and phase 1 is run again.
+
+**What phase 2 prints for a wrapper.** Two more debug lines, each with the
+fingerprint alone after `=`, read like the phase 1 line:
+
+* `controller_seed_applying_sha256=<hex>`, immediately before `cstacks
+  seed`, once the refusal above has passed. From here on the seed may have
+  written: if the run fails after this line, the block's rescue no longer
+  says nothing was written but that the seed may have partly applied, not
+  to run the attach again, and to fix the cause and run validation.
+* `controller_seed_applied_sha256=<hex>`, after the load balancer public
+  IPv6 step, outside the block: printed only once the manifest apply and the
+  IPv6 transaction have both committed and their asserts passed (a `no` or
+  `error` domain re-check does not stop it).
+
+So: neither line, nothing was applied; `applying` without `applied`, the seed
+may have partly applied; `applied`, it did. Neither line is printed in phase
+1 or in check mode, nor without `controller_seed_expect_preview_sha256`.
 
 **What the fingerprint covers.** sha256 over the preview's stdout, one LF per
 line, after `filter_plugins/controller_seed_preview.py` normalizes the one

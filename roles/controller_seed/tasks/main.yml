@@ -627,6 +627,25 @@
         - (existing_env | default(false) | bool) or (controller_seed_update_addresses | bool)
         - controller_seed_confirm | bool
 
+    # The point of no return, for a wrapper: past this line the seed may have
+    # written to the controller database, so a failure must not be read as
+    # "nothing applied". Same form as the preview line above, read with
+    #   grep -oE 'controller_seed_applying_sha256=[0-9a-f]{64}'
+    # Phase 2 only (the refusal above has passed, so this is the reviewed
+    # fingerprint); check mode runs no `cstacks seed`.
+    - name: Print the fingerprint being applied
+      ansible.builtin.debug:
+        msg: "controller_seed_applying_sha256={{ controller_seed_preview_sha256 }}"
+      when:
+        - controller_seed_expect_preview_sha256 | length > 0
+        - not ansible_check_mode
+
+    # Read by the rescue below, in every mode, so it never says "nothing was
+    # written" once the apply has started.
+    - name: Record that the apply has started
+      ansible.builtin.set_fact:
+        controller_seed_apply_started: "{{ not ansible_check_mode }}"
+
     - name: Apply the manifest
       ansible.builtin.command:
         argv:
@@ -650,24 +669,42 @@
         state: absent
       when: controller_seed_remove_manifest | bool
   rescue:
+    # Two texts: before the apply started, nothing can have been written;
+    # once it has (controller_seed_apply_started, set just before
+    # `cstacks seed`), the apply or a step after it failed and the database
+    # may hold part or all of it.
     - name: Report where the failed manifest was left
       ansible.builtin.debug:
         msg: >-
+          {% if controller_seed_apply_started | default(false) | bool %}
+          The seed FAILED after the apply started, so the seed may have
+          partly applied to the controller database. Do not run the attach
+          again: fix the cause of the error above, then run validation.
+          {{ controller_seed_manifest_path }} has been kept for debugging --
+          it is root 0600 and carries secrets, so delete it once you are done.
+          {% else %}
           The seed FAILED and nothing was written to the controller database
           (the whole apply is one transaction, and gate G stops before the
           apply runs at all). {{ controller_seed_manifest_path }}
           has been kept for debugging -- it is root 0600 and carries secrets,
           so delete it once you are done. Re-running this role re-renders and
           re-applies it; the apply is idempotent.
+          {% endif %}
 
     - name: Fail the play
       ansible.builtin.fail:
         msg: >-
+          {% if controller_seed_apply_started | default(false) | bool %}
+          The seed step failed on {{ inventory_hostname }} after the apply
+          started -- see the error above. The seed may have partly applied:
+          do not run the attach again; fix the cause and run validation.
+          {% else %}
           The seed step failed on {{ inventory_hostname }} -- see the error
           above. From `cstacks seed` it names the manifest section and key
           path; from the load balancer domain gate it names the load balancer
           and the two domains; from the preview fingerprint check it names
           both fingerprints. In the last two cases nothing was applied.
+          {% endif %}
 
 # After the block, not in it: the manifest apply has committed by now, so the
 # rescue's "nothing was written" would be untrue for a failure here. A re-run
@@ -678,4 +715,17 @@
     controller_seed_lb_ipv6_apply: true
   when:
     - controller_seed_lb_ipv6_wanted | length > 0
+    - not ansible_check_mode
+
+# Printed only here, after the manifest apply AND the IPv6 transaction have
+# committed and the IPv6 asserts passed (a failure in either ends the play
+# before this). Phase 2 only, and never in check mode. Read with
+#   grep -oE 'controller_seed_applied_sha256=[0-9a-f]{64}'
+# A wrapper that saw `controller_seed_applying_sha256=` but not this line must
+# assume the seed may have partly applied.
+- name: Print the fingerprint that was applied
+  ansible.builtin.debug:
+    msg: "controller_seed_applied_sha256={{ controller_seed_preview_sha256 }}"
+  when:
+    - controller_seed_expect_preview_sha256 | length > 0
     - not ansible_check_mode

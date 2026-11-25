@@ -171,17 +171,24 @@
     validate_lb_domain_has_ipv6: "{{ (public_ipv6 | default('', true) | string) | length > 0 }}"
     # The seed adds public_ipv6 as a LoadBalancerAddr after its apply, but
     # the apply's save already queued ValidateDomainWorker, which can resolve
-    # the apex first. Re-running the seed then saves nothing and re-checks
+    # the apex first. The seed then runs the check again for each load
+    # balancer it added an address to (a controller from v9.8.8 also
+    # re-checks whenever a public or proxy address is added, changed or
+    # removed; older ones do not). A re-run that adds nothing re-checks
     # nothing (roles/controller_seed README, "Load balancer public IPv6").
     validate_lb_domain_ipv6_set: >-
       This node sets public_ipv6 {{ public_ipv6 | default('') }}, which the
       seed adds as a public address only AFTER its apply, while the
       controller checks the domain as soon as the apply saves the load
-      balancer: it may have checked before the address existed, and
-      re-running the seed does not make it check again. Confirm
+      balancer: it may have checked before the address existed. The seed
+      checks again right after adding the address (its VALIDATE line says
+      how that went), but a re-run that adds nothing does not (from
+      controller v9.8.8 the controller also re-checks by itself whenever a
+      public or proxy address is added, changed or removed). Confirm
       {{ public_ipv6 | default('') }} is listed under the load balancer's
-      addresses in the admin UI, then have the controller re-check the
-      domain from the admin UI (below). Any other AAAA on the apex must be
+      addresses in the admin UI, then, if it does not re-check by itself
+      (controllers before v9.8.8), have it re-check the domain from the
+      admin UI (below). Any other AAAA on the apex must be
       added there too, or removed.
     validate_lb_domain_ipv6_unset: >-
       Set the node's `public_ipv6` to the AAAA's address and re-run the seed
@@ -212,9 +219,11 @@
       balancer -> addresses). An IPv6 apex is the usual culprit.
       {{ validate_lb_domain_ipv6_set if validate_lb_domain_has_ipv6 else validate_lb_domain_ipv6_unset }}
       Read the load balancer's event log in the admin UI for which one fired,
-      fix the zone or the addresses, have the controller check again (it
-      re-checks when the load balancer's domain is saved or it is deployed
-      from the admin UI), and re-run `--tags lb_domain`.
+      fix the zone or the addresses, have the controller check again with
+      the "Validate Domain" button (check-circle icon) on that load
+      balancer's row of the admin UI's Load Balancers page (older controllers
+      do not re-check when an address changes, and saving an unchanged domain
+      queues nothing), and re-run `--tags lb_domain`.
     success_msg: >-
       {{ az }}: {{ validate_lb_domain_fields[1] }} validated at
       {{ validate_lb_domain_fields[3] }}
@@ -230,10 +239,12 @@
       '{{ validate_lb_domain_fields[1] }}' —
       `domain_valid_check` is still empty after
       {{ (validate_lb_domain_retries | int) * (validate_lb_domain_delay | int) }}s.
-      This is EXPECTED on a seeded load balancer, not a symptom: nothing in a
-      provisioning run makes the controller record a verdict, and in practice
-      one is never written until someone edits the domain or deploys the load
-      balancer from the admin UI. It is therefore reported and NOT asserted —
+      This is EXPECTED on a seeded load balancer, not a symptom: apart from
+      the seed's re-check after it adds a public IPv6 address (and, from
+      controller v9.8.8, a re-check when a public or proxy address is added,
+      changed or removed), nothing in a provisioning run makes the controller
+      record a verdict, and in practice one is otherwise never written until
+      someone edits the domain or deploys the load balancer from the admin UI. It is therefore reported and NOT asserted —
       asserting it would fail every healthy install, v1 and v2 alike.
       Note what `domain_valid` does and does not tell you here: it is
       `default: true` in the schema, so with `domain_valid_check` empty it
