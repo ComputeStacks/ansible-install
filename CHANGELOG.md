@@ -44,10 +44,19 @@
   alias-zone `_acme-challenge` CNAMEs; set the inventory variables and re-run
   `site.yml` (it seeds them while unconfigured) or set them in the controller
   admin; clear or replace an old `le_dns_alias_zone` left from the PowerDNS
-  setup (it is now a zone at your DNS provider); then turn on `le` for each
-  existing load balancer in the admin, or run
-  `rake "lets_encrypt:issue_lb[<id>]"` (or `[all]`) in the controller, because
-  the seed does not change existing rows.
+  setup (it is now a zone at your DNS provider; validate warns when the
+  controller has one and the inventory does not); then turn on `le` for each
+  existing load balancer in the controller admin (saving it orders the
+  certificate), because the seed does not change existing rows and load
+  balancers seeded earlier have `le` off. `rake "lets_encrypt:issue_lb[<id>]"`
+  (or `[all]`) only re-triggers issuance for load balancers that already have
+  `le` on.
+
+  **Public resolution check now always runs.** Preflight's `app_domain_dns`
+  check and validate's `lb_domain_public` check no longer depend on
+  `dns_driver`, so they also run for environments that used `dns_driver: none`
+  or split-horizon DNS. Skip them with `preflight_check_app_domain_dns: false`
+  and `validate_skip: [lb_domain_public]`.
 
 ## November 25, 2026
 

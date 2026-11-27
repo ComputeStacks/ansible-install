@@ -77,23 +77,29 @@ REMOVED_ACME_PROVIDERS = ("nsupdate", "pdns")
 def preflight_legacy_dns(groups, variables):
     """Retired nameserver settings found in the inventory.
 
-    `groups` is ansible's `groups` mapping, `variables` the host's `vars`.
+    `groups` is ansible's `groups` mapping, `variables` one host's vars or a
+    list of them (one per host in the play; the findings are aggregated).
     Returns `groups` (legacy groups that have hosts: fatal),
     `ignored_vars` (legacy variables that are defined: a warning) and
     `acme_removed_provider` (the acme_challenge_method when it names a removed
     acme.sh provider, else ''; fatal).
     """
     found = [g for g in LEGACY_GROUPS if groups.get(g)]
+    per_host = [variables] if isinstance(variables, Mapping) else list(variables)
     ignored = sorted(
-        k
-        for k in variables
-        if k in LEGACY_VARS or k.startswith(LEGACY_VAR_PREFIXES)
+        {
+            k
+            for host_vars in per_host
+            for k in host_vars
+            if k in LEGACY_VARS or k.startswith(LEGACY_VAR_PREFIXES)
+        }
     )
-    method = str(variables.get("acme_challenge_method") or "")
+    methods = {str(host_vars.get("acme_challenge_method") or "") for host_vars in per_host}
+    removed = sorted(m for m in methods if m in REMOVED_ACME_PROVIDERS)
     return {
         "groups": found,
         "ignored_vars": ignored,
-        "acme_removed_provider": method if method in REMOVED_ACME_PROVIDERS else "",
+        "acme_removed_provider": ", ".join(removed),
     }
 
 

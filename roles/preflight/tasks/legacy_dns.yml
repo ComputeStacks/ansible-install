@@ -2,12 +2,14 @@
 # Inventory left over from the retired bundled PowerDNS / acme.sh nsupdate
 # support. Decided in filter_plugins/preflight.py (preflight_legacy_dns) so
 # tests/preflight_legacy_dns.yml can prove it; the inputs default to the
-# play's `groups` and this host's `hostvars` and are overridable only for that test.
+# play's `groups` and the `hostvars` of every host in the play (a variable set
+# only on a later host counts too) and are overridable only for that test.
 - name: Look for retired nameserver groups, variables and acme.sh providers
   ansible.builtin.set_fact:
     preflight_legacy: >-
       {{ (preflight_legacy_groups | default(groups))
-         | preflight_legacy_dns(preflight_legacy_vars | default(hostvars[inventory_hostname])) }}
+         | preflight_legacy_dns(preflight_legacy_vars
+                    | default(ansible_play_hosts_all | map('extract', hostvars) | list)) }}
   run_once: true
 
 - name: Assert the inventory has no nameserver groups and no removed acme.sh provider

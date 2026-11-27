@@ -120,11 +120,19 @@
     - validate_lb_acme_ok | bool
     - validate_lb_acme_zone_in_use | length > 0
 
+# Attach mode (add-region.yml): the controller is an `existing_env` host and the
+# seed writes no settings there, so the inventory variables do nothing and the
+# fix is always in the controller admin.
+- name: Note whether this run attaches to an existing controller
+  ansible.builtin.set_fact:
+    validate_lb_acme_attach: "{{ hostvars[validate_controller_host].existing_env | default(false) | bool }}"
+
 - name: Collect the findings for this load balancer
   ansible.builtin.set_fact:
     validate_lb_acme_warnings: >-
       {{ validate_lb_acme_warn_blank
          + validate_lb_acme_warn_drift
+         + validate_lb_acme_warn_stale_zone
          + validate_lb_acme_warn_creds
          + validate_lb_acme_warn_cname }}
   when: validate_lb_acme_ok | bool
@@ -134,8 +142,9 @@
          | map('lower') | map('trim', '.') | list }}
     validate_lb_acme_warn_blank: >-
       {{ ['the controller has no le_dns_provider, so it will not issue or renew load balancer certificates'
-          ~ ' (this load balancer keeps serving its self-signed shared certificate). Set the provider in the admin UI,'
-          ~ ' or cs_lb_acme_dns_provider in the inventory for a controller that has never configured it.']
+          ~ ' (this load balancer keeps serving its self-signed shared certificate). Set the provider in the controller admin'
+          ~ ('.' if validate_lb_acme_attach | bool
+             else ', or cs_lb_acme_dns_provider in the inventory for a controller that has never configured it.')]
       if validate_lb_acme_provider | length == 0 else [] }}
     validate_lb_acme_warn_drift: >-
       {{ (['the inventory provider is "' ~ validate_lb_acme_inventory_provider
@@ -148,6 +157,20 @@
              ~ '". The seed does not overwrite a configured setting; change it in the admin UI.']
           if validate_lb_acme_inventory_alias_zone | length > 0
              and (validate_lb_acme_inventory_alias_zone | lower | trim('.')) != validate_lb_acme_alias_zone else []) }}
+    # A controller alias zone with none in the inventory: the recommended
+    # direct-to-zone shape. The value may be a pre-9.9 PowerDNS zone whose
+    # meaning changed. Not in attach mode: there the inventory is never
+    # seeded, so a controller alias zone is just the controller's own choice.
+    # The cname check below would stay green on the old `lb<id>.<zone>`
+    # CNAMEs, so it stands down while this warning applies.
+    validate_lb_acme_warn_stale_zone: >-
+      {{ ['the controller has le_dns_alias_zone "' ~ validate_lb_acme_alias_zone
+          ~ '" but the inventory sets no cs_lb_acme_dns_alias_zone. It may be a pre-9.9 PowerDNS zone whose'
+          ~ ' meaning changed (it is now a zone at your DNS provider). To issue directly in the domain\'s own'
+          ~ ' zone, clear le_dns_alias_zone in the controller admin and remove any leftover _acme-challenge CNAME;'
+          ~ ' if you do use that alias zone, set cs_lb_acme_dns_alias_zone to match.']
+      if validate_lb_acme_alias_zone | length > 0 and validate_lb_acme_inventory_alias_zone | length == 0
+         and not validate_lb_acme_attach | bool else [] }}
     validate_lb_acme_warn_creds: >-
       {{ ['the controller has a provider but no credentials (le_dns_provider_secret), so the order will fail. Set them in the admin UI.']
       if validate_lb_acme_provider | length > 0 and not validate_lb_acme_creds_set else [] }}
@@ -156,6 +179,7 @@
              ~ validate_lb_acme_lb_id ~ '.' ~ validate_lb_acme_alias_zone
              ~ '. Create exactly: ' ~ validate_lb_acme_record]
           if validate_lb_acme_provider | length > 0 and validate_lb_acme_alias_zone | length > 0
+             and (validate_lb_acme_inventory_alias_zone | length > 0 or validate_lb_acme_attach | bool)
              and (('lb' ~ validate_lb_acme_lb_id ~ '.' ~ validate_lb_acme_alias_zone) not in validate_lb_acme_seen) else [])
          + (['_acme-challenge.' ~ validate_lb_acme_domain ~ ' is a CNAME (to '
              ~ (validate_lb_acme_seen | join(', '))

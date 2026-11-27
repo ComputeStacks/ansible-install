@@ -99,6 +99,33 @@
               - "\"is 'nsupdate'\" in ansible_failed_result.msg"
               - "'docs/acme-providers.md' in ansible_failed_result.msg"
 
+    - name: "Case: nsupdate set only on a non-first host fails"
+      block:
+        - name: Run the checks
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: legacy_dns
+          vars:
+            preflight_legacy_groups: {nodes: [a, b]}
+            preflight_legacy_vars:
+              - {acme_challenge_method: cloudflare}
+              - {acme_challenge_method: nsupdate, pdns_api_key: x}
+        - name: The checks did not fail
+          ansible.builtin.fail:
+            msg: legacy_dns.yml passed with nsupdate on the second host only
+      rescue:
+        - name: "Assert: the failure names the provider"
+          ansible.builtin.assert:
+            that:
+              - "\"is 'nsupdate'\" in ansible_failed_result.msg"
+
+    - name: "Case: retired variables are aggregated across hosts"
+      ansible.builtin.assert:
+        that:
+          - legacy_multi.ignored_vars == ['dns_driver', 'pdns_api_key']
+      vars:
+        legacy_multi: "{{ {} | preflight_legacy_dns([{'dns_driver': 'none'}, {'pdns_api_key': 'x'}]) }}"
+
     - name: "Case: pdns fails"
       block:
         - name: Run the checks

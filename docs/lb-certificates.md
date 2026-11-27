@@ -95,12 +95,16 @@ expire. In this order:
    alias zone in the controller admin.
 3. Clear or replace any old `le_dns_alias_zone` left from the PowerDNS setup.
    Its meaning changed: it is now a zone at your DNS provider.
-4. The seed does not change existing load balancer rows. Turn on `le` for each
-   load balancer in the admin, or issue from the controller:
-   `rake "lets_encrypt:issue_lb[<id>]"` for one, `rake "lets_encrypt:issue_lb[all]"`
-   for all.
+4. The seed does not change existing load balancer rows, and load balancers
+   this provisioner created earlier have `le` off. Turn on `le` for each one in
+   the controller admin; saving it orders the certificate. The rake task
+   `lets_encrypt:issue_lb[<id>|all]` only re-triggers issuance for load
+   balancers that already have `le` on; it skips the others.
 
 `roles/validate` (check `lb_acme`) warns on a blank provider, a provider the
 inventory sets but the controller does not have, missing credentials, and a
-wrong or leftover `_acme-challenge` CNAME. It never fails the run: the
+wrong or leftover `_acme-challenge` CNAME, and on a controller
+`le_dns_alias_zone` the inventory does not set (possibly a pre-9.9 PowerDNS
+zone). In attach mode the warnings point at the controller admin, never at
+the inventory. It never fails the run: the
 self-signed certificate keeps the load balancer serving meanwhile.
