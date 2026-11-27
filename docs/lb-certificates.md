@@ -31,10 +31,12 @@ Set them in `group_vars/all/main.yml` and `secrets.yml`
 | `cs_lb_acme_dns_provider` | The lego DNS provider code, e.g. `cloudflare`, `route53`. Empty (the default) leaves load balancer certificates off. |
 | `cs_lb_acme_dns_env` | Vaulted dictionary of that provider's environment variables, e.g. `CLOUDFLARE_DNS_API_TOKEN: "CHANGEME"`. Required when a provider is set. |
 | `cs_lb_acme_dns_alias_zone` | Optional. A zone at the provider that holds the challenge records instead of the load balancer's own zone. See below. |
+| `cs_lb_acme_email` | Optional. The ACME account contact. Defaults to `cs_admin_email`. Let's Encrypt rejects addresses without a real public domain. |
 
 The seed writes them to the controller as `le_dns_provider`,
-`le_dns_provider_secret` (the env dictionary, one `KEY=value` per line) and
-`le_dns_alias_zone`. With a provider set, every new load balancer is created
+`le_dns_provider_secret` (the env dictionary, one `KEY=value` per line),
+`le_dns_alias_zone` and `acme_email` (`controller_seed_settings_extra.acme_email`
+wins over `cs_lb_acme_email` when both are set). With a provider set, every new load balancer is created
 with `le: true`. Preflight rejects a malformed provider code, an empty or
 malformed env dictionary, and env or alias zone set without a provider; its
 messages name keys, never values.

@@ -97,6 +97,12 @@ controller_seed_settings_extra: {}
 controller_seed_lb_acme_dns_provider: "{{ cs_lb_acme_dns_provider | default('') }}"
 controller_seed_lb_acme_dns_env: "{{ cs_lb_acme_dns_env | default({}) }}"
 controller_seed_lb_acme_dns_alias_zone: "{{ cs_lb_acme_dns_alias_zone | default('') }}"
+# The ACME account contact. The controller registers with it before issuing,
+# and Let's Encrypt rejects the setup! placeholder (noreply@example.acme), so
+# it is seeded whenever a provider is set. Seed-only like every setting: an
+# address already configured in the admin is left alone.
+# `controller_seed_settings_extra.acme_email` wins when both are given.
+controller_seed_lb_acme_email: "{{ cs_lb_acme_email | default(cs_admin_email | default('')) }}"
 
 # --- metric_clients / log_clients -----------------------------------------
 # The endpoints the CONTROLLER reads metrics and logs back from: the nginx TLS

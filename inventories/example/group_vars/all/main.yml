@@ -62,6 +62,7 @@ acme_account_email: admin@example.com
 # keep their self-signed certificate. See docs/lb-certificates.md.
 # cs_lb_acme_dns_provider: cloudflare        # lego DNS provider code
 # cs_lb_acme_dns_alias_zone: acme.example.com   # optional; needs per-LB CNAMEs
+# cs_lb_acme_email: certs@example.com           # optional; defaults to cs_admin_email
 
 # Tailscale (optional): a host is on the tailnet if and only if
 # `tailscale_enabled` is true for it (default false). Uncomment to put every

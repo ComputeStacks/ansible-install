@@ -102,6 +102,7 @@ role is the only place the mapping exists (docs/contracts.md §Vocabulary).
 | `site` host var | *(nothing — the controller has no column for it)* | Decides **which** client each az names. One `metric_clients[]`/`log_clients[]` entry per site this run seeds nodes into, deduped by endpoint. |
 | that site's `metrics_domain`, else `cs_metrics_domain`, + `cs_ports.metrics_*` | `metric_clients[].endpoint` / `log_clients[].endpoint` | Regions reference them by **exact endpoint string**. A single-site inventory renders the same one-element lists it always did. |
 | `cs_lb_acme_dns_provider` / `_env` / `_alias_zone` | `settings.values.le_dns_provider` / `le_dns_provider_secret` / `le_dns_alias_zone`; each load balancer's `le` | Rendered only when a provider is set (and the alias zone only when set), and, like every setting, written only while unconfigured on the controller. The env dictionary is rendered as one `KEY=value` per line. With a provider, new load balancers are created with `le: true` (`controller_seed_lb_le`). docs/lb-certificates.md. |
+| `cs_lb_acme_email`, else `cs_admin_email` | `settings.values.acme_email` | Rendered only when a provider is set and `controller_seed_settings_extra` has no `acme_email`. Seed-only: Let's Encrypt rejects the controller's `noreply@example.acme` placeholder, which counts as unconfigured. |
 
 The manifest carries no `dns` section: the seed creates no DNS driver and no
 zones, and leaves any a controller already has as it is.
@@ -562,6 +563,7 @@ inventory itself between the phases is the wrapper's job.
 | `controller_seed_ulimit_nofile_soft` / `_hard` | `2500` / `3000` | Hard must be ≥ soft — docker rejects every container start otherwise and **the model does not check it**, so this role does. |
 | `controller_seed_lb_domain` | **retired** | It was ONE scalar rendered into EVERY az's load balancer, and every az's load balancer answers on a different domain. The domain is `cs_app_domain` per node now: set `app_domain` as a host var (a node that sets none takes `cs_app_zone`, which is what this defaulted to). `tasks/main.yml` **fails** if an inventory still sets it, rather than ignoring it — an operator who set it meant to choose the LB domain, and quietly rendering something else would publish tenant containers under a name their DNS does not answer for, with nothing in the run, the drift report or `validate` mentioning the variable. |
 | `controller_seed_lb_acme_dns_provider` / `_env` / `_alias_zone` | `cs_lb_acme_dns_provider` / `_env` / `_alias_zone`, else empty / `{}` / empty | See the manifest table above. `_env` is a secret: keep it vaulted. |
+| `controller_seed_lb_acme_email` | `cs_lb_acme_email`, else `cs_admin_email` | The ACME account contact; see the manifest table above. |
 | `controller_seed_lb_le` | `true` when a provider is set | The `le` flag of each load balancer the seed creates. Existing rows are not changed. |
 | `controller_seed_lb_stats_bind` | `*:{{ cs_ports.haproxy_stats }}` | Same value the metrics scrape and the firewall use. |
 | `controller_seed_lb_stats_password` | `haproxy_stats_password`, else derived from `secret_key_base` | Never leave it at the column default. |
@@ -573,7 +575,7 @@ inventory itself between the phases is the wrapper's job.
 Consumed, not owned: `cs_portal_domain`, `cs_registry_domain`,
 `cs_metrics_domain`, `cs_app_zone`, `cs_admin_email`, `cs_admin_password`,
 `currency`, `cs_lb_acme_dns_provider`, `cs_lb_acme_dns_env`, `cs_lb_acme_dns_alias_zone`,
-`prometheus_basic_auth_password`, `loki_basic_auth_password`,
+`cs_lb_acme_email`, `prometheus_basic_auth_password`, `loki_basic_auth_password`,
 `secret_key_base`, `tailscale_enabled`, `tailscale_access_only`, `existing_env`, `cs_ports`, the
 site contract (`playbooks/group_vars/all/sites.yml`): `cs_site`,
 `cs_site_metrics_domains`, `cs_site_metrics_credentials`,

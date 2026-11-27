@@ -208,6 +208,7 @@
       ansible.builtin.assert:
         that:
           - (manifest_render_content | from_yaml).settings['values'].keys() | select('match', '^le_dns') | list == []
+          - "'acme_email' not in (manifest_render_content | from_yaml).settings['values']"
           - >-
             (manifest_render_content | from_yaml).locations | map(attribute='regions') | flatten
             | map(attribute='load_balancer') | map(attribute='le') | unique | list == [false]
@@ -230,6 +231,7 @@
           - manifest_render_acme.settings['values'].le_dns_provider == 'cloudflare'
           - manifest_render_acme.settings['values'].le_dns_provider_secret == 'AAA_FIRST=a b=c\nZZZ_LAST=z'
           - "'le_dns_alias_zone' not in manifest_render_acme.settings['values']"
+          - manifest_render_acme.settings['values'].acme_email == 'admin@example.com'
           - >-
             manifest_render_acme.locations | map(attribute='regions') | flatten
             | map(attribute='load_balancer') | map(attribute='le') | unique | list == [true]
@@ -245,13 +247,15 @@
         cs_lb_acme_dns_provider: cloudflare
         cs_lb_acme_dns_env: {CLOUDFLARE_DNS_API_TOKEN: "t"}
         cs_lb_acme_dns_alias_zone: acme.example.com
+        cs_lb_acme_email: certs@example.com
       no_log: true
 
-    - name: "Case: alias zone is rendered when set"
+    - name: "Case: alias zone is rendered when set; cs_lb_acme_email overrides the admin email"
       ansible.builtin.assert:
         that:
           - manifest_render_acme.settings['values'].le_dns_alias_zone == 'acme.example.com'
           - manifest_render_acme.settings['values'].le_dns_provider_secret == 'CLOUDFLARE_DNS_API_TOKEN=t'
+          - manifest_render_acme.settings['values'].acme_email == 'certs@example.com'
         quiet: true
       no_log: true
 

@@ -58,6 +58,9 @@ settings:
 {% if controller_seed_lb_acme_dns_alias_zone | length > 0 %}
     le_dns_alias_zone: {{ controller_seed_lb_acme_dns_alias_zone | to_json }}
 {% endif %}
+{% if controller_seed_lb_acme_email | length > 0 and 'acme_email' not in controller_seed_settings_extra %}
+    acme_email: {{ controller_seed_lb_acme_email | to_json }}
+{% endif %}
 {% endif %}
 {% for name, value in (controller_seed_settings_extra | dictsort) %}
     {{ name }}: {{ value | to_json }}

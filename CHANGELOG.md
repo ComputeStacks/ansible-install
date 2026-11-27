@@ -31,7 +31,9 @@
   (vaulted environment variables of that provider) and, optionally,
   `cs_lb_acme_dns_alias_zone`. They are seeded as `le_dns_provider`,
   `le_dns_provider_secret` and `le_dns_alias_zone` while unconfigured on the
-  controller, and new load balancers get `le: true` when a provider is set.
+  controller, along with the ACME contact `acme_email` (`cs_lb_acme_email`,
+  default `cs_admin_email`; Let's Encrypt refuses the controller's
+  placeholder address), and new load balancers get `le: true` when a provider is set.
   Preflight checks the settings; `roles/validate` reports each az's certificate
   state and warns about a blank provider, an inventory/controller mismatch and
   a wrong or leftover `_acme-challenge` CNAME. The self-signed certificate
