@@ -137,9 +137,13 @@
          + validate_lb_acme_warn_cname }}
   when: validate_lb_acme_ok | bool
   vars:
+    # The required `*.<domain> CNAME <domain>` also answers for
+    # `_acme-challenge.<domain>`, so a CNAME to the domain itself is the
+    # wildcard, not a leftover record.
     validate_lb_acme_seen: >-
       {{ (validate_lb_acme_cname.stdout_lines | default([]))
-         | map('lower') | map('trim', '.') | list }}
+         | map('lower') | map('trim', '.')
+         | reject('equalto', validate_lb_acme_domain | lower | trim('.')) | list }}
     validate_lb_acme_warn_blank: >-
       {{ ['the controller has no le_dns_provider, so it will not issue or renew load balancer certificates'
           ~ ' (this load balancer keeps serving its self-signed shared certificate). Set the provider in the controller admin'
