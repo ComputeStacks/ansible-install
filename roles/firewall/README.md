@@ -143,14 +143,6 @@ not site-scope, deliberately — see [sites](#sites-are-deliberately-ignored).
 | `tenant_port_begin`–`tenant_port_end` | tcp | anywhere | 18 |
 | `ssh` (22, or the host's `ssh_port`) | tcp | controller `DockerSSH`: the global accept when ssh is open; with `firewall_allow_ssh_from` set, controller addresses **+ `iifname tailscale0`** when both route over the tailnet | 19 |
 
-### nameservers
-
-| Port | Proto | Source | Row |
-|---|---|---|---|
-| `dns` (53) | tcp + udp, v4 + v6 | anywhere | 15 |
-| `pdns_api` (8081) | tcp | controller addresses | 16 |
-| `postgres` (5432) | tcp | the *other* nameserver hosts | 17 |
-
 ### backup
 
 Nodes reach borg over ssh only. With `firewall_allow_ssh_from` empty the
@@ -281,8 +273,7 @@ so it holds under `--limit`.
 
 This covers the exporter scrapes (`node_exporter` 9100 on every host,
 `cadvisor` 8080 and `haproxy_stats` 81 on nodes) exactly as it covers
-`docker_tls`, `controller_acme_backend`, the metrics vhosts, `pdns_api` and the
-nameserver `postgres` replication. `agent_http` is the one deliberate exception
+`docker_tls`, `controller_acme_backend`, and the metrics vhosts. `agent_http` is the one deliberate exception
 — it is *exclusively* tailnet when both ends are joined, never both paths (see
 below), because the admin Bearer it carries is cleartext.
 
@@ -315,7 +306,7 @@ that is a decision rather than an oversight.
 The tempting change is to narrow the `node_exporter` (9100) and
 `cadvisor` / `haproxy_stats` accepts from `groups['metrics']` to the asking
 host's own site — `cs_site_metrics_hosts[cs_site]`. It breaks the fleet. The
-9100 accept is emitted on *every* host, and the controller, nameservers,
+9100 accept is emitted on *every* host, and the controller,
 registry and backup servers have no `site` at all: for them the narrowed
 expression resolves to nothing, no accept is emitted, and every infrastructure
 scrape target stops answering — on single-site installs as well, where `site`

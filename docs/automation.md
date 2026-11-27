@@ -16,11 +16,11 @@ directory, the playbooks' entire input:
 * `hosts.yml` — the topology. The required host vars are asserted by
   `roles/preflight` (see `inventories/example/hosts.yml` for the full set):
   every node needs `hostname`, `primary_ip`, `public_ip`, `region`, `az`,
-  `container_network`, `container_network_name` and `docker_data_device`;
-  every nameserver needs `powerdns_name`.
+  `container_network`, `container_network_name` and `docker_data_device`.
 * `group_vars/all/main.yml` — the four domains (`cs_portal_domain`,
   `cs_metrics_domain`, `cs_registry_domain`, `cs_app_zone`), admin email,
-  DNS driver, ACME settings.
+  ACME settings, and optionally the load balancer certificate settings
+  (`cs_lb_acme_dns_*`, [lb-certificates.md](lb-certificates.md)).
 * `group_vars/all/secrets.yml` — the secrets listed in
   `docs/install.md` §4. All of them can be `openssl rand -hex 32`-style
   throwaways except `secret_key_base`/`user_auth_secret`, which just need to
@@ -29,8 +29,8 @@ directory, the playbooks' entire input:
   `--vault-password-file` instead of `--ask-vault-pass`.
 
 And, before the play starts, the DNS records from `docs/install.md` §3 — A
-records for the portal/metrics/registry domains, NS delegation (plus glue)
-for `cs_app_zone`. Created at the provider that hosts the parent zone they
+records for the portal/metrics/registry domains and each az's load balancer
+domain (A, plus the `*.` CNAME). Created at the provider that hosts the parent zone they
 are authoritative immediately; there is no propagation to wait for. Order
 matters only one way: **records first, then ansible** — if anything resolves
 a name before its record exists, the NXDOMAIN is negatively cached for the
@@ -81,7 +81,7 @@ ansible-playbook -i inventories/ci playbooks/site.yml \
 * **Port 80** must still reach the controller, metrics and registry hosts for
   HTTP-01 — the staging CA validates the same way. NAT'd test infra should
   use a DNS-01 provider instead (`docs/acme-providers.md`); the provider
-  credential can be scoped to the delegated test zone.
+  credential can be scoped to the test zone.
 * The **pass/fail gate is `roles/validate`**: it is the last play of
   `site.yml` and fails the run, so the playbook's exit code is the test
   result. `--tags validate` re-runs just the assertions.

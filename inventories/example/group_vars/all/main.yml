@@ -56,6 +56,13 @@ acme_account_email: admin@example.com
 # acme_eab_hmac_key: in secrets.yml  # Trust Services; optional for ZeroSSL.
 # acme_challenge_method: <see docs/acme-providers.md>; default HTTP-01 webroot
 
+# Load balancer certificates (controller 9.9+): the controller issues each load
+# balancer's <app_domain> and *.<app_domain> certificate itself over DNS-01.
+# The credential goes in secrets.yml (cs_lb_acme_dns_env). Unset, load balancers
+# keep their self-signed certificate. See docs/lb-certificates.md.
+# cs_lb_acme_dns_provider: cloudflare        # lego DNS provider code
+# cs_lb_acme_dns_alias_zone: acme.example.com   # optional; needs per-LB CNAMEs
+
 # Tailscale (optional): a host is on the tailnet if and only if
 # `tailscale_enabled` is true for it (default false). Uncomment to put every
 # host on it, and set `tailscale_enabled: false` on hosts or groups that stay

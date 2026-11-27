@@ -1,5 +1,54 @@
 # Changelog
 
+## November 27, 2026
+
+* **The provisioner no longer installs PowerDNS or creates DNS records.** It
+  seeds no controller DNS driver or zones, and `roles/powerdns` is gone. You
+  publish, at your own DNS host, for each az's load balancer domain: A/AAAA to
+  the load balancer and `*.<domain> CNAME <domain>`; preflight and validate
+  check that they resolve publicly (docs/install.md §3). The controller keeps
+  any DNS driver and zones it already has; ComputeStacks will remove PowerDNS
+  and the zone editor in a later release.
+
+  **Existing environments:** preflight now fails while the inventory has hosts
+  in a `nameservers`, `ns_primary` or `ns_followers` group. Delete the group.
+  Those hosts keep running untouched and unmanaged (this repository no longer
+  firewalls or monitors them); decommission them by hand. Leftover
+  `dns_driver`, `pdns_*` and `powerdns_*` variables only warn. For
+  `add-region.yml`, create the new az's records by hand before the run, on
+  your old nameservers if you still use them.
+
+* **The acme.sh `nsupdate` and `pdns` DNS-01 providers are removed** from
+  `acme_web`. Preflight fails if `acme_challenge_method` is one of them; pick
+  another provider or HTTP-01 (docs/acme-providers.md). Other providers and
+  HTTP-01 are unchanged.
+
+* **Controller 9.9 issues the load balancer certificates, and the provisioner
+  seeds its DNS settings.** The pin moves to 9.9. The controller orders each
+  load balancer's `<domain>` and `*.<domain>` certificate itself (lego,
+  DNS-01) with a credential you set in the inventory:
+  `cs_lb_acme_dns_provider` (lego provider code), `cs_lb_acme_dns_env`
+  (vaulted environment variables of that provider) and, optionally,
+  `cs_lb_acme_dns_alias_zone`. They are seeded as `le_dns_provider`,
+  `le_dns_provider_secret` and `le_dns_alias_zone` while unconfigured on the
+  controller, and new load balancers get `le: true` when a provider is set.
+  Preflight checks the settings; `roles/validate` reports each az's certificate
+  state and warns about a blank provider, an inventory/controller mismatch and
+  a wrong or leftover `_acme-challenge` CNAME. The self-signed certificate
+  keeps serving until the ACME one is active. docs/lb-certificates.md has the
+  details.
+
+  **Upgrading an existing environment to 9.9:** the controller no longer
+  validates load balancer certificates through its own PowerDNS, so they are
+  not issued or renewed until `le_dns_provider` is set. In order: create any
+  alias-zone `_acme-challenge` CNAMEs; set the inventory variables and re-run
+  `site.yml` (it seeds them while unconfigured) or set them in the controller
+  admin; clear or replace an old `le_dns_alias_zone` left from the PowerDNS
+  setup (it is now a zone at your DNS provider); then turn on `le` for each
+  existing load balancer in the admin, or run
+  `rake "lets_encrypt:issue_lb[<id>]"` (or `[all]`) in the controller, because
+  the seed does not change existing rows.
+
 ## November 25, 2026
 
 * **cs-agent 3.7.0** (was 3.6.0): a systemd watchdog restarts an agent

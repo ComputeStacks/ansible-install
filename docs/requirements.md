@@ -17,7 +17,7 @@ run, with nothing changed, when a host does not match.
   one (`public_ip`).** They may be the same address.
 * **Outbound HTTPS** to the package and image sources: the Ubuntu archive,
   `download.docker.com`, `ghcr.io` and Docker Hub, `github.com` (acme.sh and
-  borg releases), `apt.postgresql.org` (controller and nameservers),
+  borg releases), `apt.postgresql.org` (controller),
   `repo.computestacks.com` (nodes), your ACME CA, and tailscale's servers
   when the tailnet is enabled.
 * **One disk is enough** for every host except a node.
@@ -36,7 +36,6 @@ column says what grows.
 | `controller` | 4 | 8 GB | 40 GB | — | postgres, and the `cstacks database-backup` dumps in `/var/lib/computestacks/backups` until you copy them off |
 | `metrics` | 2 | 4 GB | 20 GB | — | prometheus TSDB and loki chunks (loki keeps 14 days), with the number of nodes |
 | `backup` | 2 | 2 GB | 20 GB | — | borg repositories in `/var/lib/computestacks/backups`: every tenant volume, times retention. Size this one for storage first |
-| `nameservers` | 2 | 2 GB | 12 GB | — | very little |
 | `nodes` | 2 | 4 GB | 20 GB | **required**, 30 GB tested | everything tenant: images, container layers, volumes — all on the data disk |
 | `registry` | — | — | — | — | not covered by the test environment; tenant registries store under `/computestacks-mnt` on the root disk |
 
@@ -117,7 +116,6 @@ at least this:
 | `controller` | tcp 80, 443 | anywhere |
 | `nodes` | tcp 80, 443; tcp and udp 10000–50000 (published container ports) | anywhere |
 | `registry` | tcp 80, 443; tcp 10000–50000 (tenant registries) | anywhere |
-| `nameservers` | tcp and udp 53, IPv4 and IPv6 | anywhere |
 | `metrics` | tcp 80 (ACME HTTP-01) | anywhere |
 | `metrics` | tcp 3101 (prometheus) | the controller |
 | `metrics` | tcp 3102 (loki) | the controller and the nodes |
@@ -134,6 +132,6 @@ CIDR must not overlap anything else in the environment (RFC 1918, at least a
 ## DNS
 
 The portal, metrics and registry names must resolve to their hosts before
-the run, because their certificates are issued during it; with the bundled
-nameservers the tenant zone must already be delegated to them. The records
+the run, because their certificates are issued during it, and each az's load balancer domain needs its own
+records at your DNS host (the provisioner runs no DNS server). The records
 are listed in [install.md §3](install.md#3-point-dns-at-the-hosts).

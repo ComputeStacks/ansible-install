@@ -18,7 +18,7 @@ validate and the docker upgrade use.
 **Attach mode:** new node only; `existing_env` nodes are never probed.
 **Requires:** `docker_data_device` on every node; `ansible.posix` (mounts).
 
-**Nodes only.** The controller, metrics, registry, backup and nameserver hosts
+**Nodes only.** The controller, metrics, registry and backup hosts
 keep a single disk and docker's default locations.
 
 **Required var: `docker_data_device`** on every node (host var or a `nodes`

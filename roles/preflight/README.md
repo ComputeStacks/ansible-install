@@ -46,7 +46,7 @@ the first by design. (Tailnet membership needs no attach-only check:
 
 **Attach mode:** runs on every host, existing ones included, and changes
 nothing; the OS, data-disk, registry-login and controller-image checks skip
-`existing_env` hosts, and the delegation check is skipped in attach mode.
+`existing_env` hosts.
 **Requires:** — (it includes `roles/node_storage`'s read-only `probe` and pure
 `classify` task files, and `roles/cs_agent`'s pure `export_check`, itself).
 
@@ -99,8 +99,8 @@ change nothing.
   filter (`filter_plugins/preflight_ipv6.py`, Python's `ipaddress`; no
   extra collection or `netaddr` needed), which also says what is wrong and,
   for a non-canonical address, what to write instead. Canonical form is
-  required because roles/powerdns, roles/validate and this role compare the
-  address as text against what PowerDNS and dig print. Unset, null and
+  required because roles/validate and this role compare the
+  address as text against what dig prints. Unset, null and
   empty all mean "no IPv6 address".
 - **Backup export to S3.** Each new node runs `roles/cs_agent`'s pure
   `export_check` with `cs_agent_export_check_fail: false`, and ONE `run_once`
@@ -109,8 +109,24 @@ change nothing.
   off) always pass. The rules are in `roles/cs_agent/README.md`.
 - `az` values are unique across `groups['nodes']` (exactly one node per
   availability zone).
-- Exactly one host in `groups['controller']`, and — when
-  `dns_driver == 'powerdns'` — exactly one in `groups['ns_primary']`.
+- Exactly one host in `groups['controller']`.
+- **No retired DNS inventory** (`tasks/legacy_dns.yml`, decided by the
+  `preflight_legacy_dns` filter). Fails while the inventory has hosts in a
+  `nameservers`, `ns_primary` or `ns_followers` group: delete the group. Those
+  hosts keep running untouched and unmanaged (this repository no longer
+  firewalls or monitors them); decommission them by hand. Fails if
+  `acme_challenge_method` is `nsupdate` or `pdns`, the removed acme.sh
+  providers. Leftover `dns_driver`, `pdns_*` and `powerdns_*` variables only
+  warn; they are ignored.
+- **Load balancer certificate settings** (`tasks/lb_acme.yml`, decided by the
+  `preflight_lb_acme` filter, proved by `tests/preflight_lb_acme.yml`). With
+  `cs_lb_acme_dns_provider` empty everything passes unless the env or alias
+  zone is set without it. With a provider: it must be a lego provider code,
+  `cs_lb_acme_dns_env` must be a non-empty mapping of uppercase variable names
+  to non-empty single-line strings (not `PATH` or
+  `CERT_ISSUER_INSECURE_SKIP_PROPAGATION_CHECK`), and an alias zone must be a
+  lowercase dotted name. Messages name keys, never values
+  (docs/lb-certificates.md).
 - **Site scoping** (docs/contracts.md §Vocabulary), three assertions:
   - Every metrics host and backup host declares a `site` host var, checked
     **only when the inventory holds more than one site**. A single-site
@@ -257,10 +273,10 @@ the template agree on which sources are accepted.
 
 ## The load balancer DNS checks
 
-**Hand-made records (`tasks/app_domain_dns.yml`).** When the DNS driver is
-not the bundled PowerDNS, or `powerdns_manage_lb_records` is off, the operator
-publishes each new az's pair before the run (docs/install.md §3). Preflight
-resolves both publicly: the apex must include that node's `public_ip`, and
+**Records you publish (`tasks/app_domain_dns.yml`).** The provisioner creates
+no DNS records: the operator publishes each new az's pair at their own DNS
+host before the run (docs/install.md §3). Preflight resolves both publicly:
+the apex must include that node's `public_ip`, and
 `<preflight_app_domain_probe_label>.<cs_app_domain>` must be a CNAME to the
 apex. The failure message names the exact record to create. It also resolves
 the apex AAAA and **warns** (does not fail) about any address that is not the
@@ -268,42 +284,9 @@ the apex AAAA and **warns** (does not fail) about any address that is not the
 that is not one of the load balancer's public addresses, but one an operator
 added on the controller by hand is invisible from here.
 
-**Records roles/powerdns writes (`tasks/app_zone_delegation.yml`).** With
-`dns_driver: powerdns`, roles/powerdns writes the pair into the bundled tenant
-zone early in the run, so there is nothing public to dig for yet — the check
-above could only fail. What the operator still owns, and what can already be
-wrong, is the **delegation** of `cs_app_zone` at its parent. Preflight finds
-the parent's nameservers (`dig +short NS` on `cs_app_zone` minus one label,
-walking further up past empty non-terminals, bounded by the zone's labels),
-asks up to `preflight_app_zone_delegation_servers` of them **non-recursively**
-for `cs_app_zone NS`, and requires every one that answers to hand out exactly
-the set of `powerdns_name` across `groups['nameservers']` (lowercase,
-trailing dot ignored). Three failures are kept apart: the parent's
-nameservers could not be found (a lookup problem on this machine), none of
-them answered (reachability), and the delegation is missing or names other
-servers — only the last lists the NS records to create at the parent. Glue is
-mentioned when a nameserver's name lies under the zone, but not checked.
-
-It is **skipped in attach mode** (`preflight_attach_mode`, the controller's
-`existing_env`): the zone is already live and delegated, and this run neither
-made nor can change that. The records themselves are checked at the end of
-either run by roles/validate — `dns` on every nameserver and
-`lb_domain_public` through public resolution — and a one-line `debug` here
-says so.
-
-"Managed" is decided by `preflight_lb_records_managed`, the same expression,
-spelled the same way, that roles/powerdns and roles/validate use:
-
-```yaml
-dns_driver | default('none') == 'powerdns'
-and groups['ns_primary'] | default([]) | length > 0
-and (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool
-```
-
-To go back to hand-made records with the bundled PowerDNS, set
-`powerdns_manage_lb_records: false` **on the nameservers**
-(`group_vars/nameservers` or `ns_primary`'s host vars) — that is where
-roles/powerdns reads it, and the only place this role looks.
+The check runs in attach mode too, for the new az only. On an existing
+environment still served by its old nameservers, create the new az's records
+there by hand before the run.
 
 ## The registry checks (`tasks/registry.yml`, `tasks/registry_probe.yml`)
 
@@ -369,10 +352,8 @@ not earn.
 | `preflight_attach_mode` | derived | The CONTROLLER's `existing_env` — not the host this role happens to run against. |
 | `preflight_attach_nodes_sharing_zone` | derived | New nodes whose `cs_app_domain` is still `cs_app_zone` — set nowhere, or set equal to it, which are the same failure. |
 | `preflight_wildcard_domain_overrides` | derived | Hosts setting the retired `controller_wildcard_domain` to anything but `cs_app_zone`. `roles/controller`'s own default is not in scope here, so anything found was written by an operator. |
-| `preflight_check_app_domain_dns` | `true` | Both load balancer DNS checks — the public record dig (hand-made records) and the delegation check (records written by roles/powerdns). False for split horizon or records published after the run. |
+| `preflight_check_app_domain_dns` | `true` | The public record dig for each new az's load balancer domain. False for split horizon or records published after the run. |
 | `preflight_app_domain_probe_label` | `cs-preflight-probe` | Label queried under `*.<cs_app_domain>` to exercise the wildcard. Must not exist as a real record. |
-| `preflight_lb_records_managed` | derived | Whether roles/powerdns writes the load balancer records this run. Decides which DNS check runs. Override `powerdns_manage_lb_records` on the nameservers, not this. |
-| `preflight_app_zone_delegation_servers` | `3` | How many of the parent zone's nameservers are asked for the referral; every one that answers must agree. |
 | `preflight_verify_registries` | `true` | Every network read in this role, in one switch. False makes preflight purely local, for an air-gapped converge. |
 | `preflight_docker_groups` | `controller`, `metrics`, `registry`, `nodes` | Groups whose hosts run a docker daemon. Mirrors the `hosts:` line of site.yml's "Docker hosts" play; a host outside them never logs in to a registry. |
 | `preflight_verify_controller_image` | `true` | The image existence-and-tag check specifically; the credential probes stay on. |
@@ -398,8 +379,8 @@ Consumed from elsewhere in the inventory (not owned by this role):
 derivations in `playbooks/group_vars/all/sites.yml`,
 `app_domain`, `public_ipv6`, `cs_app_zone` and `cs_app_domain`
 (`playbooks/group_vars/all/app_domains.yml`), `cs_new_nodes`,
-the retired `controller_wildcard_domain`, `dns_driver`, `powerdns_name` and
-`powerdns_manage_lb_records` (on the nameservers),
+the retired `controller_wildcard_domain`, `cs_lb_acme_dns_provider`,
+`cs_lb_acme_dns_env`, `cs_lb_acme_dns_alias_zone`, `acme_challenge_method`,
 `existing_env`, `secret_key_base`, `user_auth_secret`, `tailscale_authkey`,
 `tailscale_enabled`, `cs_registry_logins` / `cs_controller_registry` (composed
 in `playbooks/group_vars/all/registries.yml`), `controller_image_repo`,

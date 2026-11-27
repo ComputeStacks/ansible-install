@@ -26,9 +26,6 @@ manifest variable, never by value.
 | 12 | node / agent → package and image repos | public | 443 | none | Package and image pulls. |
 | 13 | internet → node haproxy (tenant ingress) | node public | `tenant_http` / `tenant_https` + `tenant_port_begin`–`tenant_port_end` tcp/udp | — | Published container ports. |
 | 14 | node fluentd → loki (write) | metrics host | `metrics_loki` TLS | basic auth | Container log shipping. |
-| 15 | internet → nameservers | ns hosts | `dns` tcp/udp, v4 + v6 | — | Authoritative DNS. |
-| 16 | controller → pdns API | primary nameserver | `pdns_api` HTTP | pdns API key | Zone management. |
-| 17 | ns follower ↔ primary | ns hosts | `postgres` | pg replication | powerdns database replication. |
 | 18 | internet → registry | registry public | 443 + `tenant_port_begin`–`tenant_port_end` | registry auth | Tenant registries. |
 | 19 | controller → registry | registry host | `ssh` (the dialed host's `ssh_port`) | controller app key | `DockerSSH` container management. |
 

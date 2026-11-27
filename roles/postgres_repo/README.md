@@ -6,7 +6,6 @@ does not carry it. Runs before every role that installs a postgres package.
 
 | Runs in | Play | Hosts |
 | --- | --- | --- |
-| `site.yml` | "Nameservers" (before `powerdns`) | `nameservers` |
 | `site.yml` | "Controller infrastructure" (before `geerlingguy.postgresql`) | `controller` |
 | `add-region.yml`, `upgrade-docker.yml`, `unseal.yml` | not run | — |
 
@@ -86,9 +85,7 @@ a versioned postgres package.
 attach mode installs no postgres package anywhere. Its plays touch the new
 nodes (which run no database), the existing controller (firewall appends,
 `cstacks`, seeding, backfills — never `geerlingguy.postgresql`), the existing
-metrics and backup hosts, and — with `dns_driver: powerdns` — the existing
-leader nameserver, where only `roles/powerdns`'s `lb_records` entry point runs
-(`pdnsutil` record writes; it installs nothing). An existing environment's
+metrics and backup hosts. An existing environment's
 postgres is not this repository's to re-point.
 
 ## Variables

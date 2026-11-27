@@ -20,7 +20,7 @@ Its consumers:
 * `roles/metrics` scrapes `cs_ports.node_exporter` on every node (per-AZ
   `file_sd` fragments) **and** on the infrastructure groups
   (`metrics_infra_node_exporter_groups`: controller, registry, metrics,
-  backup, nameservers) as static targets;
+  backup) as static targets;
 * `roles/firewall` opens that port for the metrics host's addresses on every
   host in the fleet.
 

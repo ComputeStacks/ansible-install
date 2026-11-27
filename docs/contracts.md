@@ -20,8 +20,7 @@ the wildcard certificate it serves. An OPTIONAL inventory HOST var on a node,
 defaulting to `cs_app_zone`. Every az has exactly one load balancer and in a
 real estate every one of them answers on a different name, so this is per node
 and never one environment-wide scalar. `cs_app_zone` is NOT retired by it and
-does not become per-az: it stays the single parent tenant `Dns::Zone` — one
-`pdnsutil create-zone`, one `dns.zones` entry — and every `app_domain` lives
+does not become per-az: it stays the single parent tenant zone, and every `app_domain` lives
 at or under it.
 
 `site` == the physical facility a host lives in. A provisioner-only concept:

@@ -38,8 +38,7 @@ top-level key set before it writes anything.
    see "Sites" below), the admin account, the metric/log client credentials
    **for every site this run seeds**, the region tunables (against the
    *model's* validations), the required inventory vars on each node it will
-   render, a single registry host, a dns driver it can seed, and — for
-   PowerDNS — the API keys and a unique `powerdns_name` per nameserver. It
+   render, and a single registry host. It
    also fails on a retired `controller_seed_{prometheus,loki}_{username,password}`
    or `controller_seed_lb_domain` still set in an inventory, rather than
    ignoring it silently.
@@ -50,8 +49,8 @@ top-level key set before it writes anything.
    YAML, carries `schema_version: 1`, has at least one location, and uses no
    top-level key outside `vars/main.yml`'s frozen section list.
 4. Writes it to `/var/lib/computestacks/manifest.yml`, root `0600`,
-   `diff: false` + `no_log` (it carries the admin password, the DNS API keys,
-   the client credentials, the stats password and the load balancer's private
+   `diff: false` + `no_log` (it carries the admin password, the load balancer DNS
+   credential, the client credentials, the stats password and the load balancer's private
    key).
 5. Runs `DRY_RUN=1 cstacks seed` in attach mode, or with
    `controller_seed_update_addresses` — the paths that can reach an existing
@@ -60,7 +59,7 @@ top-level key set before it writes anything.
    (see "Create-only, and the domain gate"). In attach mode, or with
    `controller_seed_update_addresses`, it also prints what it would create,
    any drift warnings and any `[rotate]` lines (paired credentials — client
-   basic-auth, DNS API keys, LB shared certificate/stats password — are the
+   basic-auth, LB shared certificate/stats password — are the
    ONE class the apply converges on existing rows; everything else is
    create-if-absent), and `pause`s for the operator. The two-step attach
    variables force the preview too.
@@ -102,7 +101,10 @@ role is the only place the mapping exists (docs/contracts.md §Vocabulary).
 | `app_domain` host var, else `cs_app_zone` | `…load_balancer.domain` **and** the CN of `…load_balancer.shared_certificate` | **Per az**, through the cross-host-safe `hostvars[host].cs_app_domain`. One load balancer per az, and in a real estate every one of them answers on a different domain. Both fields are keyed off the same value so they cannot disagree — a mismatch is a failed TLS handshake for every tenant container in that az. |
 | `site` host var | *(nothing — the controller has no column for it)* | Decides **which** client each az names. One `metric_clients[]`/`log_clients[]` entry per site this run seeds nodes into, deduped by endpoint. |
 | that site's `metrics_domain`, else `cs_metrics_domain`, + `cs_ports.metrics_*` | `metric_clients[].endpoint` / `log_clients[].endpoint` | Regions reference them by **exact endpoint string**. A single-site inventory renders the same one-element lists it always did. |
-| `dns_driver: powerdns` + `groups['nameservers']` | `dns.driver` / `dns.zones` | Omitted entirely when `dns_driver: none`. |
+| `cs_lb_acme_dns_provider` / `_env` / `_alias_zone` | `settings.values.le_dns_provider` / `le_dns_provider_secret` / `le_dns_alias_zone`; each load balancer's `le` | Rendered only when a provider is set (and the alias zone only when set), and, like every setting, written only while unconfigured on the controller. The env dictionary is rendered as one `KEY=value` per line. With a provider, new load balancers are created with `le: true` (`controller_seed_lb_le`). docs/lb-certificates.md. |
+
+The manifest carries no `dns` section: the seed creates no DNS driver and no
+zones, and leaves any a controller already has as it is.
 
 ## Sites, and which nodes reach the apply
 
@@ -234,16 +236,6 @@ is a topology change: run it with `controller_seed_update_addresses: true`.
 * **`registry_node` is the registry host's `primary_ip`**, not a domain: the
   controller SSHes to it (`DockerSSH`). The four registry settings are omitted
   when the inventory has no registry group.
-* **The DNS keys look swapped and are not.** `ProvisionDriver#cloud_auth`
-  builds `Pdns::Auth.new(0, username, api_key_column, api_secret_column)` and
-  `Pdns::Auth` is `(user_id, username, password, api_key)`. So the PowerDNS
-  **webserver password** (`pdns_web_key`) goes in `api_key`, and the **X-API-Key**
-  (`pdns_api_key`) goes in `api_secret`. v1 did the same.
-* **The PowerDNS API endpoint is the leader's `primary_ip`, never its tailnet
-  address.** `roles/powerdns` writes the controller's `primary_ip`/`public_ip`
-  into `webserver-allow-from`; a request from the controller's tailnet address
-  would be rejected. (It is plain HTTP with an API key in a header — v1
-  behavior, unchanged here; see "Limitations".)
 * **`loki_endpoint` carries no credentials.** It is the *container* write path;
   `Region#loki_container_endpoint` splices the log client's username/password
   into it controller-side.
@@ -251,12 +243,9 @@ is a topology change: run it with `controller_seed_update_addresses: true`.
   is the node's `app_domain` host var falling back to `cs_app_zone`. Every az
   has its own load balancer and in a real estate every one of them answers on
   a different domain; production runs nine. `cs_app_zone` is not the LB
-  domain: it names **one** parent `Dns::Zone`, one `dns.zones` entry (v1 kept
+  domain: it names the **one** parent tenant zone (v1 kept
   the same split, with `cs_app_url` for the LB domain and the certificate's
-  CN). The controller's
-  `LetsEncryptAuth#dns_zone` walks *up* from a container FQDN and takes the
-  broadest `Dns::Zone` that matches, so one parent zone serves every LB domain
-  beneath it.
+  CN).
 * **`shared_certificate` is looked up by that same domain.** The LB domain
   **must** equal the CN/SAN of the certificate it serves or every tenant TLS
   handshake in that az mismatches, so there is deliberately no second variable
@@ -405,8 +394,8 @@ with the addresses; a `no` or `error` is reported by the non-failing task
 line. Neither fails the seed: the rows are committed, the step's assert keys
 on `DONE` (not the exit code), and roles/validate's `lb_domain` check is the
 gate. The check resolves the apex and wildcard from the controller's own
-resolvers, so the DNS records must be published by then (roles/powerdns
-writes them earlier in add-region.yml); resolver lag can still give `no`.
+resolvers, so the DNS records must be published by then (you publish them before the
+run; roles/preflight checked them); resolver lag can still give `no`.
 It writes an audit row and an event log entry on the controller like any
 domain check, and **with `controller_seed_lb_le: true` a valid domain may
 also have a Let's Encrypt certificate ordered** right then, as on the
@@ -433,12 +422,11 @@ without which the new region is invisible to every user in the default group.
 `new` links the default group to the regions this apply creates and to no
 existing one (`controller_seed_attach_link_regions`, also used when
 `controller_seed_full_manifest` is on); it needs controller 9.7.10 or later.
-No `settings`, no `dns`, no `metric_clients`/`log_clients`, no `products`,
+No `settings`, no `metric_clients`/`log_clients`, no `products`,
 `catalog`, `features` or `admin_user`. Set
 `controller_seed_full_manifest: true` to render the whole greenfield document
 against a live controller instead. Nothing in it is an overwrite there:
-settings are seeded only while still unconfigured, and the DNS driver is
-never reconfigured once it exists — a difference from the manifest is
+settings are seeded only while still unconfigured — a difference from the manifest is
 reported as drift, not applied. Do it deliberately anyway: it is how a
 still-unconfigured setting gets seeded, and how the fuller drift report gets
 printed.
@@ -544,8 +532,7 @@ warnings to stderr, which is not hashed. But the preview really runs the apply
 inside a transaction it rolls back, and PostgreSQL does not rewind a sequence
 on rollback, so a row the preview creates gets a new id each time. Those ids
 are printed only as the manifest side of a `*_id` attribute (`metric_client_id`,
-`log_client_id`, `provision_driver_id`, `primary_id`) and in the DNS module's
-`ProvisionDriver #<id>` link, and only those are replaced with `<id>`. A
+`log_client_id`, `provision_driver_id`, `primary_id`) and only those are replaced with `<id>`. A
 topology-only attach manifest prints none that vary; `controller_seed_full_manifest`
 and a greenfield preview can. Every other byte counts, so any change in what
 would be created, linked, rotated, drift-reported or skipped changes the
@@ -564,18 +551,18 @@ inventory itself between the phases is the wrapper's job.
 | `controller_seed_dry_run_first` / `_confirm` | `true` / `true` | Whether the preview is PRINTED, and whether the run pauses. The `DRY_RUN` pass itself RUNS in attach mode or with the address flag below, regardless of either — the domain gate reads it, so an output flag must not disarm it. |
 | `controller_seed_stop_after_preview` | `false` | Two-step attach phase 1: stop after the preview and its gates, print `controller_seed_preview_sha256=<hex>`, delete the manifest, apply nothing. add-region.yml only. Pass as an extra var. |
 | `controller_seed_expect_preview_sha256` | `""` | Two-step attach phase 2: apply only when this run's preview has this fingerprint; fail before the apply otherwise. Empty: no check. |
-| `controller_seed_update_addresses` | `false` | **Deliberate topology changes only.** Runs the apply with `UPDATE_ADDRESSES=1`: `region.acme_server`, `node.agent_host` (incl. clearing) and the DNS driver endpoint are updated on existing rows, reported as `[readdress]` lines. Full run or warm fact cache only; the new path must already be up — the controller dials the new address on its next call. |
+| `controller_seed_update_addresses` | `false` | **Deliberate topology changes only.** Runs the apply with `UPDATE_ADDRESSES=1`: `region.acme_server`, `node.agent_host` (incl. clearing) are updated on existing rows, reported as `[readdress]` lines. Full run or warm fact cache only; the new path must already be up — the controller dials the new address on its next call. |
 | `controller_seed_registry_node` | first registry host's `primary_ip` | `Setting.registry_node`. Empty ⇒ the registry settings are omitted. |
 | `controller_seed_cr_le` | `{{ cs_registry_domain }}` | `Setting.cr_le`. |
 | `controller_seed_settings_extra` | `{}` | Extra `Setting` rows (`company_name`, `app_name`, `general_support`, `acme_email`, …). **Seed-only** — written only while nobody has configured that setting yet, and an unknown name aborts the apply. |
 | `controller_seed_metric_endpoint` / `_log_endpoint` | `https://{{ cs_metrics_domain }}:{{ cs_ports.metrics_prometheus / metrics_loki }}` | The **single-site fallback**, unchanged. Used for a site with no metrics host in the inventory — which is every host of an inventory that never mentions `site`. A site whose metrics host *is* in the inventory uses that host's own `metrics_domain` instead, so on an attach run this pair is normally **not** consulted at all. The apply matches a client on the exact endpoint string, and the lever for making that string match an existing row is `metrics_domain` on the metrics host plus `cs_ports.metrics_prometheus` / `_loki` — not these. If a live `MetricClient.endpoint` has a shape those cannot produce (a path, a trailing slash, plain http), stop and add an explicit per-site override rather than bending `cs_metrics_domain`, which also names the certificate and the loki push URL. |
 | `controller_seed_prometheus_username` / `_password`, `controller_seed_loki_username` / `_password` | **retired** | The client basic-auth is per site now, with one spelling (docs/contracts.md §Site scoping). Set `prometheus_basic_auth_password` / `loki_basic_auth_password` and `acme_web_{prometheus,loki}_username` for the environment-wide values, and `metrics_site_credentials` in the vaulted secrets for a per-site override. `tasks/main.yml` **fails** if one of the four is still set, rather than ignoring it — the apply rotates a client's username/password on an existing row (`Writer#rotate!` skips a value that has not actually changed, but a dropped override is precisely a value that HAS changed), so a silently-dropped override would put the wrong password on a live controller. |
-| `controller_seed_dns_endpoint` | `http://<ns_primary primary_ip>:{{ cs_ports.pdns_api }}/api/v1/servers` | Ends at `/servers`, NOT `/servers/localhost`: `powerdns-ruby` appends the server id itself, and the doubled path is a 404 the gem raises as `Pdns::UnknownObject`. |
-| `controller_seed_pdns_zone_type` | `master` | `settings.config.zone_type`. |
 | `controller_seed_p_net_size` | `27` | 24–29 (model validation). |
 | `controller_seed_pid_limit` | `300` | v1 value. Column name is `pid_limit`, singular. |
 | `controller_seed_ulimit_nofile_soft` / `_hard` | `2500` / `3000` | Hard must be ≥ soft — docker rejects every container start otherwise and **the model does not check it**, so this role does. |
 | `controller_seed_lb_domain` | **retired** | It was ONE scalar rendered into EVERY az's load balancer, and every az's load balancer answers on a different domain. The domain is `cs_app_domain` per node now: set `app_domain` as a host var (a node that sets none takes `cs_app_zone`, which is what this defaulted to). `tasks/main.yml` **fails** if an inventory still sets it, rather than ignoring it — an operator who set it meant to choose the LB domain, and quietly rendering something else would publish tenant containers under a name their DNS does not answer for, with nothing in the run, the drift report or `validate` mentioning the variable. |
+| `controller_seed_lb_acme_dns_provider` / `_env` / `_alias_zone` | `cs_lb_acme_dns_provider` / `_env` / `_alias_zone`, else empty / `{}` / empty | See the manifest table above. `_env` is a secret: keep it vaulted. |
+| `controller_seed_lb_le` | `true` when a provider is set | The `le` flag of each load balancer the seed creates. Existing rows are not changed. |
 | `controller_seed_lb_stats_bind` | `*:{{ cs_ports.haproxy_stats }}` | Same value the metrics scrape and the firewall use. |
 | `controller_seed_lb_stats_password` | `haproxy_stats_password`, else derived from `secret_key_base` | Never leave it at the column default. |
 | `controller_seed_shared_cert_path` | `{{ controller_wildcard_cert \| default('/var/lib/computestacks/.ssl_wildcard/sharedcert.pem') }}` | The **legacy** path, and the one operator override inside `cs_app_domain_cert_paths`: it supplies the entry for the domain equal to `cs_app_zone`. Every *other* domain derives its path from `cs_app_wildcard_dir` and this variable does not touch them. v1 used this same path, which is why it is still the **attach-mode escape hatch** — on a controller with a non-default `controller_data_dir`, point it at that environment's existing shared certificate pem. (A new az attached to an existing environment should set its own `app_domain` and takes the per-domain path instead; `roles/preflight` asserts exactly that.) |
@@ -585,7 +572,7 @@ inventory itself between the phases is the wrapper's job.
 
 Consumed, not owned: `cs_portal_domain`, `cs_registry_domain`,
 `cs_metrics_domain`, `cs_app_zone`, `cs_admin_email`, `cs_admin_password`,
-`currency`, `dns_driver`, `pdns_api_key`, `pdns_web_key`,
+`currency`, `cs_lb_acme_dns_provider`, `cs_lb_acme_dns_env`, `cs_lb_acme_dns_alias_zone`,
 `prometheus_basic_auth_password`, `loki_basic_auth_password`,
 `secret_key_base`, `tailscale_enabled`, `tailscale_access_only`, `existing_env`, `cs_ports`, the
 site contract (`playbooks/group_vars/all/sites.yml`): `cs_site`,
@@ -622,11 +609,6 @@ node.
 
 ## Inventory requirements this role adds
 
-* Every host in `groups['nameservers']` must define **`powerdns_name`** (its
-  FQDN) in the inventory when `dns_driver: powerdns`. It becomes the zone's NS
-  records. `roles/powerdns`'s default is a placeholder and role defaults are
-  not visible from this play, so the value has to be inventory-level; the role
-  asserts it is present and unique per nameserver.
 * `haproxy_stats_password` is optional but recommended in the vaulted secrets.
 * **`public_ipv6`** is optional per node and unset by default: the az's load
   balancer's public IPv6 address, added as a `public` LoadBalancerAddr (see
@@ -643,13 +625,6 @@ node.
   `cs_app_zone`.
 
 ## Limitations
-
-* **The PowerDNS API call is plain HTTP** (`http://<ip>:8081`) carrying the
-  API key in a header, exactly as v1. It cannot use the tailnet address
-  because `webserver-allow-from` lists the controller's `primary_ip`/
-  `public_ip`. Worth revisiting as a pair (powerdns + controller_seed).
-* **AutoDNS is not implemented.** `dns_driver` must be `powerdns` or `none`;
-  anything else fails loudly rather than rendering half a driver.
 
 ## Requirements
 

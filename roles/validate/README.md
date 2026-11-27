@@ -22,8 +22,7 @@ unit set on an `existing_env` host (see [Attach mode](#attach-mode)).
 
 The last play of `site.yml` and `add-region.yml`, and the check that follows
 each node's upgrade in `upgrade-docker.yml`, where only the per-node checks
-apply (the play holds nodes alone, so the controller-only checks — `dns`,
-`pdns_api`, `containers` — do not run). It changes nothing — every task is read-only
+apply (the play holds nodes alone, so the controller-only check — `containers` — does not run). It changes nothing — every task is read-only
 and `changed_when: false` — and asserts that the control-plane graph in
 docs/contracts.md is actually wired, on the real addresses and with the real
 credentials, from the hosts that use them.
@@ -48,11 +47,9 @@ this role exists to catch at install time.
 | `ssh` | nodes, registry | **the controller** | Root SSH from the controller succeeds. |
 | `portal` | nodes | itself | `https://<cs_portal_domain>` answers. |
 | `acme_backend` | nodes | itself | The controller's ACME backend answers at the exact `regions[].acme_server` address this az's manifest carries. |
-| `lb_domain_public` | nodes (new azs only), **only when roles/powerdns wrote the records** | **the control machine** | Public DNS resolves this az's `cs_app_domain` to an A set including its `public_ip` (and an AAAA set including its `public_ipv6`, when set), and a label under `*.<cs_app_domain>` to a CNAME to the apex. Warns about an apex AAAA that is no node's `public_ipv6`. |
+| `lb_domain_public` | nodes (new azs only) | **the control machine** | Public DNS resolves this az's `cs_app_domain` to an A set including its `public_ip` (and an AAAA set including its `public_ipv6`, when set), and a label under `*.<cs_app_domain>` to a CNAME to the apex. Warns about an apex AAAA that is no node's `public_ipv6`. |
 | `lb_domain` | nodes (new azs only) | **the controller** | This az's `LoadBalancer` reached `domain_valid`, and its `domain` equals the CN of its `shared_certificate`. |
-| `dns` | controller (once) | the controller | Every nameserver returns NS records for `cs_app_zone` — and, when roles/powerdns wrote the load balancer records, serves every new az's apex A (including its `public_ip`) and wildcard CNAME (to the apex). |
-| `pdns_api` | controller (once) | the controller | The PowerDNS HTTP API answers on the address `controller_seed_dns_endpoint` dials. pdns keeps serving DNS with its webserver dead, so no other check sees this. |
-| `dns_replication` | PowerDNS followers | itself | `pg_stat_wal_receiver` shows this replica actually streaming. A detached replica keeps answering queries from stale data, so `dns` above passes while the zone silently rots. |
+| `lb_acme` | nodes (new azs only) | **the controller** and **the control machine** | Reports whether this az's load balancer has an active ACME certificate or is on the self-signed fallback, and **warns, never fails**, about: a blank `le_dns_provider` on the controller (no load balancer certificate is issued or renewed), an inventory provider or alias zone that differs from the controller's, a provider with no credentials, and a wrong, missing or leftover `_acme-challenge` CNAME (with an alias zone it must be `lb<LB id>.<alias zone>`; without one, any CNAME must go). Only the presence of the credentials is read, never the value. See docs/lb-certificates.md. |
 
 Each check is a task file included under its own tag, so
 
@@ -181,48 +178,38 @@ The check runs only for hosts in `cs_new_nodes`. An `existing_env` region's
 load balancer was never in this run's manifest, and its DNS is not this run's
 claim to make.
 
-### Load balancer records the provisioner wrote
+### Load balancer records you publish
 
-With `dns_driver: powerdns`, roles/powerdns writes each new az's pair —
+The provisioner creates no DNS records: you publish each new az's pair —
 `<cs_app_domain> A <public_ip>` and `*.<cs_app_domain> CNAME <cs_app_domain>.`
-— into the bundled tenant zone early in the run. Those records cannot exist
-when roles/preflight runs, so preflight checks only the zone's delegation at
-its parent, and the records are checked here, twice, from two directions:
+— at your own DNS host (docs/install.md §3), and roles/preflight already
+checked them before anything was built. `lb_domain_public` checks them again
+at the end, **from the control machine, through its ordinary recursive
+resolver**: the apex resolves to the node's `public_ip` (and an AAAA set
+including its `public_ipv6`, when set), and a label under the wildcard to a
+CNAME to the apex. A resolver still holding a negative answer cached before
+the records existed is the usual cause of a failure here. Any apex AAAA that
+is not the `public_ipv6` of a node on that name is **warned** about rather
+than failed: the controller rejects it unless it is one of the load
+balancer's addresses, but one added there by hand is invisible from here. A
+split-horizon control machine that cannot see public DNS skips it with
+`validate_skip: [lb_domain_public]`. The node list is `cs_new_nodes`, read
+locally.
 
-- **`dns`, from the controller, against every nameserver's own address.** A
-  record the leader lacks is roles/powerdns's job (a re-run converges it); a
-  record only a follower lacks is replication, and the failure message says
-  which of the two it is. Every new node is checked, including one whose
-  `cs_app_domain` is a zone of its own on these servers — roles/powerdns
-  skips writing those, but what the servers *serve* is what matters, and this
-  play cannot see which names are zones.
-- **`lb_domain_public`, from the control machine, through its ordinary
-  recursive resolver** — the same check preflight makes for hand-made
-  records. When `dns` passes and this fails, the path to the nameservers is
-  wrong: the parent's delegation of `cs_app_zone`, or a resolver still holding
-  a negative answer cached before the records existed. The message says so and
-  never tells the operator to create the records by hand. When the node sets
-  `public_ipv6`, the apex AAAA must include it too (roles/powerdns wrote it).
-  Any apex AAAA that is not the `public_ipv6` of a node on that name is
-  **warned** about rather than failed: the controller rejects it unless it is
-  one of the load balancer's addresses, but one added there by hand is
-  invisible from here. A split-horizon
-  control machine that cannot see public DNS skips it with
-  `validate_skip: [lb_domain_public]`.
+### Load balancer certificates (`lb_acme`)
 
-Both are on only when all three hold — the same expression, spelled the same
-way, as roles/powerdns and roles/preflight use:
-
-```yaml
-dns_driver | default('none') == 'powerdns'
-and groups['ns_primary'] | default([]) | length > 0
-and (hostvars[groups['ns_primary'][0]].powerdns_manage_lb_records | default(true)) | bool
-```
-
-`powerdns_manage_lb_records: false` is set **on the nameservers**
-(`group_vars/nameservers` or `ns_primary`'s host vars), because that is where
-roles/powerdns reads it. The node list is `cs_new_nodes`, read locally —
-never a powerdns role variable, which this play does not load.
+From controller 9.9 the controller orders each load balancer's certificate
+over DNS-01 (docs/lb-certificates.md). The check reads, per new az, the load
+balancer's `le` flag, whether its ACME certificate is active, and the
+controller's `le_dns_provider`, `le_dns_alias_zone` and whether
+`le_dns_provider_secret` is set (never its value); it resolves
+`_acme-challenge.<cs_app_domain>` publicly when a provider is set. Every
+finding is a warning, because the operator may be fixing the settings or the
+record while the run goes on and the self-signed shared certificate keeps the
+load balancer serving. `site.yml` and `add-region.yml` end with a "Remaining
+by hand" list (`tasks_from: lb_acme_remaining`) naming the
+`_acme-challenge.<domain> CNAME lb<id>.<alias zone>` record to create for each
+az this run added, when an alias zone is configured in the inventory.
 
 **Every per-site value comes from the site maps, never from a global.** The
 prometheus query dials `cs_site_metrics_domains[cs_site]` with the
@@ -276,11 +263,7 @@ likely to have been forgotten when a region is added years after the
 environment was built. No `existing_env` region is checked — those load
 balancers were never in this run's manifest.
 
-`lb_domain_public` and the load balancer half of `dns` run in attach mode too,
-for the new az only. They matter more there than on a greenfield run:
-roles/preflight skips its delegation check in attach mode (the zone is already
-live), so a delegation that drifted since the environment was built is first
-seen here.
+`lb_domain_public` and `lb_acme` run in attach mode too, for the new az only.
 
 **That principle applies to the existing controller too, and the `services`
 check therefore asserts nothing at all on any `existing_env` host.** It used to
@@ -328,9 +311,9 @@ is a property of the control plane rather than of how the host was built.
 | `validate_prometheus_endpoint` | `https://{{ cs_site_metrics_domains[cs_site] \| default(cs_metrics_domain) }}:{{ cs_ports.metrics_prometheus }}` | This host's site's metrics vhost. |
 | `validate_prometheus_username` / `_password` | this host's site's entry in `cs_site_metrics_credentials`, else `cs_metrics_credentials_default` | Both halves matter — a wrong username is an indistinguishable 401. |
 | `validate_prometheus_metric` / `_job` | `node_cpu_seconds_total` / `node-exporter` | The controller's own label contract. |
-| `validate_lb_records_managed` | derived | Whether roles/powerdns wrote the load balancer records this run — the switch for `lb_domain_public` and for the record half of `dns`. See above; override `powerdns_manage_lb_records` on the nameservers, not this. |
 | `validate_app_domain_probe_label` | `cs-validate-probe` | Label queried under each `*.<cs_app_domain>` to exercise the wildcard. Must not exist as a real record. Mirrors preflight's `preflight_app_domain_probe_label`. |
-| `validate_lb_public_hint` / `validate_dns_lb_where_leader` / `_follower` | see `defaults/main.yml` | Operator-facing halves of the record-check failure messages. |
+| `validate_lb_public_hint` | see `defaults/main.yml` | Operator-facing half of the record-check failure message. |
+| `validate_lb_acme_inventory_provider` / `_alias_zone` | `cs_lb_acme_dns_provider` / `cs_lb_acme_dns_alias_zone` | What the inventory says, compared with the controller's settings by `lb_acme`. |
 | `validate_lb_domain_retries` / `_delay` | `12` / `10` | Ceiling on the wait for the controller's asynchronous domain verdict — two minutes. `0`, not `1`, takes whatever answer is there: ansible counts *re*-tries, so `1` is two attempts. |
 | `validate_borg_*` | key path, remote path, user | `validate_borg_remote_path` follows `backup_borg_remote_path`, which attach mode requires. |
 | `validate_borg_version_compare` | `true` | Blocking by default. |
@@ -345,10 +328,9 @@ Computed in `vars/main.yml`, not overridable: `validate_backup_host`
 
 Consumed, not owned: `cs_ports`, `hostname`, `primary_ip`, `public_ip`,
 `az`, `cs_portal_domain`, `cs_metrics_domain`, `cs_app_zone`,
-`powerdns_name` and `powerdns_manage_lb_records` (inventory vars on the
-nameservers),
+`cs_lb_acme_dns_provider` and `cs_lb_acme_dns_alias_zone`,
 `cs_app_domain` and `cs_new_nodes`
-(`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`), `dns_driver`,
+(`playbooks/group_vars/all/app_domains.yml`, `…/sites.yml`),
 `borg_version`, `borg_image`, `existing_env`,
 `tailscale_enabled` / `tailscale_access_only`, `controller_acme_address`, and
 the frozen site contract
@@ -358,10 +340,6 @@ the frozen site contract
 
 ## Requirements
 
-`community.docker` (container state) and `community.postgresql` (the
-`dns_replication` check's WAL-receiver query), both pinned in
-`requirements.yml`. `dig` comes from `dnsutils`, which `roles/common`
-installs on every host; `python3-psycopg2` comes from
-`roles/powerdns/tasks/postgres.yml`, which runs on exactly the hosts
-`dns_replication` queries. `lb_domain_public` runs `dig` on the **control
+`community.docker` (container state), pinned in `requirements.yml`. `dig` comes from `dnsutils`, which `roles/common`
+installs on every host. `lb_domain_public` and `lb_acme` run `dig` on the **control
 machine**, as roles/preflight already does, so it needs `dig` there too.

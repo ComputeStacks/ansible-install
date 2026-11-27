@@ -52,9 +52,8 @@ below unless there is something to compare.
   `rm -rf`'d nginx's certificate directory before copying into it.
 - v1's `enable_cloudflare_real_ip` cron hook is gone; `ProxyIpList` in the
   controller owns the CDN address lists now.
-- The default NSUPDATE TSIG algorithm moves from `hmac-md5` to `hmac-sha256`
-  (documented in `docs/acme-providers.md`; set it explicitly to reuse an
-  existing v1 key).
+- (Historical: the acme.sh NSUPDATE provider has since been removed.) Its
+  default TSIG algorithm had moved from `hmac-md5` to `hmac-sha256`.
 - No `ops` docker network membership and no `-p` publishing: the container
   runs on the host network (see "Host networking is load-bearing" in
   `roles/acme_web/README.md`).
@@ -163,9 +162,7 @@ below unless there is something to compare.
   certificate. v1 had one `cs_app_url` for every load balancer's domain and
   the certificate's CN.
 - `consul_token` is no longer set (dead column since the v3 agent cutover).
-- Behavior kept from v1: the PowerDNS webserver password goes in `api_key`
-  and the X-API-Key in `api_secret`; the PowerDNS API call is plain HTTP to
-  the leader's `primary_ip`; `controller_seed_pid_limit` defaults to v1's 300.
+- Behavior kept from v1: `controller_seed_pid_limit` defaults to v1's 300.
 
 
 ## cs_agent (v1: roles/cs_agent)
@@ -404,6 +401,8 @@ support. v2 adds the PGDG repository and pins the major
 
 
 ## powerdns (v1: roles/powerdns)
+
+*Historical: the provisioner no longer installs PowerDNS; see CHANGELOG.md (November 27, 2026).*
 
 * **Credentials are sourced from the vaulted inventory, not generated** — the
   biggest behavioral change. v1 generated the API key, webserver key and db

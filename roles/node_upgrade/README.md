@@ -311,7 +311,7 @@ else (the playbook refuses a LIMIT that leaves the first two out):
 
 Not run: node_storage (only its read-only probe), geerlingguy.docker,
 ssh_trust, controller_seed, controller_post_enroll, and every role that
-configures the controller, metrics, backup or nameserver hosts.
+configures the controller, metrics or backup hosts.
 
 ### State file additions
 

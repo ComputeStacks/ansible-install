@@ -86,8 +86,14 @@ portal.example.com.       IN A     <controller public ip>
 metrics.example.com.      IN A     <metrics public ip>
 metrics.west.example.com. IN A     <second site's metrics public ip>
 cr.example.com.           IN A     <registry public ip>
-usercontent.example.com.  IN NS    ns1.example.com.
 ```
+
+The provisioner runs no DNS server and creates no records. Each availability
+zone's load balancer domain also needs records at your DNS host (A/AAAA to the
+load balancer, and `*.<domain> CNAME <domain>`), described in
+[`docs/install.md`](docs/install.md#3-point-dns-at-the-hosts); the controller
+issues those domains' certificates itself, see
+[`docs/lb-certificates.md`](docs/lb-certificates.md).
 
 ## Inventory
 
@@ -109,7 +115,7 @@ cp -r inventories/example inventories/prod
 ```
 
 * `hosts.yml` — the groups (`controller`, `metrics`, `backup`, `registry`,
-  `nameservers` with `ns_primary`/`ns_followers`, `nodes`) and the host vars.
+  `nodes`) and the host vars.
   Every node needs `hostname`, `primary_ip`, `public_ip`, `region`, `az`,
   `container_network`, `container_network_name` and `docker_data_device`;
   preflight asserts all of them. `region` becomes a controller *Location*, `az` becomes a controller
@@ -138,7 +144,7 @@ zero means that site's nodes install with backups disabled. A region never
 spans sites.
 
 Set `site` as a host var on each node, metrics host and backup host — not on
-the controller, the registry or the nameservers, which are platform-wide. A
+the controller or the registry, which are platform-wide. A
 metrics host may also set `metrics_domain`, the public name its prometheus
 and loki vhosts answer on and the name its certificate covers; without one it
 uses the environment-wide `cs_metrics_domain`. `inventories/example` describes
@@ -203,7 +209,7 @@ ansible-playbook -i inventories/prod playbooks/site.yml --ask-vault-pass
 The play order is a contract, not a convenience (`docs/contracts.md`):
 
 ```
-reachability -> preflight -> base system -> tailscale -> nameservers
+reachability -> preflight -> base system -> tailscale
   -> node data disk -> docker
   -> controller (vault, postgres, redis, nginx/acme, portal)
   -> node docker TLS -> metrics -> registry -> backup -> node base stack
@@ -238,7 +244,7 @@ The last play asserts the things that otherwise fail silently: services and
 containers up, each node's docker and containerd state on its data disk, the controller reaching each node's agent, the prometheus
 label contract answering the controller's own placement query, borg reachable
 from every node, the portal reachable from every node, root SSH from the
-controller, and the tenant zone resolving on every nameserver. Run it on its
+controller, and the load balancer domains resolving publicly. Run it on its
 own at any time:
 
 ```bash
@@ -507,6 +513,8 @@ docs/
   the v1 playbooks, role by role.
 * [`docs/acme-providers.md`](docs/acme-providers.md) — ACME challenge methods
   and the DNS-01 provider matrix.
+* [`docs/lb-certificates.md`](docs/lb-certificates.md) — load balancer
+  certificates issued by the controller over DNS-01, and upgrading to 9.9.
 * [`docs/automation.md`](docs/automation.md) — driving these playbooks from
   terraform/CI: the inventory contract, the non-interactive knobs, the ACME
   staging CA.

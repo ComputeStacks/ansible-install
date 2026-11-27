@@ -22,6 +22,10 @@ vaulted `secrets.yml`). Google Trust Services requires EAB; ZeroSSL accepts it
 as the alternative to email registration. Set both or neither — the role
 asserts the pairing.
 
+**Scope.** These providers are for the portal, metrics and registry
+certificates. The load balancer domains' certificates are issued by the
+controller with its own DNS credential; see [lb-certificates.md](lb-certificates.md).
+
 **DNS alias mode.** With any DNS-01 provider, `acme_challenge_alias: <zone>`
 validates through a permanent CNAME you create once —
 `_acme-challenge.<each domain> IN CNAME _acme-challenge.<zone>` — so the DNS
@@ -129,41 +133,6 @@ acme_linode_token: ""
 
 Linode issuance runs with `--dnssleep 900`; expect the task to take a quarter
 of an hour.
-
-## NSUPDATE (RFC 2136)
-
-The recommended option when this installation runs its own PowerDNS
-nameservers — it grants update rights to one key on one zone rather than full
-API access to the server. See
-<https://doc.powerdns.com/authoritative/dnsupdate.html#per-zone-settings>.
-
-```yaml
-acme_challenge_method: "nsupdate"
-acme_dns_server: "ns1.example.com"
-acme_dns_port: "53"
-acme_dns_tsig_name: "acme"         # name of your key
-acme_dns_tsig_algo: "hmac-sha256"
-acme_dns_tsig_secret: ""
-```
-
-The role writes the TSIG key to `/root/.acme-nsupdate.key`, mode 0600.
-
-> **Changed from v1:** the default algorithm is `hmac-sha256`, not v1's
-> `hmac-md5`. Set `acme_dns_tsig_algo: "hmac-md5"` explicitly if you are
-> reusing an existing v1 key that was generated with it.
-
-## PowerDNS API
-
-Prefer NSUPDATE — this grants complete server access.
-<https://doc.powerdns.com/authoritative/http-api/>
-
-```yaml
-acme_challenge_method: "pdns"
-acme_pdns_url: "http://ns1.example.com:8081"
-acme_pdns_serverid: "localhost"
-acme_pdns_token: ""
-acme_pdns_ttl: 60
-```
 
 ## Vultr
 

@@ -139,8 +139,7 @@ backup", give the new node its region's export settings —
 new node's agent simply has export off. Preflight checks the settings before
 anything changes ([roles/cs_agent/README.md](../roles/cs_agent/README.md#backup-export-to-s3)).
 
-**Flag every existing shared host** — controller, metrics, backup, registry,
-nameservers:
+**Flag every existing shared host** — controller, metrics, backup, registry:
 
 ```yaml
 controller:
@@ -201,7 +200,6 @@ Exactly this, and nothing else:
 | backup | one `authorized_keys` entry for the new node | Added by `cs_agent`, commented with the node's hostname. |
 | backup | firewall: the same node-address appends | Latent on most v1 servers — their script's `default_allow_ssh` accepts 22 from anywhere, so borg already reaches them. On a server built with `default_allow_ssh: false` the appends are what keeps the new node's backups from failing silently. |
 | controller | the new az's `public_ipv6` as a `public` LoadBalancerAddr, through `cstacks runner` | Only for a new node that sets `public_ipv6`, after the seed apply, on the new az's load balancer only. Additive; an address already on it under another role fails the run before the apply. |
-| nameserver (`ns_primary`) | the new az's load balancer records in `cs_app_zone`: `<app_domain>` A (and AAAA, when the node sets `public_ipv6`), `*.<app_domain>` CNAME and the `_cs-lb.<app_domain>` TXT ownership marker | Only with `dns_driver: powerdns` and `powerdns_manage_lb_records` not turned off on the nameservers. Written with `pdnsutil` (PowerDNS 4.x and 5.x alike), for the new region's names only. Never overwrites a record it does not own: a conflict at any of those names fails the run before anything is written. The followers receive them through replication; nothing is written on them. |
 | vault (on the controller) | nothing | The new node's docker certificate is *issued* from the existing PKI; the playbook unseals the vault if it is sealed and writes nothing. |
 
 `/etc/default/computestacks` is append-only, always. No shared-host file is
@@ -268,7 +266,7 @@ message says it stopped. A wrapper reads the fingerprint with
 What phase 1 leaves in place is everything before the seed: the new node
 built, the portal recreated (if the environment file or `cstacks` changed), a
 fresh `pg_dump`, and the additive writes on the shared hosts in the table
-above — the nameserver's load balancer records, the firewall appends, the
+above — the firewall appends, the
 prometheus fragments and the controller's ssh trust for the node. None of them
 is an apply, and every one of them is a no-op when run again.
 
@@ -291,45 +289,38 @@ records — `<app_domain>` A to that node's public IP and `*.<app_domain>`
 **CNAME** to `<app_domain>` (docs/install.md §3). If the new az answers on
 IPv6 too, set its `public_ipv6`: the seed adds it to the new load balancer as
 a public address (a `cstacks runner` step after the apply, planned before the
-confirm prompt), and with `dns_driver: powerdns` it is written as the apex
-AAAA. An AAAA on `<app_domain>` that is not one of the load balancer's public
+confirm prompt), and you publish it as the apex AAAA. An AAAA on `<app_domain>` that is not one of the load balancer's public
 addresses makes the controller mark the domain INVALID. `roles/preflight` requires
 the new node's `app_domain` to be set and to differ from `cs_app_zone`, so a
 new az never lands on the zone apex an existing region already answers on.
 
-**With `dns_driver: powerdns` the playbook writes that pair itself**, on the
-existing `ns_primary`, in a play that runs straight after preflight — see the
-nameserver row above. A hand-made pair that already matches is adopted; a name
-that holds anything else (records that differ, or a marker naming another
-node) stops the run before any write, and the message says how to resolve it:
-a different `app_domain`, or deleting the stale records by hand. Preflight
-does not check the zone's delegation in attach mode — it is already live — so
-it is first checked at the end of the run, by `roles/validate`'s `dns` (every
-nameserver) and `lb_domain_public` (public resolution), and then `lb_domain`
-reads the controller's verdict back.
+**The playbook never writes that pair.** Create it at your own DNS host before
+the run; if the environment still runs its old nameservers, create it there by
+hand. Preflight digs for the apex in public DNS and fails if it is missing or
+does not resolve to the new node's `public_ip`, and `roles/validate`'s
+`lb_domain_public` and `lb_domain` checks confirm it at the end. The old
+`nameservers` hosts must be out of the inventory (preflight fails while that
+group has hosts); they keep running, unmanaged.
 
-This needs the existing nameservers in the inventory in the same shape
-`site.yml` uses — a `nameservers` group with `ns_primary` and `ns_followers`
-children, each host flagged `existing_env: true`, and cs_app_zone's zone
-present on the leader (the play fails, naming the zone, if it is not). **If
-the inventory has no `ns_primary`**, that play has no hosts and writes
-nothing, and the run treats the records as yours, exactly as for `dns_driver:
-none`: create the pair by hand before the run, and preflight digs for it in
-public DNS and fails if it is missing. The same holds with
-`powerdns_manage_lb_records: false` set on the nameservers.
+**Certificates for the new load balancer.** The seed gives the new load
+balancer `le: true` when `cs_lb_acme_dns_provider` is set in the inventory,
+but an attach manifest writes no settings: the controller must already hold
+`le_dns_provider` and its credentials (set them in the admin, or by a full
+`site.yml` run). With an alias zone, create the new az's
+`_acme-challenge` CNAME after the seed; the end-of-run "Remaining by hand"
+output lists it. See [lb-certificates.md](lb-certificates.md).
 
 The attach manifest carries **topology only**: the new location, region, node,
 network and load balancer, plus the user-group region link without which the
 new region is invisible to every existing user. That link is `link_regions:
 new`: the default group is linked to the regions this run creates and to no
-existing one, so a region deliberately kept off the default group stays off. It carries no settings, no DNS
-driver, no products and no admin user, so nothing global is touched.
+existing one, so a region deliberately kept off the default group stays off. It carries no settings, no products and no admin user, so nothing global is touched.
 `controller_seed_full_manifest: true` renders the whole greenfield document
 against the live controller instead. Almost nothing in it is an overwrite
 there — settings are seeded only while still unconfigured, the DNS driver is
-never reconfigured once it exists, and a difference from the manifest surfaces
+never touched, and a difference from the manifest surfaces
 as a drift warning rather than being applied. The exception is paired
-credentials (metric/log client basic-auth, DNS `api_key`/`api_secret`, the LB
+credentials (metric/log client basic-auth, the LB
 shared certificate and stats password): those converge to the manifest's
 values, reported as `[rotate]` lines — which is why the secrets in your vault
 MUST be the existing environment's values, not fresh ones. The DRY_RUN gate

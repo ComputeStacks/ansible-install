@@ -17,7 +17,6 @@ The smallest sensible install is five machines plus one node:
 | `metrics` | prometheus, alertmanager, loki behind nginx | Shared by every region. |
 | `backup` | borg over SSH | Shared by every region. |
 | `registry` | docker + nginx; the controller creates the registries over SSH | Optional but assumed by the registry settings. |
-| `nameservers` | PowerDNS, postgres-replicated | One `ns_primary`, zero or more `ns_followers`. Optional if `dns_driver: none`. |
 | `nodes` | docker, cs-agent, haproxy, cadvisor, fluentd | One per availability zone. |
 
 Each host needs:
@@ -70,23 +69,8 @@ metrics.example.com.     IN A   <metrics public ip>
 cr.example.com.          IN A   <registry public ip>
 ```
 
-and, when you are running the bundled nameservers, delegate the tenant zone
-to them:
-
-```
-usercontent.example.com. IN NS  ns1.example.com.
-usercontent.example.com. IN NS  ns2.example.com.
-ns1.example.com.         IN A   <ns1 public ip>
-ns2.example.com.         IN A   <ns2 public ip>
-```
-
-With `dns_driver: powerdns` **that delegation is the whole of your DNS work
-for the tenant zone.** Preflight checks it before anything is built: it asks
-the parent zone's own nameservers for the referral and fails unless it names
-exactly the `powerdns_name` of every host in `nameservers`
-(`preflight_check_app_domain_dns: false` skips it, for a control machine that
-cannot see public DNS). The load balancer records below are then written by
-the provisioner itself — see the next section.
+The provisioner installs no DNS server and creates no DNS records: you
+publish every name below at your own DNS host.
 
 ### Every load balancer needs its own pair of records
 
@@ -106,27 +90,12 @@ and, only for an az with a public IPv6 address (the node's `public_ipv6`):
 exm-001.usercontent.example.com.    IN AAAA  <that node's public_ipv6>
 ```
 
-**With `dns_driver: powerdns` you do not create these.** `roles/powerdns`
-writes them on the primary nameserver, into `cs_app_zone` — the zone the
-bundled nameservers serve — right after the zone is created, together with an
-ownership marker, `_cs-lb.<app_domain>. TXT "owner=<node>"`. Every run
-converges the records it owns (address, CNAME target, TTL), and writes the
-apex AAAA too for a node that sets `public_ipv6` — an AAAA there is otherwise
-left as it is. A pair you already
-made by hand that matches is adopted; anything else at those names — records
-that differ, or a marker naming some other node — fails the run before
-anything is written, and it never overwrites a name it cannot show is its
-own. `roles/validate` then checks the records on every nameserver and through
-public resolution. `roles/powerdns/README.md` has the rules, and one caveat:
-the controller rewrites the whole zone when it saves DNS changes, so an admin
-edit or controller write already in flight while the records are written can
-delete them again — a re-run restores them.
-
-**Otherwise they are yours, and this is the step that is most often missed.**
-With `dns_driver: none` or an external DNS provider, or with
-`powerdns_manage_lb_records: false` set on the nameservers, create the pair
-for every az yourself, in the public DNS that serves `<app_domain>`, before
-the run — preflight digs for it and fails if it is missing.
+**These records are yours, and this is the step that is most often missed.**
+Create the pair for every az, in the public DNS that serves `<app_domain>`,
+before the run: preflight digs for them and fails if the apex does not resolve
+to the node's `public_ip`. For an add-region run on an existing environment
+that still uses its old nameservers, create the new az's records there by hand
+first.
 
 **The wildcard MUST be a CNAME. An A record fails.** The controller proves the
 wildcard exists by querying a random label under the domain *for a CNAME
@@ -153,58 +122,17 @@ and fails the run if it came back negative; if it has not been written yet the
 check says so and does not fail, so **re-run `--tags lb_domain` if you see
 that message.**
 
-Wherever they live, these names must resolve publicly: when `cs_app_zone` is
-delegated to the bundled nameservers they belong *inside* that zone. A pair
-put in the parent zone sits beneath the delegation point, is occluded, and is
-never served.
+These names must resolve publicly, from the control machine as well as from
+the controller (`preflight_check_app_domain_dns: false` skips the check, for a
+control machine that cannot see public DNS).
 
-### If you delegate per-az instead of delegating the whole tenant zone
+### Certificates for the load balancer domains
 
-The shape above delegates `cs_app_zone` **as a whole** to the bundled
-nameservers, which then serve every az as ordinary records inside that one
-flat zone. There is no zone cut at an az name, so a NODATA answer under
-`<app_domain>` is proved by the SOA of `cs_app_zone` — in bailiwick, and
-accepted by every resolver.
-
-Delegating each `<app_domain>` separately (because the parent is a domain you
-already serve elsewhere and cannot hand over wholesale) creates a zone cut
-that the bundled nameservers have no zone for: they answer out of the flat
-parent zone, so their NODATA answers are proved by an SOA *above* the cut,
-which resolvers may reject with SERVFAIL. It shows up as intermittent
-failures on container hostnames rather than as an outage, because it only
-bites query types that find no record at the az apex.
-
-**The structural fix is a zone per delegated `app_domain`** on the bundled
-nameservers — `pdnsutil create-zone <app_domain> <ns1 fqdn>` — which puts the
-SOA below the cut and makes every negative answer in-bailiwick, for every
-query type.
-
-**The provisioner does not handle per-az delegation.** It never creates a
-per-az zone, and when one exists on the bundled nameservers it skips that
-az's load balancer records with a warning: they are yours to create and
-maintain, in that zone — the pair above, by hand. `roles/validate` still
-checks what the nameservers actually serve for it.
-
-If you cannot do that, one record per az patches the type that is noticed
-first. It goes in the zone **the bundled nameservers serve** — not in the
-external parent that delegates to them, where `<app_domain>` is a delegation
-point and anything you add beside the NS records is occluded and never
-returned:
-
-```
-<app_domain>.  14400  IN  HTTPS  1 .
-```
-
-Keep the minimal ServiceMode form `1 .`; an `alpn=` parameter advertises
-protocols the load balancer may not offer. It needs PowerDNS >= 4.5, and one
-record per az covers every container under it, because the wildcard CNAME
-resolves to the az apex and the apex record of the queried type is returned.
-
-Understand what this does and does not fix. Chrome asks for `HTTPS` (type 65)
-on every navigation, which is why that type is usually the first to be
-noticed — but an `AAAA` query on an IPv4-only az apex hits the identical
-out-of-bailiwick SOA, and so does any other type with no record there. The
-HTTPS record removes one symptom; only a zone at the cut removes the cause.
+The controller (9.9) issues each load balancer's `<app_domain>` and
+`*.<app_domain>` certificate itself, over DNS-01, with the credential you give
+it. Set that up in the inventory before the run; see
+[lb-certificates.md](lb-certificates.md). Until the certificate is active the
+load balancer serves a self-signed one.
 
 ## 4. Build the inventory
 
@@ -217,8 +145,7 @@ $EDITOR inventories/prod/group_vars/all/secrets.yml
 
 `hosts.yml` carries the topology. Every node needs `hostname`, `primary_ip`,
 `public_ip`, `region`, `az`, `container_network`, `container_network_name` and
-`docker_data_device`; every nameserver needs a unique `powerdns_name` (its
-FQDN — it becomes the zone's NS records).
+`docker_data_device`.
 
 `docker_data_device` is the blank data disk from §1, as a whole device under
 `/dev/`: `/dev/vdb` on KVM, `/dev/xvdb` on xcp-ng, or a stable
@@ -235,8 +162,9 @@ itself must be 2 to 5 labels long; preflight asserts both, and
 
 `main.yml` carries the environment-wide domains (`cs_portal_domain`,
 `cs_metrics_domain`, `cs_registry_domain`, `cs_app_zone` — the single parent
-tenant zone), the admin email, locale/currency, the DNS driver, and the ACME
-settings.
+tenant zone), the admin email, locale/currency, and the ACME settings. The load balancer
+certificate variables (`cs_lb_acme_dns_*`) are described in
+[lb-certificates.md](lb-certificates.md).
 
 `secrets.yml` carries everything else. Generate the immutable pair **once**:
 
@@ -247,7 +175,8 @@ openssl rand -hex 64   # -> user_auth_secret
 
 and then fill in `cs_admin_password`, `node_enrollment_token`,
 `postgres_password`, `prometheus_basic_auth_password`,
-`loki_basic_auth_password`, `backups_key`, and the three PowerDNS keys.
+`loki_basic_auth_password`, `backups_key`, and, if you use them, the load balancer DNS credentials
+(`cs_lb_acme_dns_env`, see [lb-certificates.md](lb-certificates.md)).
 `openssl rand -hex 32` is fine for all of them.
 
 > `secret_key_base` cannot be changed later. It keys every encrypted column in
@@ -295,8 +224,8 @@ ansible-vault encrypt inventories/prod/group_vars/all/secrets.yml
 * **`public_ipv6`** on any node whose load balancer answers on IPv6 too: that
   az's public IPv6 address, quoted, in canonical form (`"2001:db8:1::10"`;
   preflight checks it). The seed adds it to the load balancer as a public
-  address, and with `dns_driver: powerdns` it is written as the apex AAAA of
-  `app_domain`. **Set it whenever `app_domain` has an AAAA**: the controller
+  address; publish it as the apex AAAA of `app_domain` at your DNS host.
+  **Set it whenever `app_domain` has an AAAA**: the controller
   requires every A and AAAA at the apex to be one of the load balancer's
   public addresses, and marks the domain INVALID otherwise (see §3).
 * **`haproxy_stats_password`.** Optional, recommended: without it the
@@ -403,8 +332,7 @@ silently:
   archive**, even though 26.04 also ships 18. `roles/postgres_repo`
   configures the PGDG repository (`apt.postgresql.org`, `resolute-pgdg`
   suite) with an apt preferences pin and runs before `geerlingguy.postgresql`
-  on the controller and before `roles/powerdns` on the nameservers — the only
-  two places a postgres package is installed. The archive only ever carries
+  on the controller, the only place a postgres package is installed. The archive only ever carries
   its one default major; PGDG carries every supported one, so the fleet can
   move to a later major within this LTS by changing `postgresql_version`, once
   the controller is validated against it. Moving an existing host needs a
