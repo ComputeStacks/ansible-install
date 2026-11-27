@@ -27,7 +27,5 @@ cs_ports:
   tenant_https: 443
   tenant_port_begin: 10000        # published container ports (nodes AND registry host)
   tenant_port_end: 50000
-  dns: 53                         # tcp+udp, v4+v6, nameservers
-  pdns_api: 8081                  # controller -> primary nameserver
   postgres: 5432                  # controller-local; ns follower -> primary replication
   redis: 6379                     # loopback ONLY — never exposed, no auth path exists

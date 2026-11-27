@@ -1,0 +1,118 @@
+# Does roles/preflight refuse leftover nameserver inventory and the removed
+# acme.sh providers, and warn about the retired variables, without a host?
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/preflight_legacy_dns.yml
+#
+# PURE: it includes only tasks/legacy_dns.yml with canned `groups` and `vars`.
+# The `fatal:` lines in the output are the asserts' failure paths, caught by
+# `rescue:`.
+
+- name: Preflight retired-nameserver checks
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: "Case: clean inventory passes"
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: legacy_dns
+      vars:
+        preflight_legacy_groups: {all: [a], nodes: [a], nameservers: [], ns_primary: []}
+        preflight_legacy_vars: {acme_challenge_method: cloudflare, cs_app_zone: example.com}
+
+    - name: "Case: http and unset acme_challenge_method pass"
+      ansible.builtin.assert:
+        that:
+          - legacy_http.acme_removed_provider == ''
+          - legacy_unset.acme_removed_provider == ''
+          - legacy_http.groups == [] and legacy_unset.ignored_vars == []
+      vars:
+        legacy_http: "{{ {'nodes': ['a']} | preflight_legacy_dns({'acme_challenge_method': 'http'}) }}"
+        legacy_unset: "{{ {} | preflight_legacy_dns({}) }}"
+
+    - name: "Case: legacy variables are listed, not fatal"
+      ansible.builtin.assert:
+        that:
+          - legacy_vars.ignored_vars == ['dns_driver', 'pdns_api_key', 'powerdns_name']
+          - legacy_vars.groups == []
+          - legacy_vars.acme_removed_provider == ''
+      vars:
+        legacy_vars: >-
+          {{ {} | preflight_legacy_dns({'dns_driver': 'powerdns', 'pdns_api_key': 'x',
+                                         'powerdns_name': 'ns1', 'cs_app_zone': 'example.com'}) }}
+
+    - name: "Case: every legacy group is named"
+      ansible.builtin.assert:
+        that:
+          - legacy_groups.groups == ['nameservers', 'ns_primary', 'ns_followers']
+          - ({} | preflight_legacy_dns({})).groups == []
+      vars:
+        legacy_groups: >-
+          {{ {'nameservers': ['ns1', 'ns2'], 'ns_primary': ['ns1'], 'ns_followers': ['ns2']}
+             | preflight_legacy_dns({}) }}
+
+    - name: "Case: a nameservers group with hosts fails"
+      block:
+        - name: Run the checks
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: legacy_dns
+          vars:
+            preflight_legacy_groups: {nodes: [a], nameservers: [ns1], ns_primary: [ns1]}
+            preflight_legacy_vars: {}
+        - name: The checks did not fail
+          ansible.builtin.fail:
+            msg: legacy_dns.yml passed with a nameservers group
+      rescue:
+        - name: "Assert: the failure names the groups and the CHANGELOG"
+          ansible.builtin.assert:
+            that:
+              - "'nameservers, ns_primary' in ansible_failed_result.msg"
+              - "'no longer installs or manages PowerDNS' in ansible_failed_result.msg"
+              - "'CHANGELOG' in ansible_failed_result.msg"
+
+    - name: "Case: acme_challenge_method http and cloudflare pass"
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: legacy_dns
+      vars:
+        preflight_legacy_groups: {nodes: [a]}
+        preflight_legacy_vars: {acme_challenge_method: "{{ 'http' if item == 'h' else 'cloudflare' }}"}
+      loop: [h, c]
+
+    - name: "Case: nsupdate fails"
+      block:
+        - name: Run the checks
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: legacy_dns
+          vars:
+            preflight_legacy_groups: {nodes: [a]}
+            preflight_legacy_vars: {acme_challenge_method: nsupdate}
+        - name: The checks did not fail
+          ansible.builtin.fail:
+            msg: legacy_dns.yml passed with acme_challenge_method nsupdate
+      rescue:
+        - name: "Assert: the failure names the provider and the docs"
+          ansible.builtin.assert:
+            that:
+              - "\"is 'nsupdate'\" in ansible_failed_result.msg"
+              - "'docs/acme-providers.md' in ansible_failed_result.msg"
+
+    - name: "Case: pdns fails"
+      block:
+        - name: Run the checks
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: legacy_dns
+          vars:
+            preflight_legacy_groups: {}
+            preflight_legacy_vars: {acme_challenge_method: pdns}
+        - name: The checks did not fail
+          ansible.builtin.fail:
+            msg: legacy_dns.yml passed with acme_challenge_method pdns
+      rescue:
+        - name: "Assert: the failure names pdns"
+          ansible.builtin.assert:
+            that:
+              - "\"is 'pdns'\" in ansible_failed_result.msg"

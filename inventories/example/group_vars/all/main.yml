@@ -29,8 +29,7 @@ cs_registry_domain: cr.example.com
 # host does not set a `metrics_domain` host var of its own (hosts.yml). A
 # single-site install has only this one.
 cs_metrics_domain: metrics.example.com
-# The ONE tenant Dns::Zone: one `pdnsutil create-zone`, one entry in the
-# manifest's `dns.zones`, and the parent of every load balancer domain in the
+# The tenant DNS zone: the parent of every load balancer domain in the
 # environment. It stays environment-wide.
 #
 # What is PER AZ is the load balancer's own domain, the `app_domain` host var
@@ -48,9 +47,6 @@ cs_admin_email: admin@example.com
 locale: en
 currency: USD
 
-# DNS driver: powerdns | autodns | none
-dns_driver: powerdns
-
 # ACME (portal/registry/metrics certs)
 # acme_ca: zerossl | letsencrypt | letsencrypt_test (staging, for throwaway
 # environments) | google | ... | a full directory URL. Default zerossl.
@@ -58,7 +54,7 @@ acme_ca: zerossl
 acme_account_email: admin@example.com
 # acme_eab_kid: ""            # External Account Binding — required by Google
 # acme_eab_hmac_key: in secrets.yml  # Trust Services; optional for ZeroSSL.
-# acme_dns_provider: <see docs/acme-providers.md>; default HTTP-01 webroot
+# acme_challenge_method: <see docs/acme-providers.md>; default HTTP-01 webroot
 
 # Tailscale (optional): a host is on the tailnet if and only if
 # `tailscale_enabled` is true for it (default false). Uncomment to put every
@@ -99,8 +95,8 @@ acme_account_email: admin@example.com
 # cs_agent_s3_export_max_ttl_sec: 86400        # < 604800 (agent task retention)
 
 # Post-install checks (roles/validate). Names: services, storage, containers,
-# agent, backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain, dns,
-# dns_replication, pdns_api.
+# agent, backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain,
+# lb_domain_public.
 # validate_skip: []
 # validate_tls_verify: true    # false while the portal is self-signed
 

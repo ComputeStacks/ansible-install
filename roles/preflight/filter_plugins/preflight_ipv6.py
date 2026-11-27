@@ -1,10 +1,9 @@
 """Pure address checks for roles/preflight.
 
 `public_ipv6` (an optional node host var) is compared as a STRING everywhere
-downstream: against what `pdnsutil list-zone` prints for an AAAA rrset
-(roles/powerdns, tasks/lb_records_plan.yml), against what `dig` returns
-(roles/validate, roles/preflight) and in the controller seed's plan output
-(roles/controller_seed). PowerDNS and dig both print the RFC 5952 form --
+downstream: against what `dig` returns (roles/validate, roles/preflight) and
+in the controller seed's plan output (roles/controller_seed). dig and the
+controller both print the RFC 5952 form --
 lowercase, leading zeros dropped, the longest zero run compressed -- so
 preflight requires the inventory to use exactly that form, and every other
 role can then compare strings without a filter of its own.
@@ -60,7 +59,7 @@ def cs_ipv6_problem(value):
         return (
             "it is not written in canonical (RFC 5952) form; write it as "
             + canonical
-            + " -- PowerDNS and dig print that form, and the provisioner compares addresses as text"
+            + " -- dig and the controller print that form, and the provisioner compares addresses as text"
         )
     return ""
 

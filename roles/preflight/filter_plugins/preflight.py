@@ -65,8 +65,40 @@ def preflight_unreachable(hosts, hostvars, result_var="preflight_reachable_ping"
     return found
 
 
+# Inventory left over from the retired bundled PowerDNS and acme.sh
+# nsupdate/pdns support.
+LEGACY_GROUPS = ("nameservers", "ns_primary", "ns_followers")
+LEGACY_VAR_PREFIXES = ("pdns_", "powerdns_")
+LEGACY_VARS = ("dns_driver",)
+REMOVED_ACME_PROVIDERS = ("nsupdate", "pdns")
+
+
+def preflight_legacy_dns(groups, variables):
+    """Retired nameserver settings found in the inventory.
+
+    `groups` is ansible's `groups` mapping, `variables` the host's `vars`.
+    Returns `groups` (legacy groups that have hosts: fatal),
+    `ignored_vars` (legacy variables that are defined: a warning) and
+    `acme_removed_provider` (the acme_challenge_method when it names a removed
+    acme.sh provider, else ''; fatal).
+    """
+    found = [g for g in LEGACY_GROUPS if groups.get(g)]
+    ignored = sorted(
+        k
+        for k in variables
+        if k in LEGACY_VARS or k.startswith(LEGACY_VAR_PREFIXES)
+    )
+    method = str(variables.get("acme_challenge_method") or "")
+    return {
+        "groups": found,
+        "ignored_vars": ignored,
+        "acme_removed_provider": method if method in REMOVED_ACME_PROVIDERS else "",
+    }
+
+
 class FilterModule:
     def filters(self):
         return {
             "preflight_unreachable": preflight_unreachable,
+            "preflight_legacy_dns": preflight_legacy_dns,
         }

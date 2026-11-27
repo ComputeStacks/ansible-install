@@ -1,11 +1,8 @@
----
 # Optional. When set, roles/controller_seed adds it to the az's load balancer
-# as a `public` address and roles/powerdns (when it manages the records)
-# publishes it as the apex AAAA. Both compare it as text against what
-# PowerDNS, dig and the controller print, so it has to be one host address in
-# canonical RFC 5952 form (filter_plugins/preflight_ipv6.py). Every node, not
-# just the new ones: roles/powerdns also reads it off nodes it does not build
-# when it converges a name they share. Unset, null and empty all mean "none".
+# as a `public` address. It is compared as text against what dig and the
+# controller print, so it has to be one host address in canonical RFC 5952
+# form (filter_plugins/preflight_ipv6.py). Every node, not just the new ones.
+# Unset, null and empty all mean "none".
 - name: Assert every public_ipv6 that is set is one canonical IPv6 host address
   ansible.builtin.assert:
     that:

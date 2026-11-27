@@ -117,11 +117,8 @@
     - "'nodes' in group_names"
   tags: [validate, acme_backend]
 
-# Per az, as the check below, and only when roles/powerdns wrote the records
-# (`validate_lb_records_managed`): does public DNS, from the control machine,
-# actually hand out this az's pair? The records were written early in the run,
-# so this is where the check preflight makes for hand-made records lands.
-# Before `lb_domain`, whose wait for the controller's verdict is pointless if
+# Per az, as the check below: does public DNS, from the control machine,
+# actually hand out this az's pair? Before `lb_domain`, whose wait for the controller's verdict is pointless if
 # the names do not resolve. Runs per node (not run_once) so it works on either
 # playbook's validate play: site.yml's `hosts: all` and add-region.yml's
 # `controller:nodes` both contain every new node.
@@ -134,7 +131,6 @@
     - "'lb_domain_public' not in validate_skip"
     - "'nodes' in group_names"
     - inventory_hostname in (cs_new_nodes | default([]))
-    - validate_lb_records_managed | bool
   tags: [validate, lb_domain_public]
 
 # Per az, and only for an az this run actually seeded: `cs_new_nodes` is
@@ -152,40 +148,6 @@
     - "'nodes' in group_names"
     - inventory_hostname in (cs_new_nodes | default([]))
   tags: [validate, lb_domain]
-
-- name: Assert the tenant DNS zone resolves on every nameserver
-  ansible.builtin.include_tasks:
-    file: dns.yml
-    apply:
-      tags: [validate, dns]
-  when:
-    - "'dns' not in validate_skip"
-    - "'controller' in group_names"
-    - dns_driver | default('none') != 'none'
-    - groups['nameservers'] | default([]) | length > 0
-  tags: [validate, dns]
-
-- name: Assert the controller can reach the PowerDNS API
-  ansible.builtin.include_tasks:
-    file: pdns_api.yml
-    apply:
-      tags: [validate, pdns_api]
-  when:
-    - "'pdns_api' not in validate_skip"
-    - "'controller' in group_names"
-    - dns_driver | default('none') == 'powerdns'
-    - groups['ns_primary'] | default([]) | length > 0
-  tags: [validate, pdns_api]
-
-- name: Assert every PowerDNS follower is still streaming from the leader
-  ansible.builtin.include_tasks:
-    file: dns_replication.yml
-    apply:
-      tags: [validate, dns_replication]
-  when:
-    - "'dns_replication' not in validate_skip"
-    - "'ns_followers' in group_names"
-  tags: [validate, dns_replication]
 
 - name: Report the checks that ran on this host
   ansible.builtin.debug:

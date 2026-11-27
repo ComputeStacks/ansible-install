@@ -98,7 +98,6 @@ validate_expected_services: >-
             + (validate_services_metrics if 'metrics' in group_names else [])
             + (validate_services_registry if 'registry' in group_names else [])
             + (validate_services_nodes if 'nodes' in group_names else [])
-            + (validate_services_nameservers if 'nameservers' in group_names else [])
             + (validate_services_backup if 'backup' in group_names else []))
            | unique) }}
 
@@ -146,10 +145,3 @@ validate_backup_host: "{{ cs_site_backup_hosts[cs_site] | default('') }}"
 # targets and the firewall, none of which are the problem.
 validate_metrics_credentials: >-
   {{ cs_site_metrics_credentials[cs_site] | default(cs_metrics_credentials_default) }}
-
-# --- pdns_api -------------------------------------------------------------
-# The leader address the controller dials, resolved the same way
-# `controller_seed_dns_primary_ip` does so the check cannot probe an address
-# the seed never uses.
-validate_pdns_api_address: >-
-  {{ ((groups['ns_primary'] | default([]) | map('extract', hostvars, 'primary_ip') | list) + ['']) | first }}

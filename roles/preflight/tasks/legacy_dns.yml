@@ -1,0 +1,42 @@
+---
+# Inventory left over from the retired bundled PowerDNS / acme.sh nsupdate
+# support. Decided in filter_plugins/preflight.py (preflight_legacy_dns) so
+# tests/preflight_legacy_dns.yml can prove it; the inputs default to the
+# play's `groups` and `vars` and are overridable only for that test.
+- name: Look for retired nameserver groups, variables and acme.sh providers
+  ansible.builtin.set_fact:
+    preflight_legacy: >-
+      {{ (preflight_legacy_groups | default(groups))
+         | preflight_legacy_dns(preflight_legacy_vars | default(vars)) }}
+  run_once: true
+
+- name: Assert the inventory has no nameserver groups and no removed acme.sh provider
+  ansible.builtin.assert:
+    that:
+      - preflight_legacy.groups | length == 0
+      - preflight_legacy.acme_removed_provider | length == 0
+    fail_msg: >-
+      {% if preflight_legacy.groups | length > 0 %}
+      The provisioner no longer installs or manages PowerDNS nameservers, but
+      the inventory still has hosts in: {{ preflight_legacy.groups | join(', ') }}.
+      Delete {{ 'that group' if preflight_legacy.groups | length == 1 else 'those groups' }}
+      from the inventory. The hosts keep running untouched; this repository
+      will not change or remove them, so manage or decommission them by hand.
+      See CHANGELOG.md.
+      {% endif %}
+      {% if preflight_legacy.acme_removed_provider | length > 0 %}
+      acme_challenge_method is '{{ preflight_legacy.acme_removed_provider }}', but the
+      acme.sh nsupdate and pdns DNS-01 providers were removed. Use another
+      provider (docs/acme-providers.md) or 'http'.
+      {% endif %}
+    success_msg: "no retired nameserver groups or acme.sh providers in the inventory"
+  run_once: true
+
+- name: Warn that retired DNS variables are ignored
+  ansible.builtin.debug:
+    msg: >-
+      These inventory variables belonged to the removed PowerDNS support and
+      are ignored now: {{ preflight_legacy.ignored_vars | join(', ') }}.
+      Delete them from the inventory.
+  when: preflight_legacy.ignored_vars | length > 0
+  run_once: true

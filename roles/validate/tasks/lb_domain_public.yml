@@ -1,24 +1,13 @@
 ---
 # Does public DNS hand out this az's load balancer records?
 #
-# Only when roles/powerdns wrote them (`validate_lb_records_managed`). For
-# hand-made records roles/preflight (tasks/app_domain_dns.yml) makes exactly
-# this check before the run starts; for records this run writes, nothing
-# exists to check until roles/powerdns has run, so the check lands here. It
-# is the same check with the same shape — from the control machine, through
-# its ordinary recursive resolver, the apex A must include this node's
-# `public_ip` and a label under the wildcard must be a CNAME to the apex —
-# because that is what the controller's `ValidateDomainService` and every
-# tenant's browser will see.
-#
-# What a failure MEANS is different, and the messages say so. The records are
-# in the bundled zone (the `dns` check asks every nameserver for them
-# directly, and roles/powerdns asserted them after writing), so a public
-# lookup that disagrees is almost always the path TO those servers: the
-# parent of `cs_app_zone` does not delegate to them, or a resolver is still
-# serving an older answer it cached. Telling the operator to create the
-# records by hand would be wrong — the provisioner owns them and a re-run
-# converges them.
+# The operator publishes these records at their own DNS host before the run;
+# roles/preflight (tasks/app_domain_dns.yml) makes the same check before the
+# converge starts. It is repeated here, after the run, from the control
+# machine through its ordinary recursive resolver: the apex A must include
+# this node's `public_ip` and a label under the wildcard must be a CNAME to
+# the apex, because that is what the controller's `ValidateDomainService` and
+# every tenant's browser will see.
 #
 # Runs on each new node, delegated to the control machine, reading only this
 # node's own `cs_app_domain` and `public_ip` — no cross-host read at all, so
@@ -45,8 +34,8 @@
 
 # AAAA too, because the controller holds every apex address to the same rule
 # as the A (event 510806d5621c97d5): it must be one of the load balancer's
-# public addresses. roles/powerdns writes this node's `public_ipv6` as the
-# AAAA when it is set, and roles/controller_seed adds it to the load balancer.
+# public addresses. roles/controller_seed adds this node's `public_ipv6` to
+# the load balancer.
 - name: Resolve this az's load balancer domain's IPv6 addresses publicly
   ansible.builtin.command:
     argv:
@@ -84,9 +73,8 @@
       - public_ip in (validate_lb_public_a.stdout_lines | default([]))
     fail_msg: >-
       {{ cs_app_domain }} (az {{ az }}) {{ validate_lb_public_hint_answer }}
-      through public DNS from this control machine, but this run wrote
-      `{{ cs_app_domain }}. A {{ public_ip }}` into {{ cs_app_zone }} on the
-      bundled nameservers. {{ validate_lb_public_hint }}
+      through public DNS from this control machine, but it should include
+      `{{ cs_app_domain }}. A {{ public_ip }}`. {{ validate_lb_public_hint }}
     success_msg: "{{ cs_app_domain }} resolves publicly to {{ public_ip }}"
     quiet: true
   vars:
@@ -110,9 +98,8 @@
          else ('returned no CNAME'
                if ((validate_lb_public_wildcard.stdout | default('')) | trim) | length == 0
                else ('is a CNAME to ' ~ ((validate_lb_public_wildcard.stdout | default('')) | trim))) }}
-      through public DNS from this control machine, but this run wrote
-      `*.{{ cs_app_domain }}. CNAME {{ cs_app_domain }}.` into
-      {{ cs_app_zone }} on the bundled nameservers. The controller proves the
+      through public DNS from this control machine, but it should be
+      `*.{{ cs_app_domain }}. CNAME {{ cs_app_domain }}.`. The controller proves the
       wildcard the same way and marks the load balancer invalid without it
       (event 2721edc59787a807 for no CNAME, 635285f7f2889009 for the wrong
       target). {{ validate_lb_public_hint }}
@@ -131,9 +118,8 @@
          else ('has no AAAA record'
                if (validate_lb_public_aaaa.stdout_lines | default([])) | length == 0
                else ('has AAAA ' ~ (validate_lb_public_aaaa.stdout_lines | join(', ')))) }}
-      through public DNS from this control machine, but this run wrote
-      `{{ cs_app_domain }}. AAAA {{ public_ipv6 }}` into {{ cs_app_zone }} on
-      the bundled nameservers. {{ validate_lb_public_hint }}
+      through public DNS from this control machine, but it should include
+      `{{ cs_app_domain }}. AAAA {{ public_ipv6 }}`. {{ validate_lb_public_hint }}
     success_msg: "{{ cs_app_domain }} resolves publicly to {{ public_ipv6 }}"
     quiet: true
   when: (public_ipv6 | default('', true) | string) | length > 0
