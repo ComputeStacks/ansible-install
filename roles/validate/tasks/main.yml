@@ -155,3 +155,17 @@
       {{ inventory_hostname }} validated.
       {{ 'Skipped: ' ~ (validate_skip | join(', ')) if validate_skip | length > 0 else 'No checks skipped.' }}
   tags: [validate]
+
+# Per az, the same scope as lb_domain. Warns, never fails: whether the
+# controller can order this az's certificate is a DNS and settings question
+# the operator may be fixing at the same time (controller 9.9+).
+- name: Report this az's load balancer certificate status and ACME DNS records
+  ansible.builtin.include_tasks:
+    file: lb_acme.yml
+    apply:
+      tags: [validate, lb_acme]
+  when:
+    - "'lb_acme' not in validate_skip"
+    - "'nodes' in group_names"
+    - inventory_hostname in (cs_new_nodes | default([]))
+  tags: [validate, lb_acme]

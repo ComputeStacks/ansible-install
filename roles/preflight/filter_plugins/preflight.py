@@ -1,4 +1,4 @@
-"""Pure decision logic for roles/preflight.
+"""Pure decision logic for roles/preflight (also preflight_lb_acme below).
 
 preflight_unreachable() decides which targeted hosts did not answer the
 reachability probe in tasks/reachable.yml. It is a function of its arguments:
@@ -7,6 +7,7 @@ registered ping result. tests/preflight_reachable.yml feeds it canned results
 to prove the rule without a host.
 """
 
+import re
 from collections.abc import Mapping
 
 # Long ssh errors (a whole banner, a stack of -v output) are cut to this many
@@ -96,9 +97,76 @@ def preflight_legacy_dns(groups, variables):
     }
 
 
+LB_ACME_PROVIDER_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+LB_ACME_ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+LB_ACME_ENV_FORBIDDEN = ("PATH", "CERT_ISSUER_INSECURE_SKIP_PROPAGATION_CHECK")
+LB_ACME_ZONE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+
+
+def preflight_lb_acme(provider, env, alias_zone):
+    """Problems with the load balancer ACME settings (cs_lb_acme_dns_*).
+
+    Returns a list of messages, empty when the settings are usable. Messages
+    name env keys but never print a value: `env` carries secrets.
+    """
+    problems = []
+    provider = "" if provider is None else provider
+    alias_zone = "" if alias_zone is None else alias_zone
+    env = {} if env is None else env
+    if not isinstance(provider, str) or not isinstance(alias_zone, str):
+        return ["cs_lb_acme_dns_provider and cs_lb_acme_dns_alias_zone must be strings"]
+    if not isinstance(env, Mapping):
+        return ["cs_lb_acme_dns_env must be a mapping of KEY: value"]
+    if not provider:
+        if env:
+            problems.append(
+                "cs_lb_acme_dns_env is set but cs_lb_acme_dns_provider is empty, "
+                "so the credentials would be ignored"
+            )
+        if alias_zone:
+            problems.append(
+                "cs_lb_acme_dns_alias_zone is set but cs_lb_acme_dns_provider is empty, "
+                "so it would be ignored"
+            )
+        return problems
+    if not LB_ACME_PROVIDER_RE.match(provider):
+        problems.append(
+            "cs_lb_acme_dns_provider must be a lego DNS provider code "
+            "(lowercase letters, digits, '.' and '-', e.g. cloudflare)"
+        )
+    if not env:
+        problems.append(
+            "cs_lb_acme_dns_env is empty: the provider needs its credentials as "
+            "KEY: value pairs (the lego environment variables, vaulted)"
+        )
+    for key, value in sorted(((str(k), v) for k, v in env.items()), key=lambda kv: kv[0]):
+        if not LB_ACME_ENV_KEY_RE.match(key):
+            problems.append(
+                "cs_lb_acme_dns_env key '%s' must be an uppercase environment "
+                "variable name (A-Z, 0-9, _)" % key
+            )
+        if key in LB_ACME_ENV_FORBIDDEN:
+            problems.append("cs_lb_acme_dns_env must not set %s" % key)
+        if not isinstance(value, str) or not value.strip():
+            problems.append(
+                "cs_lb_acme_dns_env key '%s' must be a non-empty string (quote it)" % key
+            )
+        elif "\n" in value or "\r" in value:
+            problems.append(
+                "cs_lb_acme_dns_env key '%s' must be a single line" % key
+            )
+    if alias_zone and not LB_ACME_ZONE_RE.match(alias_zone):
+        problems.append(
+            "cs_lb_acme_dns_alias_zone must be a lowercase dotted hostname "
+            "without a trailing dot (e.g. acme.example.com)"
+        )
+    return problems
+
+
 class FilterModule:
     def filters(self):
         return {
             "preflight_unreachable": preflight_unreachable,
             "preflight_legacy_dns": preflight_legacy_dns,
+            "preflight_lb_acme": preflight_lb_acme,
         }

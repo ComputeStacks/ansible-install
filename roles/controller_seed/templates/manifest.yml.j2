@@ -52,6 +52,13 @@ settings:
     registry_ssh_port: {{ controller_seed_registry_ssh_port | string | to_json }}
     cr_le: {{ controller_seed_cr_le | to_json }}
 {% endif %}
+{% if controller_seed_lb_acme_dns_provider | length > 0 %}
+    le_dns_provider: {{ controller_seed_lb_acme_dns_provider | to_json }}
+    le_dns_provider_secret: {{ (controller_seed_lb_acme_dns_env | dictsort | map('join', '=') | join('\n')) | to_json }}
+{% if controller_seed_lb_acme_dns_alias_zone | length > 0 %}
+    le_dns_alias_zone: {{ controller_seed_lb_acme_dns_alias_zone | to_json }}
+{% endif %}
+{% endif %}
 {% for name, value in (controller_seed_settings_extra | dictsort) %}
     {{ name }}: {{ value | to_json }}
 {% endfor %}

@@ -1,0 +1,180 @@
+---
+# Can the controller order this az's load balancer certificate, and is the
+# DNS it needs in place? (controller 9.9+)
+#
+# NEVER FAILS. Every finding is a WARN: the operator may be setting the
+# provider in the admin UI or publishing the CNAME while this runs, and the
+# self-signed `shared_certificate` the seed generated keeps the load balancer
+# serving in the meantime.
+#
+# What the controller does: with `le: true` and a `le_dns_provider`, it orders
+# `<domain>` and `*.<domain>` over DNS-01 with lego. With a blank provider it
+# SKIPS the load balancer certificates silently, issuing and renewing nothing.
+# With `le_dns_alias_zone` set, each load balancer needs
+# `_acme-challenge.<domain> CNAME lb<id>.<alias zone>` (exactly that);
+# without it the provider writes the domain's own zone and a leftover
+# `_acme-challenge` CNAME has to go.
+#
+# The seed writes the three settings only while the controller has them
+# unconfigured, so the inventory and the controller can differ; that is
+# reported too. Only presence is read of the credentials (`le_dns_provider_secret`),
+# never the value; the provider code and alias zone are not secret.
+
+- name: Read this az's load balancer certificate state from the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ validate_cstacks_bin }}"
+      - runner
+      - "{{ validate_lb_acme_query }}"
+  vars:
+    # One `puts` of pipe-joined fields:
+    #
+    #   OK | lb id | domain | le yes|no | acme cert active yes|no
+    #      | provider | alias zone | credentials set yes|no
+    #
+    # or the single token NOREGION / NOLB when there is no row to read. Settings
+    # are read with find_by so this never creates a row on the controller.
+    validate_lb_acme_query: >-
+      {{ 'r = Region.find_by(name: %q{' ~ az ~ '});'
+         ~ ' lb = r&.load_balancer;'
+         ~ ' s = ->(n) { Setting.find_by(name: n, category: "acme")&.value.to_s.strip };'
+         ~ ' puts lb.nil? ? (r.nil? ? "NOREGION" : "NOLB")'
+         ~ ' : ["OK", lb.id, lb.domain.to_s, (lb.le ? "yes" : "no"),'
+         ~ ' (lb.lets_encrypt&.active? ? "yes" : "no"),'
+         ~ ' s.call("le_dns_provider"),'
+         ~ ' s.call("le_dns_alias_zone").downcase.delete_suffix("."),'
+         ~ ' (s.call("le_dns_provider_secret").empty? ? "no" : "yes")].join("|")' }}
+  delegate_to: "{{ validate_controller_host }}"
+  register: validate_lb_acme_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Split the certificate state into its fields
+  ansible.builtin.set_fact:
+    validate_lb_acme_fields: >-
+      {{ (validate_lb_acme_state.stdout | default('') | trim).split('|') }}
+    validate_lb_acme_ok: >-
+      {{ validate_lb_acme_state.rc == 0
+         and (validate_lb_acme_state.stdout | default('') | trim).split('|') | length == 8
+         and (validate_lb_acme_state.stdout | trim).startswith('OK|') }}
+
+- name: Warn that the certificate state could not be read
+  ansible.builtin.debug:
+    msg: >-
+      WARN: could not read az '{{ az }}'s load balancer certificate state from
+      {{ validate_controller_host }} (the runner returned
+      "{{ validate_lb_acme_state.stdout | default('') | trim }}"). Re-run with
+      `--tags lb_acme` once the controller answers.
+  when: not (validate_lb_acme_ok | bool)
+
+- name: Name the fields
+  ansible.builtin.set_fact:
+    validate_lb_acme_lb_id: "{{ validate_lb_acme_fields[1] }}"
+    validate_lb_acme_domain: "{{ validate_lb_acme_fields[2] }}"
+    validate_lb_acme_le: "{{ validate_lb_acme_fields[3] == 'yes' }}"
+    validate_lb_acme_active: "{{ validate_lb_acme_fields[4] == 'yes' }}"
+    validate_lb_acme_provider: "{{ validate_lb_acme_fields[5] }}"
+    validate_lb_acme_alias_zone: "{{ validate_lb_acme_fields[6] }}"
+    validate_lb_acme_creds_set: "{{ validate_lb_acme_fields[7] == 'yes' }}"
+  when: validate_lb_acme_ok | bool
+
+# Public resolution exactly as lb_domain_public does it: dig from the control
+# machine through its ordinary resolver. Only worth asking when the controller
+# will actually try to order (a provider is configured).
+- name: Resolve the load balancer's _acme-challenge name publicly
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - +time=3
+      - +tries=2
+      - "_acme-challenge.{{ validate_lb_acme_domain }}"
+      - CNAME
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  register: validate_lb_acme_cname
+  when:
+    - validate_lb_acme_ok | bool
+    - validate_lb_acme_provider | length > 0
+    - validate_lb_acme_domain | length > 0
+
+# The record to create when an alias zone is in play: the controller's zone
+# (what it will use), else the inventory's. Kept as a fact so the
+# "Remaining by hand" play can list it.
+- name: Work out the _acme-challenge record this load balancer needs
+  ansible.builtin.set_fact:
+    validate_lb_acme_zone_in_use: >-
+      {{ validate_lb_acme_alias_zone | default('', true)
+         or (validate_lb_acme_inventory_alias_zone | lower | trim('.')) }}
+  when: validate_lb_acme_ok | bool
+
+- name: Remember the record to create
+  ansible.builtin.set_fact:
+    validate_lb_acme_record: >-
+      _acme-challenge.{{ validate_lb_acme_domain }}. CNAME
+      lb{{ validate_lb_acme_lb_id }}.{{ validate_lb_acme_zone_in_use }}.
+  when:
+    - validate_lb_acme_ok | bool
+    - validate_lb_acme_zone_in_use | length > 0
+
+- name: Collect the findings for this load balancer
+  ansible.builtin.set_fact:
+    validate_lb_acme_warnings: >-
+      {{ validate_lb_acme_warn_blank
+         + validate_lb_acme_warn_drift
+         + validate_lb_acme_warn_creds
+         + validate_lb_acme_warn_cname }}
+  when: validate_lb_acme_ok | bool
+  vars:
+    validate_lb_acme_seen: >-
+      {{ (validate_lb_acme_cname.stdout_lines | default([]))
+         | map('lower') | map('trim', '.') | list }}
+    validate_lb_acme_warn_blank: >-
+      {{ ['the controller has no le_dns_provider, so it will not issue or renew load balancer certificates'
+          ~ ' (this load balancer keeps serving its self-signed shared certificate). Set the provider in the admin UI,'
+          ~ ' or cs_lb_acme_dns_provider in the inventory for a controller that has never configured it.']
+      if validate_lb_acme_provider | length == 0 else [] }}
+    validate_lb_acme_warn_drift: >-
+      {{ (['the inventory provider is "' ~ validate_lb_acme_inventory_provider
+             ~ '" but the controller has "' ~ validate_lb_acme_provider
+             ~ '". The seed does not overwrite a configured setting; change it in the admin UI.']
+          if validate_lb_acme_inventory_provider | length > 0
+             and validate_lb_acme_inventory_provider != validate_lb_acme_provider else [])
+         + (['the inventory alias zone is "' ~ validate_lb_acme_inventory_alias_zone
+             ~ '" but the controller has "' ~ (validate_lb_acme_alias_zone | default('(none)', true))
+             ~ '". The seed does not overwrite a configured setting; change it in the admin UI.']
+          if validate_lb_acme_inventory_alias_zone | length > 0
+             and (validate_lb_acme_inventory_alias_zone | lower | trim('.')) != validate_lb_acme_alias_zone else []) }}
+    validate_lb_acme_warn_creds: >-
+      {{ ['the controller has a provider but no credentials (le_dns_provider_secret), so the order will fail. Set them in the admin UI.']
+      if validate_lb_acme_provider | length > 0 and not validate_lb_acme_creds_set else [] }}
+    validate_lb_acme_warn_cname: >-
+      {{ (['_acme-challenge.' ~ validate_lb_acme_domain ~ ' is not a public CNAME to lb'
+             ~ validate_lb_acme_lb_id ~ '.' ~ validate_lb_acme_alias_zone
+             ~ '. Create exactly: ' ~ validate_lb_acme_record]
+          if validate_lb_acme_provider | length > 0 and validate_lb_acme_alias_zone | length > 0
+             and (('lb' ~ validate_lb_acme_lb_id ~ '.' ~ validate_lb_acme_alias_zone) not in validate_lb_acme_seen) else [])
+         + (['_acme-challenge.' ~ validate_lb_acme_domain ~ ' is a CNAME (to '
+             ~ (validate_lb_acme_seen | join(', '))
+             ~ ') but no alias zone is set, so the provider writes the domain itself, in its own zone. Remove that CNAME.']
+          if validate_lb_acme_provider | length > 0 and validate_lb_acme_alias_zone | length == 0
+             and validate_lb_acme_seen | length > 0 else []) }}
+
+- name: Warn about the load balancer certificate settings and DNS
+  ansible.builtin.debug:
+    msg: "WARN: {{ az }} ({{ validate_lb_acme_domain }}): {{ item }}"
+  loop: "{{ validate_lb_acme_warnings | default([]) }}"
+  when: validate_lb_acme_ok | bool
+
+- name: Report this az's load balancer certificate status
+  ansible.builtin.debug:
+    msg: >-
+      {{ az }} ({{ validate_lb_acme_domain }}, load balancer {{ validate_lb_acme_lb_id }}):
+      {{ 'ACME certificate active' if validate_lb_acme_active
+         else 'self-signed fallback in use (no ACME certificate yet'
+              ~ ('; le is off for this load balancer)' if not validate_lb_acme_le
+                 else '; the controller has not issued one)') }}
+  when: validate_lb_acme_ok | bool

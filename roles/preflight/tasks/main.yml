@@ -401,6 +401,10 @@
 - name: Check the inventory for retired nameserver settings
   ansible.builtin.include_tasks: legacy_dns.yml
 
+# cs_lb_acme_dns_* (load balancer certificates, controller 9.9+).
+- name: Check the load balancer ACME settings
+  ansible.builtin.include_tasks: lb_acme.yml
+
 - name: Assert hostnames (where defined) are a single lowercase word, not an FQDN
   ansible.builtin.assert:
     that:

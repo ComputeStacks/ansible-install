@@ -1,0 +1,25 @@
+---
+# The load balancer ACME settings (cs_lb_acme_dns_*), checked before anything
+# is installed. Decided in filter_plugins/preflight.py (preflight_lb_acme) so
+# tests/preflight_lb_acme.yml can prove it. The inputs default to the inventory
+# vars and are overridable only for that test. The problems name env keys and
+# never print a value: the env dict is a secret, hence no_log on the fact and
+# the assert.
+- name: Collect problems with the load balancer ACME settings
+  ansible.builtin.set_fact:
+    preflight_lb_acme_problems: >-
+      {{ (preflight_lb_acme_provider | default(cs_lb_acme_dns_provider | default('')))
+         | preflight_lb_acme(preflight_lb_acme_env | default(cs_lb_acme_dns_env | default({})),
+                             preflight_lb_acme_alias_zone | default(cs_lb_acme_dns_alias_zone | default(''))) }}
+  no_log: true
+  run_once: true
+
+- name: Assert the load balancer ACME settings are usable
+  ansible.builtin.assert:
+    that: preflight_lb_acme_problems | length == 0
+    fail_msg: >-
+      The load balancer certificate settings are wrong:
+      {{ preflight_lb_acme_problems | join('; ') }}.
+      See the cs_lb_acme_dns_* variables in inventories/example.
+    success_msg: "load balancer ACME settings are usable (or unset)"
+  run_once: true

@@ -1,0 +1,19 @@
+---
+# "Remaining by hand" (site.yml, add-region.yml): when an ACME alias zone is
+# set, each load balancer this run seeded needs one DNS record the operator
+# creates. Per node, reading only this node's own facts (contracts rule 10).
+# `validate_lb_acme_record` is a fact the `lb_acme` check set earlier in the
+# run; when validate did not run there is no id to print, so say where it is.
+- name: List the _acme-challenge record to create for this az
+  ansible.builtin.debug:
+    msg: >-
+      {{ az }}: create this DNS record at your DNS host so the controller can
+      validate the load balancer certificate:
+      {{ validate_lb_acme_record
+         | default('_acme-challenge.' ~ cs_app_domain ~ '. CNAME lb<id>.'
+                   ~ (validate_lb_acme_inventory_alias_zone | lower | trim('.')) ~ '.'
+                   ~ ' (<id> is the id of this az load balancer in the admin UI;'
+                   ~ ' `make validate` prints the exact record)') }}
+  when:
+    - validate_lb_acme_inventory_alias_zone | length > 0
+    - inventory_hostname in (cs_new_nodes | default([]))

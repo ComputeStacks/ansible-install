@@ -201,6 +201,60 @@
                         | map(attribute='ssh_port', default=cs_ports.ssh)
                         | map('int'))) }}
 
+    # Load balancer certificates (controller 9.9+): the three settings and
+    # `le` follow cs_lb_acme_dns_*. The inventory under test sets none, so the
+    # render above is the "unset" case; the two below override the inventory vars.
+    - name: "Case: provider unset renders no le_dns_* setting and le false"
+      ansible.builtin.assert:
+        that:
+          - (manifest_render_content | from_yaml).settings['values'].keys() | select('match', '^le_dns') | list == []
+          - >-
+            (manifest_render_content | from_yaml).locations | map(attribute='regions') | flatten
+            | map(attribute='load_balancer') | map(attribute='le') | unique | list == [false]
+        quiet: true
+
+    - name: Render the manifest with a provider and credentials
+      ansible.builtin.set_fact:
+        manifest_render_acme: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/controller_seed/templates/manifest.yml.j2') | from_yaml }}
+      vars:
+        cs_lb_acme_dns_provider: cloudflare
+        cs_lb_acme_dns_env: {ZZZ_LAST: "z", AAA_FIRST: "a b=c"}
+        cs_lb_acme_dns_alias_zone: ""
+      no_log: true
+
+    - name: "Case: provider set renders two settings, the sorted secret, and le true"
+      ansible.builtin.assert:
+        that:
+          - manifest_render_acme.settings['values'].le_dns_provider == 'cloudflare'
+          - manifest_render_acme.settings['values'].le_dns_provider_secret == 'AAA_FIRST=a b=c\nZZZ_LAST=z'
+          - "'le_dns_alias_zone' not in manifest_render_acme.settings['values']"
+          - >-
+            manifest_render_acme.locations | map(attribute='regions') | flatten
+            | map(attribute='load_balancer') | map(attribute='le') | unique | list == [true]
+        quiet: true
+      no_log: true
+
+    - name: Render the manifest with a provider, credentials and an alias zone
+      ansible.builtin.set_fact:
+        manifest_render_acme: >-
+          {{ lookup('ansible.builtin.template',
+                    playbook_dir ~ '/../roles/controller_seed/templates/manifest.yml.j2') | from_yaml }}
+      vars:
+        cs_lb_acme_dns_provider: cloudflare
+        cs_lb_acme_dns_env: {CLOUDFLARE_DNS_API_TOKEN: "t"}
+        cs_lb_acme_dns_alias_zone: acme.example.com
+      no_log: true
+
+    - name: "Case: alias zone is rendered when set"
+      ansible.builtin.assert:
+        that:
+          - manifest_render_acme.settings['values'].le_dns_alias_zone == 'acme.example.com'
+          - manifest_render_acme.settings['values'].le_dns_provider_secret == 'CLOUDFLARE_DNS_API_TOKEN=t'
+        quiet: true
+      no_log: true
+
     # Split, so the default callback prints one manifest line per output line
     # instead of a single string full of \n escapes. Printing the document IS
     # the point of the play — see the secrets note in the header.

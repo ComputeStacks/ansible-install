@@ -7,7 +7,11 @@
 
 # Controller (rolling minor line — `cstacks upgrade` pulls latest patch)
 controller_image_repo: "ghcr.io/computestacks/controller"
-controller_image_tag: "9.8"
+# Set 2026-11-27 to 9.9 (ghcr.io/computestacks/controller:9.9 published; v9.9.0
+# release notes). 9.9 adds the load balancer certificate settings
+# (le_dns_provider, le_dns_provider_secret, le_dns_alias_zone) that
+# roles/controller_seed seeds from cs_lb_acme_dns_*.
+controller_image_tag: "9.9"
 # `controller_image_repo` can be pointed at a private registry instead; supply
 # its pull credentials (vaulted) as
 # controller_registry_username / controller_registry_password in secrets.yml

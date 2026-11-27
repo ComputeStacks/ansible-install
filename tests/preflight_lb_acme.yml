@@ -1,0 +1,87 @@
+# Does roles/preflight accept usable load balancer ACME settings
+# (cs_lb_acme_dns_*) and refuse the unusable ones, without printing a secret?
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/preflight_lb_acme.yml
+#
+# PURE: the filter on canned values, and tasks/lb_acme.yml with canned inputs.
+# The `fatal:` lines in the output are the assert's failure path, caught by
+# `rescue:`.
+
+- name: Preflight load balancer ACME settings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ok_env: {CLOUDFLARE_DNS_API_TOKEN: secret-token-value}
+  tasks:
+    - name: "Case: tasks/lb_acme.yml passes on usable settings (also loads the role's filters)"
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: lb_acme
+      vars:
+        preflight_lb_acme_provider: cloudflare
+        preflight_lb_acme_env: "{{ ok_env }}"
+        preflight_lb_acme_alias_zone: ""
+
+    - name: "Case: unset passes"
+      ansible.builtin.assert:
+        that:
+          - ('' | preflight_lb_acme({}, '')) == []
+          - ('' | preflight_lb_acme(none, none)) == []
+
+    - name: "Case: provider with credentials passes, with and without alias zone"
+      ansible.builtin.assert:
+        that:
+          - ('cloudflare' | preflight_lb_acme(ok_env, '')) == []
+          - ('cloudflare' | preflight_lb_acme(ok_env, 'acme.example.com')) == []
+          - ('dns-made.easy' | preflight_lb_acme(ok_env, '')) == []
+
+    - name: "Case: each bad input is named, and no value is printed"
+      ansible.builtin.assert:
+        that:
+          - ('Cloud flare' | preflight_lb_acme(ok_env, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme({}, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_lower, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_path, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_skip, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_empty, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_int, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(env_multiline, '')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(ok_env, 'acme.example.com.')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(ok_env, 'ACME.example.com')) | length == 1
+          - ('cloudflare' | preflight_lb_acme(ok_env, 'localhost')) | length == 1
+          - "'secret-token-value' not in (('Bad Provider' | preflight_lb_acme(ok_env, '')) | join)"
+          - "'secret' not in (('cloudflare' | preflight_lb_acme(env_multiline, '')) | join)"
+      vars:
+        env_lower: {lower: x}
+        env_path: {PATH: x}
+        env_skip: {CERT_ISSUER_INSECURE_SKIP_PROPAGATION_CHECK: "true"}
+        env_empty: {A_KEY: ""}
+        env_int: {A_KEY: 12}
+        env_multiline: {A_KEY: "secret\nvalue"}
+
+    - name: "Case: env or alias zone without a provider are refused"
+      ansible.builtin.assert:
+        that:
+          - ('' | preflight_lb_acme(ok_env, '')) | length == 1
+          - ('' | preflight_lb_acme({}, 'acme.example.com')) | length == 1
+          - ('' | preflight_lb_acme(ok_env, 'acme.example.com')) | length == 2
+
+    - name: "Case: tasks/lb_acme.yml fails on a provider without credentials"
+      block:
+        - name: Run the checks
+          ansible.builtin.include_role:
+            name: preflight
+            tasks_from: lb_acme
+          vars:
+            preflight_lb_acme_provider: cloudflare
+            preflight_lb_acme_env: {}
+            preflight_lb_acme_alias_zone: ""
+        - name: The checks did not fail
+          ansible.builtin.fail:
+            msg: lb_acme.yml passed a provider without credentials
+      rescue:
+        - name: "Assert: the failure names the variable"
+          ansible.builtin.assert:
+            that:
+              - "'cs_lb_acme_dns_env is empty' in ansible_failed_result.msg"

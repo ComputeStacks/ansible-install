@@ -87,6 +87,17 @@ controller_seed_cr_le: "{{ cs_registry_domain }}"
 # does not know, so do not invent names here.
 controller_seed_settings_extra: {}
 
+# Load balancer certificates (controller 9.9+): the controller orders each
+# load balancer's `<domain>` + `*.<domain>` certificate over DNS-01 with
+# lego. Inventory vars, read with a default HERE rather than defaulted in
+# playbooks/group_vars, because a playbook group_vars default would outrank
+# the operator's own inventory value. Provider blank renders none of the three
+# settings. SEED-ONLY like every setting: written only while the controller
+# has it unconfigured; later changes are made in the admin UI.
+controller_seed_lb_acme_dns_provider: "{{ cs_lb_acme_dns_provider | default('') }}"
+controller_seed_lb_acme_dns_env: "{{ cs_lb_acme_dns_env | default({}) }}"
+controller_seed_lb_acme_dns_alias_zone: "{{ cs_lb_acme_dns_alias_zone | default('') }}"
+
 # --- metric_clients / log_clients -----------------------------------------
 # The endpoints the CONTROLLER reads metrics and logs back from: the nginx TLS
 # vhosts roles/acme_web publishes on the metrics host. Matched EXACTLY by the
@@ -168,7 +179,9 @@ controller_seed_lb_stats_password: >-
   {{ haproxy_stats_password
      | default((secret_key_base ~ '|haproxy-stats') | hash('sha256') | truncate(32, true, '')) }}
 controller_seed_lb_direct_connect: false
-controller_seed_lb_le: false
+# On when a provider is set (the controller then orders the certificate);
+# the self-signed shared_certificate stays as the fallback either way.
+controller_seed_lb_le: "{{ controller_seed_lb_acme_dns_provider | length > 0 }}"
 # THE LEGACY CERTIFICATE PATH, AND THE ONE OPERATOR OVERRIDE IN THE PER-DOMAIN
 # MAP. `cs_app_domain_cert_paths` (vars/main.yml) maps every load balancer
 # domain this run seeds to the pem roles/controller generated for it. Every

@@ -224,6 +224,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_storage_classify.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_reachable.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_legacy_dns.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/preflight_lb_acme.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/ssh_port.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/ssh_port.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_kernel_uplink_ra.yml

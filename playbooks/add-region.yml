@@ -372,6 +372,11 @@
         name: firewall
         tasks_from: ssh_open_reminder
 
+    - name: List the load balancer ACME DNS records still to create
+      ansible.builtin.include_role:
+        name: validate
+        tasks_from: lb_acme_remaining
+
 # Last, so it is the last thing a two-step attach's phase 1 prints. Skipped
 # on every other run.
 - name: Two-step attach summary

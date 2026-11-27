@@ -6,7 +6,7 @@
 #   validate_skip: [borg, lb_domain_public]
 #
 # Check names: services, storage, containers, agent, backfill, prometheus,
-# borg, ssh, portal, acme_backend, lb_domain_public, lb_domain.
+# borg, ssh, portal, acme_backend, lb_domain_public, lb_domain, lb_acme.
 validate_skip: []
 
 # TLS verification for the two checks that dial an HTTPS endpoint by name
@@ -172,6 +172,15 @@ validate_acme_timeout: 10
 # remedy is to re-run `--tags lb_domain` rather than to treat it as broken.
 validate_lb_domain_retries: 12
 validate_lb_domain_delay: 10
+
+# --- lb_acme --------------------------------------------------------------
+# The inventory's load balancer certificate settings (controller 9.9+), which
+# `lb_acme` compares with what the controller holds. The seed only writes a
+# setting the controller has not configured yet, so a difference means the
+# inventory is not what is live. Read with a default here, not in
+# playbooks/group_vars, which would outrank the operator's inventory value.
+validate_lb_acme_inventory_provider: "{{ cs_lb_acme_dns_provider | default('') }}"
+validate_lb_acme_inventory_alias_zone: "{{ cs_lb_acme_dns_alias_zone | default('') }}"
 
 # Label used to exercise each wildcard, by `lb_domain_public`.
 # Any label matches a wildcard; a fixed one keeps the run reproducible. It must
