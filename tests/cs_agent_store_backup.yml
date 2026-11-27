@@ -1,0 +1,173 @@
+---
+# Does roles/cs_agent render the off-node SQLite backup block (store.backup.*)
+# only when it is enabled, write an s3 key only when it is set (so the agent's
+# fallback to backups.export.s3 works), and refuse a config cs-agent would
+# only log about at startup?
+#
+#   ansible-playbook -c local -i tests/fixtures/single-site tests/cs_agent_store_backup.yml
+#
+# (run by `make check`). PURE: it includes only tasks/store_backup_check.yml
+# and renders templates/agent.yml.j2 with a lookup. Every value is a
+# placeholder; the age recipient is the age spec's published example key.
+#
+# The `noqa: var-naming[no-role-prefix]` marks are for the secrets-file
+# credential names the role consumes. The one `fatal: ... settings are
+# invalid` in the output is expected: the refusal path, caught by `rescue:`.
+
+- name: Off-node SQLite backup settings and agent.yml rendering
+  hosts: nodes[0]
+  gather_facts: false
+  vars:
+    csb_template: "{{ playbook_dir }}/../roles/cs_agent/templates/agent.yml.j2"
+    csb_age: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+    # A valid settings dict as store_backup_check.yml builds it.
+    csb_ok:
+      enabled: true
+      recipients: ["{{ csb_age }}"]
+      freq: "*/15 * * * *"
+      keep_all_hours: 48
+      retention_days: 30
+      bucket: ""
+      endpoint: ""
+      export_bucket: exports-example
+      export_endpoint: https://s3.example.com
+      access_key_set: false
+      secret_key_set: false
+      access_key_placeholder: false
+      secret_key_placeholder: false
+      export_access_key_set: true
+      export_secret_key_set: true
+      export_access_key_placeholder: false
+      export_secret_key_placeholder: false
+  tasks:
+    - name: "Case: defaults (off), through store_backup_check.yml"
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: store_backup_check
+        public: true
+
+    - name: "Assert: off, no problems, no backup block rendered"
+      vars:
+        csb_doc: "{{ lookup('ansible.builtin.template', csb_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_store_backup_problems == []
+          - "'backup' not in csb_doc.store"
+        fail_msg: "{{ cs_agent_store_backup_problems }} / {{ csb_doc.store }}"
+        quiet: true
+
+    - name: "Case: on, everything from the export settings"  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.include_role:
+        name: cs_agent
+        tasks_from: store_backup_check
+      vars: &csb_inherit
+        cs_agent_store_backup_enabled: true
+        cs_agent_store_backup_recipients: ["{{ csb_age }}"]
+        cs_agent_s3_export_bucket: exports-example
+        s3_export_access_key: EXAMPLEACCESSKEY
+        s3_export_secret_key: EXAMPLESECRET
+
+    - name: "Assert: valid, and no s3 key but the prefix is written"
+      vars:
+        <<: *csb_inherit
+        csb_doc: "{{ lookup('ansible.builtin.template', csb_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - cs_agent_store_backup_problems == []
+          - >-
+            csb_doc.store.backup == {'enabled': true, 'freq': '*/15 * * * *',
+            'recipients': [csb_age], 'keep_all_hours': 48, 'retention_days': 30,
+            's3': {'prefix': 'sqlite/'}}
+        fail_msg: "{{ cs_agent_store_backup_problems }} / {{ csb_doc.store | to_json }}"
+        quiet: true
+
+    - name: "Assert: its own bucket and account render every set key"  # noqa: var-naming[no-role-prefix]
+      vars:
+        cs_agent_store_backup_enabled: true
+        cs_agent_store_backup_recipients: ["{{ csb_age }}"]
+        cs_agent_store_backup_node_name: node-a
+        cs_agent_store_backup_s3_bucket: sqlite-example
+        cs_agent_store_backup_s3_endpoint: https://s3.example.com
+        cs_agent_store_backup_s3_region: example-1
+        cs_agent_store_backup_s3_force_path_style: true
+        store_backup_s3_access_key: EXAMPLEACCESSKEY
+        store_backup_s3_secret_key: 'EXAMPLE/secret"with\quote'
+        csb_doc: "{{ lookup('ansible.builtin.template', csb_template) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - csb_doc.store.backup.node_name == 'node-a'
+          - >-
+            csb_doc.store.backup.s3 == {'prefix': 'sqlite/', 'bucket': 'sqlite-example',
+            'endpoint': 'https://s3.example.com', 'region': 'example-1',
+            'access_key': 'EXAMPLEACCESSKEY', 'secret_key': 'EXAMPLE/secret"with\quote',
+            'force_path_style': true}
+        fail_msg: "{{ csb_doc.store.backup | default('no backup block') | to_json }}"
+        quiet: true
+
+    - name: "Case: an invalid config fails the host"
+      block:
+        - name: Check a config with no recipients and no bucket
+          ansible.builtin.include_role:
+            name: cs_agent
+            tasks_from: store_backup_check
+          vars:
+            cs_agent_store_backup_enabled: true
+
+        - name: Reaching this task means the refusal did not fail the host
+          ansible.builtin.fail:
+            msg: store_backup_check.yml accepted an invalid config
+      rescue:
+        - name: "Assert: it was the recipients and the bucket"
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg is search('cs_agent_store_backup_recipients is empty')
+              - ansible_failed_result.msg is search('no bucket')
+            fail_msg: "{{ ansible_failed_result.msg | default(ansible_failed_result) }}"
+            quiet: true
+
+    - name: "Filter: valid configs"
+      ansible.builtin.assert:
+        that:
+          - csb_ok | cs_agent_store_backup_problems == []
+          - >-
+            csb_ok | combine({'enabled': false, 'recipients': []}) | cs_agent_store_backup_problems == []
+          - >-
+            csb_ok | combine({'enabled': 'False', 'freq': ''}) | cs_agent_store_backup_problems == []
+          - >-
+            csb_ok | combine({'bucket': 'own', 'endpoint': 'https://own.example.com',
+            'export_bucket': '', 'export_endpoint': 'http://ignored', 'access_key_set': true,
+            'secret_key_set': 'True', 'export_access_key_set': false,
+            'export_secret_key_set': false}) | cs_agent_store_backup_problems == []
+          - >-
+            csb_ok | combine({'freq': '@hourly', 'keep_all_hours': 0, 'retention_days': '1'}) | cs_agent_store_backup_problems == []
+          - >-
+            csb_ok | combine({'freq': '@every 30m'}) | cs_agent_store_backup_problems == []
+        quiet: true
+
+    - name: "Filter: each rule refuses its own case"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (csb_ok | combine(item.patch) | cs_agent_store_backup_problems) | length == 1
+          - >-
+            (csb_ok | combine(item.patch) | cs_agent_store_backup_problems)[0] is search(item.match)
+        fail_msg: "{{ item.patch }} -> {{ csb_ok | combine(item.patch) | cs_agent_store_backup_problems }}"
+        quiet: true
+      loop:
+        - {patch: {recipients: []}, match: 'recipients is empty'}
+        - {patch: {recipients: 'age1abc'}, match: 'must be a list'}
+        - {patch: {recipients: ['AGE-SECRET-KEY-1XYZ']}, match: 'is not an age X25519'}
+        - {patch: {recipients: ['age1short']}, match: 'is not an age X25519'}
+        - {patch: {freq: '*/15 * * *'}, match: 'cs_agent_store_backup_freq'}
+        - {patch: {freq: ''}, match: 'cs_agent_store_backup_freq'}
+        - {patch: {keep_all_hours: -1}, match: 'keep_all_hours'}
+        - {patch: {keep_all_hours: true}, match: 'keep_all_hours'}
+        - {patch: {retention_days: 0}, match: 'retention_days'}
+        - {patch: {export_bucket: ''}, match: 'no bucket'}
+        - {patch: {export_endpoint: 'http://s3.example.com'}, match: 'https://'}
+        - {patch: {endpoint: 's3.example.com'}, match: 'https://'}
+        - {patch: {export_access_key_set: false}, match: 'store_backup_s3_access_key is not set'}
+        - {patch: {export_secret_key_placeholder: true}, match: 's3_export_secret_key is still the CHANGEME'}
+        - {patch: {access_key_set: true, access_key_placeholder: true}, match: 'store_backup_s3_access_key is still the CHANGEME'}
+      loop_control:
+        label: "{{ item.patch }}"

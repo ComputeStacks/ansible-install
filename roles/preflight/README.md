@@ -337,7 +337,7 @@ not earn.
 | `preflight_required_node_vars` | see `defaults/main.yml` | List of host vars every node must define. |
 | `preflight_check_node_storage` | `true` | The data disk probe and its run-wide assert. False only for a run that never touches docker or the disk (`firewall.yml`). |
 | `preflight_check_public_ipv6` | `true` | The `public_ipv6` format check. False only in `firewall.yml`, which never reads it. |
-| `preflight_check_backup_export` | `true` | The backup export check and its run-wide assert. False only in `firewall.yml`, which never configures cs-agent. |
+| `preflight_check_backup_export` | `true` | The backup export and off-node SQLite backup checks and their run-wide asserts. False only in `firewall.yml`, which never configures cs-agent. |
 | `preflight_storage_refused_nodes` | derived | Nodes whose `node_storage_state` fact is `refuse`. A plain fact, so the cross-host read is safe (docs/contracts.md rule 10). |
 | `preflight_site_hint` | see `defaults/main.yml` | What a `site` is and where to set it, as an operator-facing sentence. Shared by all three site assertions. |
 | `preflight_node_sites` | derived | Distinct `cs_site` values across `groups['nodes']`. |

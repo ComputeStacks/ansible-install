@@ -629,6 +629,35 @@
   when: preflight_check_backup_export | bool
   run_once: true
 
+# The off-node SQLite backup (cs-agent 3.7.0+), the same way. Gated with the
+# export check: both configure cs-agent, and its S3 settings fall back to the
+# export's.
+- name: Check each new node's off-node SQLite backup settings
+  ansible.builtin.include_role:
+    name: cs_agent
+    tasks_from: store_backup_check
+  vars:
+    cs_agent_store_backup_check_fail: false
+  when:
+    - preflight_check_backup_export | bool
+    - "'nodes' in group_names"
+    - not (existing_env | default(false) | bool)
+
+- name: Assert no node's off-node SQLite backup settings are invalid
+  ansible.builtin.assert:
+    that:
+      - (preflight_store_backup_bad_nodes | length) == 0
+    fail_msg: >-
+      The off-node SQLite backup settings are invalid on
+      {{ preflight_store_backup_bad_nodes | length }} node(s), and nothing was
+      changed on any host:
+      {% for n in preflight_store_backup_bad_nodes %}{{ n }}:
+      {{ hostvars[n].cs_agent_store_backup_problems | join(' ') }}{{ ' ' if not loop.last else '' }}{% endfor %}
+      See roles/cs_agent/README.md, "Off-node SQLite backup".
+    success_msg: "every new node's off-node SQLite backup settings are valid (or the backup is off)"
+  when: preflight_check_backup_export | bool
+  run_once: true
+
 # DNS before the registry: both are network checks, but this one fails on an
 # operator step that has to be fixed outside this repository (and outside this
 # run), so it is the more useful thing to learn first. The operator publishes

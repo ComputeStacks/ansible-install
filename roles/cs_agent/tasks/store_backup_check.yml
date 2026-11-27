@@ -1,0 +1,51 @@
+---
+# PURE. Check the off-node SQLite backup settings (store.backup.* in
+# agent.yml) with the cs_agent_store_backup_problems filter
+# (filter_plugins/cs_agent_store_backup.py). Same shape as export_check.yml:
+# roles/preflight includes it on every new node before anything changes, the
+# role's own tasks/main.yml includes it again as a backstop, and
+# tests/cs_agent_store_backup.yml drives it.
+#
+# Input:   the cs_agent_store_backup_* variables (defaults/main.yml), the
+#          vaulted store_backup_s3_* credentials, and the export settings
+#          they fall back to
+#          cs_agent_store_backup_check_fail   fail the host on a problem
+#                                             (default true)
+# Output:  cs_agent_store_backup_problems     operator-facing sentences;
+#                                             empty when valid or off
+#
+# Credentials enter the dict only as set / placeholder booleans.
+
+- name: Check the off-node SQLite backup settings
+  vars:
+    cs_agent_store_backup_settings:
+      enabled: "{{ cs_agent_store_backup_enabled }}"
+      recipients: "{{ cs_agent_store_backup_recipients }}"
+      freq: "{{ cs_agent_store_backup_freq }}"
+      keep_all_hours: "{{ cs_agent_store_backup_keep_all_hours }}"
+      retention_days: "{{ cs_agent_store_backup_retention_days }}"
+      bucket: "{{ cs_agent_store_backup_s3_bucket }}"
+      endpoint: "{{ cs_agent_store_backup_s3_endpoint }}"
+      export_bucket: "{{ cs_agent_s3_export_bucket }}"
+      export_endpoint: "{{ cs_agent_s3_export_endpoint }}"
+      access_key_set: "{{ (store_backup_s3_access_key | default('') | string | length) > 0 }}"
+      secret_key_set: "{{ (store_backup_s3_secret_key | default('') | string | length) > 0 }}"
+      access_key_placeholder: "{{ (store_backup_s3_access_key | default('') | string | trim | upper) == 'CHANGEME' }}"
+      secret_key_placeholder: "{{ (store_backup_s3_secret_key | default('') | string | trim | upper) == 'CHANGEME' }}"
+      export_access_key_set: "{{ (s3_export_access_key | default('') | string | length) > 0 }}"
+      export_secret_key_set: "{{ (s3_export_secret_key | default('') | string | length) > 0 }}"
+      export_access_key_placeholder: "{{ (s3_export_access_key | default('') | string | trim | upper) == 'CHANGEME' }}"
+      export_secret_key_placeholder: "{{ (s3_export_secret_key | default('') | string | trim | upper) == 'CHANGEME' }}"
+  ansible.builtin.set_fact:
+    cs_agent_store_backup_problems: "{{ cs_agent_store_backup_settings | cs_agent_store_backup_problems }}"
+
+- name: Refuse an invalid off-node SQLite backup configuration
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }}: the off-node SQLite backup settings are invalid
+      (cs_agent_store_backup_enabled is true):
+      {{ cs_agent_store_backup_problems | join(' ') }}
+      See roles/cs_agent/README.md, "Off-node SQLite backup".
+  when:
+    - cs_agent_store_backup_problems | length > 0
+    - cs_agent_store_backup_check_fail | default(true) | bool

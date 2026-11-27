@@ -2,6 +2,15 @@
 
 ## November 27, 2026
 
+* **Optional off-node backup of cs-agent's SQLite databases** (cs-agent
+  3.7.0+). Set `cs_agent_store_backup_enabled: true` and
+  `cs_agent_store_backup_recipients` (age public keys) to have each node
+  encrypt and upload `control.db` and its project databases to S3. Unset S3
+  settings fall back to the backup export's (`cs_agent_s3_export_*`), so
+  with export configured nothing else is needed. Preflight rejects a missing
+  recipient, bucket or credential. Off by default; see
+  roles/cs_agent/README.md, "Off-node SQLite backup".
+
 * **The provisioner no longer installs PowerDNS or creates DNS records.** It
   seeds no controller DNS driver or zones, and `roles/powerdns` is gone. You
   publish, at your own DNS host, for each az's load balancer domain: A/AAAA to

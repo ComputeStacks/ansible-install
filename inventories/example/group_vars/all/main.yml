@@ -102,6 +102,14 @@ acme_account_email: admin@example.com
 # cs_agent_s3_export_default_ttl_sec: 43200    # <= max_ttl_sec
 # cs_agent_s3_export_max_ttl_sec: 86400        # < 604800 (agent task retention)
 
+# Off-node backup of cs-agent's own SQLite databases (optional;
+# roles/cs_agent/README.md "Off-node SQLite backup"). Encrypted to age public
+# keys; keep the identity off the nodes. Unset s3 settings fall back to the
+# export's above, so with export configured only these two are needed.
+# cs_agent_store_backup_enabled: true
+# cs_agent_store_backup_recipients: ["age1..."]
+# cs_agent_store_backup_s3_bucket: sqlite-backups-example   # else export's
+
 # Post-install checks (roles/validate). Names: services, storage, containers,
 # agent, backfill, prometheus, borg, ssh, portal, acme_backend, lb_domain,
 # lb_domain_public.

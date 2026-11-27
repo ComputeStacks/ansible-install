@@ -55,6 +55,9 @@
 - name: Check the backup export settings
   ansible.builtin.include_tasks: export_check.yml
 
+- name: Check the off-node SQLite backup settings
+  ansible.builtin.include_tasks: store_backup_check.yml
+
 - name: Install the cs-agent package from the ComputeStacks apt repository
   ansible.builtin.include_tasks: install.yml
 

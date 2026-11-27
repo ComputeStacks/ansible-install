@@ -12,6 +12,35 @@ host:
 
 store:
   data_dir: "{{ cs_agent_store_data_dir }}"
+{% if cs_agent_store_backup_enabled | bool %}
+  # Off-node SQLite backup, checked by tasks/store_backup_check.yml. An s3 key
+  # is written only when set: an unset key falls back to backups.export.s3,
+  # and a key written empty would not.
+  backup:
+    enabled: true
+    freq: {{ cs_agent_store_backup_freq | string | trim | to_json }}
+    recipients: {{ cs_agent_store_backup_recipients | map('string') | map('trim') | list | to_json }}
+{% if cs_agent_store_backup_node_name | string | trim | length > 0 %}
+    node_name: {{ cs_agent_store_backup_node_name | string | trim | to_json }}
+{% endif %}
+    keep_all_hours: {{ cs_agent_store_backup_keep_all_hours | int }}
+    retention_days: {{ cs_agent_store_backup_retention_days | int }}
+    s3:
+      prefix: {{ cs_agent_store_backup_s3_prefix | string | to_json }}
+{% for key, value in [
+     ('endpoint', cs_agent_store_backup_s3_endpoint),
+     ('region', cs_agent_store_backup_s3_region),
+     ('bucket', cs_agent_store_backup_s3_bucket),
+     ('access_key', store_backup_s3_access_key | default('')),
+     ('secret_key', store_backup_s3_secret_key | default(''))] %}
+{% if value | string | trim | length > 0 %}
+      {{ key }}: {{ (value | string if key.endswith('_key') else value | string | trim) | to_json }}
+{% endif %}
+{% endfor %}
+{% if cs_agent_store_backup_s3_force_path_style | string | trim | length > 0 %}
+      force_path_style: {{ cs_agent_store_backup_s3_force_path_style | bool | lower }}
+{% endif %}
+{% endif %}
 {% if cs_agent_controller_host | length > 0 %}
 
 computestacks:

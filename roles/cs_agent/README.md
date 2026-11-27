@@ -201,6 +201,51 @@ carry over. Keep the bucket private, leave SSE on, and give it an
 object-expiry lifecycle rule and `AbortIncompleteMultipartUpload`. Each large
 export holds roughly `part_size_mb × concurrency` of memory per worker.
 
+## Off-node SQLite backup
+
+cs-agent 3.7.0+ can snapshot its own databases (`control.db` and every
+project database) on a schedule, encrypt each snapshot to age public keys and
+upload it to S3 (`store.backup.*`). It is **off until
+`cs_agent_store_backup_enabled` is true**; with it false no `backup:` block is
+rendered.
+
+| Variable | Default | `agent.yml` key |
+|---|---|---|
+| `cs_agent_store_backup_enabled` | `false` | `store.backup.enabled` |
+| `cs_agent_store_backup_recipients` | `[]` | `store.backup.recipients` — age public keys (`age1...`), at least one |
+| `cs_agent_store_backup_freq` | `*/15 * * * *` | `store.backup.freq` |
+| `cs_agent_store_backup_node_name` | `""` (the hostname) | `store.backup.node_name`, written only when set |
+| `cs_agent_store_backup_keep_all_hours` | `48` | `store.backup.keep_all_hours` |
+| `cs_agent_store_backup_retention_days` | `30` | `store.backup.retention_days` |
+| `cs_agent_store_backup_s3_bucket` | `""` (export's) | `store.backup.s3.bucket` |
+| `cs_agent_store_backup_s3_endpoint` | `""` (export's) | `store.backup.s3.endpoint` |
+| `cs_agent_store_backup_s3_region` | `""` (export's) | `store.backup.s3.region` |
+| `cs_agent_store_backup_s3_force_path_style` | `""` (export's) | `store.backup.s3.force_path_style` |
+| `cs_agent_store_backup_s3_prefix` | `sqlite/` | `store.backup.s3.prefix` (never falls back) |
+| `store_backup_s3_access_key` (secrets) | — (export's) | `store.backup.s3.access_key` |
+| `store_backup_s3_secret_key` (secrets) | — (export's) | `store.backup.s3.secret_key` |
+
+**S3 falls back to the export settings.** cs-agent reads any
+`store.backup.s3` key that is absent from `backups.export.s3` instead, so this
+role writes an S3 key only when its variable is set. With "Backup export to
+S3" configured, enabling the backup and setting recipients is enough; set the
+`cs_agent_store_backup_s3_*` variables for a separate bucket or account. The
+credentials need Put, Get, List and Delete on the prefix. Per-region
+settings work as for the export.
+
+**Keep the age identity off the nodes.** Only the public keys go in the
+inventory; the private identity is needed only where `cs-agent store-restore
+--identity` runs.
+
+**Checks** (`tasks/store_backup_check.yml`, filter
+`cs_agent_store_backup_problems` in `filter_plugins/cs_agent_store_backup.py`).
+Pure; `preflight` runs it on every new node and this role again as a
+backstop. With the backup on it requires at least one well-formed age
+recipient, a 5-field cron or `@` schedule, `keep_all_hours` ≥ 0,
+`retention_days` ≥ 1, and, after the fallback, a bucket, both credentials
+(neither `CHANGEME`) and an `https://` endpoint if one is set. cs-agent
+itself only logs a bad config at startup and runs with the backup off.
+
 ## Enrollment
 
 Per docs/contracts.md, delegated to the controller host:
@@ -274,6 +319,7 @@ containers.
 | `cs_agent_borg_compression` | `zstd,3` | `backups.borg.compression`. |
 | `cs_agent_queue_numworkers` | `3` | Agent job workers. |
 | `cs_agent_s3_export_*` | cs-agent's defaults, bucket empty | Backup export to S3; off until `cs_agent_s3_export_bucket` is set. See "Backup export to S3". |
+| `cs_agent_store_backup_*` | off | Off-node SQLite backup; off until `cs_agent_store_backup_enabled` is true. See "Off-node SQLite backup". |
 | `cs_agent_upstream_tasks_retention_sec` | `604800` | cs-agent's compiled-in `tasks.retention_sec`; not rendered, only the export check reads it. |
 | `cs_agent_mariadb_*` | agent defaults | Top-level `mariadb.*` block. |
 | `cs_agent_enroll_command` | `cstacks` | Set to an absolute path if `cstacks` is not on the controller's non-interactive `PATH`. |

@@ -193,6 +193,36 @@ cs_agent_upstream_tasks_retention_sec: 604800
 
 cs_agent_s3_export_enabled: "{{ (cs_agent_s3_export_bucket | default('') | string | trim | length) > 0 }}"
 
+# --- off-node SQLite backup (optional, cs-agent 3.7.0+) --------------------
+# store.backup.* — the agent snapshots control.db and every project database on
+# a schedule, encrypts each snapshot to the age recipients and uploads it to
+# S3. OFF until cs_agent_store_backup_enabled is true; with it false no
+# `backup:` block is rendered. Once on, tasks/store_backup_check.yml (also run
+# by preflight) requires at least one recipient and a usable bucket and
+# credentials. Settable per region / az / host like the export settings.
+#
+# The recipients are age PUBLIC keys (age1...). Keep the matching identity
+# OFF the nodes: it is only needed where `cs-agent store-restore --identity`
+# runs.
+cs_agent_store_backup_enabled: false
+cs_agent_store_backup_recipients: []
+cs_agent_store_backup_freq: "*/15 * * * *"
+# Name used in object keys; empty = the node's hostname (the agent's default).
+cs_agent_store_backup_node_name: ""
+cs_agent_store_backup_keep_all_hours: 48     # keep every snapshot this recent
+cs_agent_store_backup_retention_days: 30     # thinned to one a day, then deleted
+# S3. Each of these left empty (and each credential left unset) is NOT
+# rendered, so the agent falls back to the same key under backups.export.s3:
+# with export configured, enabling the backup and setting recipients is
+# enough. The prefix never falls back. The credentials, vaulted as
+# store_backup_s3_access_key / store_backup_s3_secret_key, need Put, Get,
+# List and Delete on the prefix.
+cs_agent_store_backup_s3_bucket: ""
+cs_agent_store_backup_s3_endpoint: ""        # empty = export's, else AWS
+cs_agent_store_backup_s3_region: ""
+cs_agent_store_backup_s3_force_path_style: ""   # "" = export's; else true/false
+cs_agent_store_backup_s3_prefix: "sqlite/"
+
 # --- mariadb ---------------------------------------------------------------
 # TOP-LEVEL in the schema. The upstream sample nests these under `backups:`,
 # which the code never reads (config/config.go registers `mariadb.*`).

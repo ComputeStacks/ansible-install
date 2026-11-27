@@ -232,6 +232,7 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_routing.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/tailscale_membership.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_export.yml
+	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/cs_agent_store_backup.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/backup_server_sshd.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/backup_server_sshd.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/firewall_ssh_source.yml
