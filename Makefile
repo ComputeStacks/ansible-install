@@ -90,8 +90,7 @@ help:
 	@echo "check                             syntax-check the playbooks and the role harness, then"
 	@echo "                                  parse both inventories and render the site contract"
 	@echo "                                  and the bootstrap manifest against each, and prove"
-	@echo "                                  the powerdns load balancer record plan, the"
-	@echo "                                  public_ipv6 check and load balancer address seed, the"
+	@echo "                                  the public_ipv6 check and load balancer address seed, the"
 	@echo "                                  node upgrade selection rules, the maintain-nodes"
 	@echo "                                  decision, agent.yml and tailscale comparisons and"
 	@echo "                                  deferred docker restarts, the node data"
@@ -218,7 +217,6 @@ check:
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/site_contract.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i inventories/example tests/manifest_render.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/manifest_render.yml
-	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_records_plan.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/lb_public_ipv6.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/controller_seed_preview.yml
 	$(ANSIBLE_PLAYBOOK) -c local -i tests/fixtures/single-site tests/node_upgrade_select.yml

@@ -20,7 +20,7 @@
 # Left out on purpose: node_storage (verified `ready` in preflight, never
 # re-applied to a live disk), geerlingguy.docker, ssh_trust, controller_seed,
 # controller_post_enroll, and every role that configures the controller, the
-# metrics or backup hosts, or the nameservers. The only writes off the node
+# metrics or backup hosts. The only writes off the node
 # are the ones cs_agent and docker_tls make for a node (README.md).
 #
 # The caller flushes the handlers right after this file, inside the hold:

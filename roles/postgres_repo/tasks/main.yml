@@ -1,7 +1,7 @@
 ---
 # The PGDG apt repository, plus the apt preferences that keep this host on the
 # pinned major. Runs BEFORE anything that installs a postgres package:
-# geerlingguy.postgresql on the controller, roles/powerdns on the nameservers.
+# geerlingguy.postgresql on the controller.
 #
 # The fleet takes postgres from PGDG rather than the Ubuntu archive so the
 # major is ours to choose for the life of the LTS: the archive carries only
@@ -108,7 +108,7 @@
   when: postgres_repo_source is changed or postgres_repo_preferences is changed
 
 # Cheap, and it converts the failure mode from "geerlingguy.postgresql's apt
-# task says No package matching postgresql-<major>" (or powerdns's) into a message
+# task says No package matching postgresql-<major>" into a message
 # that names the repository as the cause.
 - name: Check that the pinned postgres major resolves
   ansible.builtin.command:

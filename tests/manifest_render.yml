@@ -169,6 +169,14 @@
           {{ (manifest_render_content | from_yaml).keys() | list | sort | join(', ') }}
         quiet: true
 
+    # The provisioner no longer seeds a DNS driver, whatever the inventory sets.
+    - name: Assert the rendered manifest has no dns section
+      ansible.builtin.assert:
+        that:
+          - "'dns' not in (manifest_render_content | from_yaml)"
+          - "'dns' not in controller_seed_schema_sections"
+        quiet: true
+
     # Each node's Node row carries ITS OWN sshd port: the controller dials
     # nodes on Node.ssh_port, so a node with an `ssh_port` host var rendered
     # with the default is a node the controller can never reach.

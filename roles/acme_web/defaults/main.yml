@@ -225,20 +225,6 @@ acme_web_ionos_secret: "{{ acme_ionos_secret | default('') }}"
 # linode
 acme_web_linode_token: "{{ acme_linode_token | default('') }}"
 
-# nsupdate (RFC 2136)
-acme_web_dns_server: "{{ acme_dns_server | default('') }}"
-acme_web_dns_port: "{{ acme_dns_port | default(cs_ports.dns) }}"
-acme_web_dns_tsig_name: "{{ acme_dns_tsig_name | default('') }}"
-acme_web_dns_tsig_algo: "{{ acme_dns_tsig_algo | default('hmac-sha256') }}"
-acme_web_dns_tsig_secret: "{{ acme_dns_tsig_secret | default('') }}"
-acme_web_dns_tsig_key_path: "{{ acme_dns_tsig_key_path | default('/root/.acme-nsupdate.key') }}"
-
-# pdns (PowerDNS API)
-acme_web_pdns_url: "{{ acme_pdns_url | default('') }}"
-acme_web_pdns_serverid: "{{ acme_pdns_serverid | default('localhost') }}"
-acme_web_pdns_token: "{{ acme_pdns_token | default('') }}"
-acme_web_pdns_ttl: "{{ acme_pdns_ttl | default(60) }}"
-
 # vultr
 acme_web_vultr_key: "{{ acme_vultr_key | default('') }}"
 
@@ -292,19 +278,6 @@ acme_web_dns_providers:
     extra_args: ["--dnssleep", "900"]
     env:
       LINODE_V4_API_KEY: "{{ acme_web_linode_token }}"
-  nsupdate:
-    plugin: dns_nsupdate
-    env:
-      NSUPDATE_SERVER: "{{ acme_web_dns_server }}"
-      NSUPDATE_SERVER_PORT: "{{ acme_web_dns_port }}"
-      NSUPDATE_KEY: "{{ acme_web_dns_tsig_key_path }}"
-  pdns:
-    plugin: dns_pdns
-    env:
-      PDNS_Url: "{{ acme_web_pdns_url }}"
-      PDNS_ServerId: "{{ acme_web_pdns_serverid }}"
-      PDNS_Token: "{{ acme_web_pdns_token }}"
-      PDNS_Ttl: "{{ acme_web_pdns_ttl }}"
   vultr:
     plugin: dns_vultr
     env:

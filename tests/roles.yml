@@ -89,13 +89,6 @@
   roles:
     - backup_server
 
-- name: Nameservers
-  hosts: nameservers
-  gather_facts: false
-  roles:
-    - postgres_repo
-    - powerdns
-
 # The alternate entry points. Most are what add-region.yml (and firewall.yml)
 # calls; the two vault ones are included by docker_tls rather than by a play,
 # so nothing else parses them.
@@ -158,23 +151,6 @@
       ansible.builtin.include_role:
         name: cs_agent
         tasks_from: export_check
-
-# The powerdns entry points. add-region.yml includes `lb_records` against an
-# existing ns_primary; `lb_records_plan` is the pure step it (and
-# tests/lb_records_plan.yml) includes.
-- name: Nameserver task-file entry points
-  hosts: ns_primary
-  gather_facts: false
-  tasks:
-    - name: Write the load balancer records into the tenant zone
-      ansible.builtin.include_role:
-        name: powerdns
-        tasks_from: lb_records
-
-    - name: Plan the load balancer records
-      ansible.builtin.include_role:
-        name: powerdns
-        tasks_from: lb_records_plan
 
 # The public_ipv6 entry points: preflight's check and controller_seed's
 # address step, which their main.yml include, and the pure plan

@@ -9,9 +9,7 @@
 # `cs_app_url` was the load balancer's domain and the certificate CN, per run,
 # and `cs_app_zone` was — in v1's own words — "the zone name for cs_app_url".
 # The merge is the bug this file un-does. `cs_app_zone` keeps the meaning it
-# has today and stays environment-wide: ONE parent `Dns::Zone`, one
-# `pdnsutil create-zone`, one entry in the manifest's `dns.zones` list. Nothing
-# in roles/powerdns or roles/validate changes. What splits off is the per-az
+# has today and stays environment-wide: ONE parent zone. What splits off is the per-az
 # half — the load balancer domain — and that is `app_domain`.
 #
 # `app_domain` is an OPTIONAL inventory HOST var on a node. Nothing here

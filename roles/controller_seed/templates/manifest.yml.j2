@@ -97,33 +97,6 @@ log_clients:
     password: {{ log_creds['loki_password'] | to_json }}
 {% endif %}
 {% endfor %}
-{% if dns_driver | default('none') == 'powerdns' %}
-
-dns:
-  driver:
-    module_name: Pdns
-    endpoint: {{ controller_seed_dns_endpoint | to_json }}
-    auth_type: static
-    username: {{ controller_seed_dns_username | to_json }}
-    # Pdns::Auth is (user_id, username, password, api_key) and
-    # ProvisionDriver#cloud_auth passes (username, api_key_column,
-    # api_secret_column) into it -- so the WEB password goes in api_key and
-    # the X-API-Key goes in api_secret. It reads backwards; it is correct.
-    api_key: {{ pdns_web_key | to_json }}
-    api_secret: {{ pdns_api_key | to_json }}
-    settings:
-      config:
-        zone_type: {{ controller_seed_pdns_zone_type | to_json }}
-        masters: []
-        nameservers:
-{% for ns in (groups['nameservers'] | default([]) | sort) %}
-          - {{ (hostvars[ns].powerdns_name | regex_replace('\.$', '') ~ '.') | to_json }}
-{% endfor %}
-        server: {{ controller_seed_pdns_server | to_json }}
-  zones:
-    - name: {{ controller_seed_dns_zone | to_json }}
-      provider_ref: {{ (controller_seed_dns_zone ~ '.') | to_json }}
-{% endif %}
 {% endif %}
 
 # region (inventory) -> Location; az (inventory) -> Region. Exactly one node

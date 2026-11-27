@@ -96,16 +96,6 @@
       failed_when: acme_web_nginx_state.status.ActiveState != 'active'
       when: acme_web_challenge_method == 'http'
 
-    - name: Write the nsupdate TSIG key
-      ansible.builtin.template:
-        src: acme-dns/nsupdate.conf.j2
-        dest: "{{ acme_web_dns_tsig_key_path }}"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      when: acme_web_challenge_method == 'nsupdate'
-
     - name: Assert the selected DNS-01 provider is known
       ansible.builtin.assert:
         that:

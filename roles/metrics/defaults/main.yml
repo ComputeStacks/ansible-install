@@ -38,7 +38,7 @@ metrics_alertmanager_tls_skip_verify: true
 #
 # DECISION (site scoping): this list stays PLATFORM-WIDE, deliberately, and
 # is the one thing in this role that is not site-scoped. Every host in
-# groups['nodes'] has a `site`; the controller, the nameservers and the
+# groups['nodes'] has a `site`; the controller and the
 # registry do not, and there is nowhere sensible to put one -- they serve
 # the whole estate, not a facility. Scope this the way
 # `metrics_file_sd_nodes` is scoped and they land in the site called
@@ -53,7 +53,6 @@ metrics_infra_node_exporter_groups:
   - registry
   - metrics
   - backup
-  - nameservers
 
 # The three per-AZ file_sd jobs this role owns (docs/contracts.md Prometheus
 # contract). One rendered file per node per component, keyed by that node's

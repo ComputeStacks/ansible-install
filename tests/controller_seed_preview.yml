@@ -15,8 +15,8 @@
 # app/services/bootstrap/recorder.rb): two spaces and a bracketed action per
 # row, thirteen spaces per attribute, `→` between before and after. `apr_run1`
 # and `apr_run2` are the same full-manifest attach previewed twice against the
-# same database: a metric client and a DNS driver are created by the
-# rolled-back apply, so every id pointing at them comes from a sequence the
+# same database: a metric client is created by the
+# rolled-back apply, so every id pointing at it comes from a sequence the
 # rollback did not rewind and differs between the two. Every other difference
 # is a real change and must change the fingerprint.
 #
@@ -43,16 +43,6 @@
       - "             username: nil → \"prometheus\""
       - "             password: nil → «redacted»"
       - "  [skip  ] LogClient https://metrics.example.com:3443 (exists, skipped)"
-      - "== dns =="
-      - "  [create] ProvisionDriver powerdns"
-      - "             module_name: nil → \"Pdns\""
-      - "             api_key: nil → «redacted»"
-      - "  [update] ProductModule dns"
-      - "             primary_id: 3 → 41"
-      - "  [link  ] ProductModule dns → ProvisionDriver #41"
-      - "  [skip  ] Dns::Zone apps.example.com (exists, skipped)"
-      - "  [warn  ] Dns::Zone apps.example.com — manifest differs from database, database wins — update your inventory or change it in the UI"
-      - "             provision_driver_id: database 3, manifest 41"
       - "== locations =="
       - "  [create] Location exm"
       - "  [create] Region exm-006"
@@ -75,9 +65,6 @@
     # The same preview one run later: only the sequence-allocated ids moved.
     apr_run2: >-
       {{ apr_run1
-         | map('regex_replace', '→ 41$', '→ 42')
-         | map('regex_replace', '#41$', '#42')
-         | map('regex_replace', 'manifest 41$', 'manifest 42')
          | map('regex_replace', 'metric_client_id: nil → 17$', 'metric_client_id: nil → 18')
          | list }}
     # Real changes, each of which must move the fingerprint.
@@ -85,13 +72,11 @@
       # an existing price's id is a database value, not a sequence draw
       price_id: "{{ apr_run1 | map('regex_replace', '#12 ', '#13 ') | list }}"
       # the database side of a drift line is the database's value
-      drift_database_side: "{{ apr_run1 | map('regex_replace', 'database 3,', 'database 4,') | list }}"
-      # the before side of a diff line is the database's value
-      diff_before_side: "{{ apr_run1 | map('regex_replace', 'primary_id: 3 →', 'primary_id: 5 →') | list }}"
+      drift_database_side: "{{ apr_run1 | map('regex_replace', 'database \"a.example.com\"', 'database \"c.example.com\"') | list }}"
       # a plain integer attribute that is not an id
       not_an_id: "{{ apr_run1 | map('regex_replace', 'p_net_size: nil → 27', 'p_net_size: nil → 28') | list }}"
       domain_drift: "{{ apr_run1 | map('regex_replace', 'manifest \"a.example.com.\"', 'manifest \"b.example.com\"') | list }}"
-      extra_row: "{{ apr_run1[:28] + ['  [create] Node node-007.example.com'] + apr_run1[28:] }}"
+      extra_row: "{{ apr_run1[:18] + ['  [create] Node node-007.example.com'] + apr_run1[18:] }}"
       summary: "{{ apr_run1 | map('regex_replace', '^5 created', '6 created') | list }}"
       update_addresses: "{{ apr_run1[:2] + ['UPDATE_ADDRESSES — infrastructure addresses will be updated on rows that already exist.'] + apr_run1[2:] }}"
   tasks:
@@ -131,16 +116,13 @@
       ansible.builtin.assert:
         that:
           - apr_norm | length == apr_run1 | length
-          - "'             primary_id: 3 → <id>' in apr_norm"
-          - "'  [link  ] ProductModule dns → ProvisionDriver #<id>' in apr_norm"
-          - "'             provision_driver_id: database 3, manifest <id>' in apr_norm"
           - "'             metric_client_id: nil → <id>' in apr_norm"
           - "'             log_client_id: nil → <id>' in apr_norm"
           - "'             p_net_size: nil → 27' in apr_norm"
           - "'  [link  ] BillingResourcePrice #12 (Small, max_qty=nil) → exm-006' in apr_norm"
-          # five lines carry an id; every other line is passed through as is
-          - (apr_norm | select('search', '<id>') | list | length) == 5
-          - (apr_norm | reject('search', '<id>') | list) == (apr_run1 | reject('search', '(→ |manifest |#)(41|17|2)$') | list)
+          # two lines carry an id; every other line is passed through as is
+          - (apr_norm | select('search', '<id>') | list | length) == 2
+          - (apr_norm | reject('search', '<id>') | list) == (apr_run1 | reject('search', '(→ |manifest |#)(17|2)$') | list)
         fail_msg: "{{ apr_norm | to_json }}"
         quiet: true
 

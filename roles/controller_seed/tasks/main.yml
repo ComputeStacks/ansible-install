@@ -196,55 +196,6 @@
       host the controller should use.
     quiet: true
 
-- name: Assert the dns driver is one this role can seed
-  ansible.builtin.assert:
-    that:
-      - (dns_driver | default('none')) in ['powerdns', 'none']
-    fail_msg: >-
-      dns_driver is '{{ dns_driver | default('none') }}'. controller_seed
-      renders the manifest's dns section for 'powerdns' only, and omits the
-      section entirely for 'none'. AutoDNS seeding is not implemented in v2 --
-      configure the driver in the admin UI and set dns_driver: none.
-    quiet: true
-
-- name: Assert the powerdns inputs the dns section needs are present
-  ansible.builtin.assert:
-    that:
-      - (pdns_api_key | default('')) | length > 0
-      - (pdns_web_key | default('')) | length > 0
-      - (controller_seed_dns_primary_ip | default('')) | length > 0
-      - (groups['nameservers'] | default([])) | length > 0
-    fail_msg: >-
-      dns_driver is 'powerdns' but pdns_api_key / pdns_web_key are unset, or
-      the inventory has no nameservers group with a primary_ip on the
-      ns_primary host. The manifest's DNS driver cannot be rendered without
-      them.
-    quiet: true
-  when:
-    - dns_driver | default('none') == 'powerdns'
-    - not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
-
-- name: Assert every nameserver defines a unique powerdns_name
-  # These become the zone's NS records. Role defaults are not in scope in this
-  # play, so the value has to come from the inventory -- and two nameservers
-  # sharing the sample default would publish a broken NS set.
-  ansible.builtin.assert:
-    that:
-      - (groups['nameservers'] | map('extract', hostvars, 'powerdns_name') | select('defined') | list | length)
-        == (groups['nameservers'] | length)
-      - (groups['nameservers'] | map('extract', hostvars, 'powerdns_name') | list | unique | length)
-        == (groups['nameservers'] | length)
-    fail_msg: >-
-      Every host in groups['nameservers'] must set a unique 'powerdns_name'
-      (its FQDN, e.g. ns1.example.com) in the inventory -- these are written
-      into the DNS driver's nameservers list and become the NS records of
-      every tenant zone. roles/powerdns's default is a placeholder and is not
-      visible from this play.
-    quiet: true
-  when:
-    - dns_driver | default('none') == 'powerdns'
-    - not (existing_env | default(false) | bool) or (controller_seed_full_manifest | bool)
-
 # `regions[].acme_server` falls back to the controller's primary_ip for every
 # node that is not tailnet-paired with the controller. On a node in the same
 # datacenter that is correct; on a REMOTE region it is an address that routes
@@ -391,7 +342,7 @@
 - name: Seed the controller
   block:
     - name: Write the manifest
-      # 0600 root: admin password, DNS API keys, client credentials, stats
+      # 0600 root: admin password, client credentials, stats
       # password and the load balancer private key. diff:false as well as
       # no_log so a --diff run can never print it either.
       ansible.builtin.copy:

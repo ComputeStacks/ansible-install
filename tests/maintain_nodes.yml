@@ -358,7 +358,7 @@
           - mn_common.vars.common_allow_reboot is false
           - mn_agent.vars.cs_agent_allow_downgrade is false
           - mn_names | intersect(['node_storage', 'geerlingguy.docker', 'ssh_trust', 'controller', 'controller_seed',
-                                  'controller_post_enroll', 'metrics', 'backup_server', 'powerdns', 'vault']) == []
+                                  'controller_post_enroll', 'metrics', 'backup_server', 'vault']) == []
         fail_msg: "{{ mn_included | to_json }}"
         quiet: true
 

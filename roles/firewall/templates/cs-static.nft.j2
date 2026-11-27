@@ -115,7 +115,7 @@ table inet {{ firewall_table }} {
         # one metrics host per site, so narrowing this to that site's metrics
         # host — `cs_site_metrics_hosts[cs_site]` — looks like the obvious
         # follow-up. It is wrong: this accept is emitted on EVERY host, and the
-        # controller, nameservers, registry and backup servers carry no `site`
+        # controller, registry and backup servers carry no `site`
         # at all, so the narrowed form would resolve to nothing and emit no
         # accept for them — every infrastructure scrape target goes dark, on
         # single-site installs too. Accepting from both metrics hosts is
@@ -194,16 +194,6 @@ table inet {{ firewall_table }} {
         tcp dport {{ ports.controller_http }} accept    comment "acme http-01"
         tcp dport {{ ports.tenant_https }} accept    comment "tenant registries"
         tcp dport {{ ports.tenant_port_begin }}-{{ ports.tenant_port_end }} accept    comment "published registry ports"
-{% endif %}
-{% if 'nameservers' in group_names %}
-
-        # --- nameserver --------------------------------------------------
-        tcp dport {{ ports.dns }} accept    comment "authoritative dns"
-        udp dport {{ ports.dns }} accept    comment "authoritative dns"
-        # controller -> pdns api.
-{{ accept_from(groups['controller'] | default([]), 'tcp dport ' ~ ports.pdns_api ~ ' accept') }}
-        # pdns database replication between nameservers.
-{{ accept_from(groups['nameservers'] | default([]) | reject('equalto', inventory_hostname) | list, 'tcp dport ' ~ ports.postgres ~ ' accept') }}
 {% endif %}
 {% if 'backup' in group_names %}
 

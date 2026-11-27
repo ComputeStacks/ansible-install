@@ -147,8 +147,8 @@ node_exporter_apt_version: "1.10.2-1"
 # resolute-pgdg suite (postgresql-18 is 18.6-1.pgdg26.04+2 there, verified
 # 2026-10-10) and pins apt to it, so a later major can be adopted within this
 # LTS by changing this one value. That role runs before geerlingguy.postgresql
-# on the controller and before roles/powerdns on the nameservers -- the only
-# two places a postgres package is installed. Changing the major on an
+# on the controller -- the only
+# place a postgres package is installed. Changing the major on an
 # existing host needs a pg_upgrade the provisioner does not perform, and
 # means re-validating the controller repo first.
 postgresql_version: 18

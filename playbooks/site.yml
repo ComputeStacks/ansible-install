@@ -66,12 +66,6 @@
     - role: ubuntu_pro
       when: (ubuntu_pro_token | default('')) | length > 0
 
-- name: Nameservers
-  hosts: nameservers
-  roles:
-    - postgres_repo              # PGDG apt repo + pin (the pinned major)
-    - powerdns
-
 # Before docker is installed, so dockerd and containerd never write a byte to
 # the root disk: the data disk from `docker_data_device` is formatted (only
 # when provably blank), mounted with prjquota, and bind-mounted over

@@ -158,7 +158,6 @@ controller_seed_schema_sections:
   - settings
   - metric_clients
   - log_clients
-  - dns
   - locations
   - products
   - catalog

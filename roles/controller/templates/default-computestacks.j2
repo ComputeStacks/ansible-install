@@ -6,7 +6,7 @@
 # SECRET_KEY_BASE and USER_AUTH_SECRET are IMMUTABLE INSTALL INPUTS. They come
 # from the vaulted secrets file and are never generated here. Changing
 # SECRET_KEY_BASE silently destroys every encrypted credential in the database
-# (agent tokens, DNS API keys, load balancer certificates) — treat a rotation
+# (agent tokens, load balancer certificates) — treat a rotation
 # as a full reinstall.
 #
 # This file is rendered whole ONLY on a greenfield controller. On an existing
